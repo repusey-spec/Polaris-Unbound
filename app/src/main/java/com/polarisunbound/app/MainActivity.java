@@ -2,6 +2,11 @@ package com.polarisunbound.app;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.content.ContentUris;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.MediaStore;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
@@ -10,6 +15,7 @@ import java.util.*;
 
 public class MainActivity extends AppCompatActivity {
     private LinearLayout body;
+    private MediaPlayer localPlayer;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         showHome();
@@ -47,4 +53,5 @@ public class MainActivity extends AppCompatActivity {
     private void showForeign(){ base("해외라디오"); body.addView(button("102.7 KIIS-FM\nLos Angeles")); }
     private void showMp3(){ base("MP3"); TextView t=new TextView(this); t.setText("로컬 음악 라이브러리\n다음 단계에서 MediaStore 목록/재생 연결"); t.setTextSize(20); body.addView(t); }
     @Override public void onBackPressed(){ showHome(); }
+    @Override protected void onDestroy(){ if(localPlayer!=null) localPlayer.release(); super.onDestroy(); }
 }
