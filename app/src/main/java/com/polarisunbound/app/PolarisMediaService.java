@@ -95,7 +95,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private String extractStreamUrl(String raw){
         if(raw==null) return null;
-        String s=raw.replace("\\\/","/").replace("\\u0026","&").replace("&amp;","&");
+        String s=raw.replace("\\/","/").replace("\\u0026","&").replace("&amp;","&");
         Matcher m=Pattern.compile("https?://[^\\\"'\\s,}\\)]+",Pattern.CASE_INSENSITIVE).matcher(s);
         String fallback=null;
         while(m.find()){
