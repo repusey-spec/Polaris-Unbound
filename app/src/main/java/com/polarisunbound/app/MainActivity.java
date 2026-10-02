@@ -66,7 +66,14 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView button(String s){
         TextView v=new TextView(this); v.setText(s); v.setTextSize(21); v.setGravity(17);
-        v.setPadding(14,32,14,32); v.setBackgroundResource(android.R.drawable.btn_default); return v;
+        v.setPadding(14,32,14,32);
+        GradientDrawable bg=new GradientDrawable();
+        bg.setColor(0xE6FFFFFF);
+        bg.setCornerRadius(24f);
+        bg.setStroke(1,0x55FFFFFF);
+        v.setTextColor(Color.rgb(35,35,35));
+        v.setBackground(bg);
+        return v;
     }
 
     private TextView tab(String text,boolean active){
@@ -169,10 +176,12 @@ public class MainActivity extends AppCompatActivity {
         for(int i=0;i<6;i++){
             if(i%3==0){ row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); body.addView(row,new LinearLayout.LayoutParams(-1,-2)); }
             final int slot=i, station=presetStation(i);
-            TextView v=button((i+1)+"\n"+RADIO_NAMES[station]+"\n현재 프로그램"); v.setTextSize(14);
+            TextView v=button((i+1)+"\n"+RADIO_NAMES[station]); v.setTextSize(14);
             v.setOnClickListener(x->playId("kr"+(station+1),RADIO_NAMES[station]));
             v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
-            row.addView(v,new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-2,1);
+            bp.setMargins(7,7,7,7);
+            row.addView(v,bp);
         }
     }
 
