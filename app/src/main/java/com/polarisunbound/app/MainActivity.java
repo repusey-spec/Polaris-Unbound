@@ -10,6 +10,8 @@ import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.widget.*;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
@@ -36,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             },null);
         browser.connect();
-        showHome();
+        showDomestic();
         requestAudioPermission();
     }
 
@@ -50,12 +52,28 @@ public class MainActivity extends AppCompatActivity {
         v.setPadding(14,32,14,32); v.setBackgroundResource(android.R.drawable.btn_default); return v;
     }
 
+    private TextView tab(String text,boolean active){
+        TextView v=new TextView(this); v.setText(text); v.setTextSize(15); v.setGravity(17); v.setPadding(8,24,8,24);
+        GradientDrawable bg=new GradientDrawable();
+        bg.setCornerRadii(new float[]{18,18,18,18,0,0,0,0});
+        bg.setColor(active ? Color.rgb(70,130,180) : Color.rgb(205,205,205));
+        v.setTextColor(active ? Color.WHITE : Color.DKGRAY); v.setBackground(bg); return v;
+    }
+
     private void base(String title){
-        ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,24,24,24);
-        TextView h=new TextView(this); h.setText(title); h.setTextSize(30); h.setPadding(0,10,0,16); body.addView(h);
-        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setPadding(0,0,0,16); body.addView(status);
+        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tabs=new LinearLayout(this); tabs.setOrientation(LinearLayout.HORIZONTAL); tabs.setPadding(12,12,12,0);
+        TextView t1=tab("1 국내라디오","domestic".equals(currentPage));
+        TextView t2=tab("2 해외라디오","foreign".equals(currentPage));
+        TextView t3=tab("3 MP3","mp3".equals(currentPage));
+        tabs.addView(t1,new LinearLayout.LayoutParams(0,-2,1)); tabs.addView(t2,new LinearLayout.LayoutParams(0,-2,1)); tabs.addView(t3,new LinearLayout.LayoutParams(0,-2,1));
+        t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showForeign()); t3.setOnClickListener(v->showMp3());
+        root.addView(tabs,new LinearLayout.LayoutParams(-1,-2));
+        ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
+        TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setPadding(0,8,0,12); body.addView(h);
+        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setPadding(0,0,0,12); body.addView(status);
         TextView stop=button("■ 정지"); stop.setTextSize(16); stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); }); body.addView(stop);
-        sc.addView(body); setContentView(sc);
+        sc.addView(body); root.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(root);
     }
 
     private void playId(String id,String label){
@@ -119,6 +137,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    @Override public void onBackPressed(){ if("home".equals(currentPage)) super.onBackPressed(); else showHome(); }
+    @Override public void onBackPressed(){ super.onBackPressed(); }
     @Override protected void onDestroy(){ if(browser!=null){ if(browser.isConnected()) browser.disconnect(); } super.onDestroy(); }
 }
