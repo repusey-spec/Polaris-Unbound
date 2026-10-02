@@ -16,12 +16,15 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import android.view.View;
 
 public class MainActivity extends AppCompatActivity {
     private LinearLayout body;
     private MediaBrowserCompat browser;
     private MediaControllerCompat controller;
     private TextView status;
+    private LinearLayout tabsBar;
+    private FrameLayout pageHost;
     private TextView diag;
     private final BroadcastReceiver diagReceiver=new BroadcastReceiver(){ @Override public void onReceive(Context c,Intent i){ if(diag!=null) diag.setText("진단: "+i.getStringExtra("step")); } };
     private String currentPage="home";
@@ -65,28 +68,39 @@ public class MainActivity extends AppCompatActivity {
         v.setTextColor(active ? Color.WHITE : Color.DKGRAY); v.setBackground(bg); return v;
     }
 
-    private void base(String title){
+    private void ensureShell(){
+        if(tabsBar!=null && pageHost!=null) return;
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         ViewCompat.setOnApplyWindowInsetsListener(root,(v,insets)->{
             int top=insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
-            v.setPadding(0,top,0,0);
-            return insets;
+            v.setPadding(0,top,0,0); return insets;
         });
-        LinearLayout tabs=new LinearLayout(this); tabs.setOrientation(LinearLayout.HORIZONTAL); tabs.setPadding(12,12,12,0);
+        tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
+        root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
+        pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
+        setContentView(root);
+    }
+
+    private void refreshTabs(){
+        tabsBar.removeAllViews();
         TextView t1=tab("1 국내라디오","domestic".equals(currentPage));
         TextView t2=tab("2 해외라디오","foreign".equals(currentPage));
         TextView t3=tab("3 MP3","mp3".equals(currentPage));
-        tabs.addView(t1,new LinearLayout.LayoutParams(0,-2,1)); tabs.addView(t2,new LinearLayout.LayoutParams(0,-2,1)); tabs.addView(t3,new LinearLayout.LayoutParams(0,-2,1));
+        tabsBar.addView(t1,new LinearLayout.LayoutParams(0,-2,1));
+        tabsBar.addView(t2,new LinearLayout.LayoutParams(0,-2,1));
+        tabsBar.addView(t3,new LinearLayout.LayoutParams(0,-2,1));
         t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showForeign()); t3.setOnClickListener(v->showMp3());
-        root.addView(tabs,new LinearLayout.LayoutParams(-1,-2));
+    }
+
+    private void base(String title){
+        ensureShell(); refreshTabs(); pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setPadding(0,8,0,12); body.addView(h);
         status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setPadding(0,0,0,12); body.addView(status);
         diag=new TextView(this); diag.setText("진단: 대기"); diag.setTextSize(14); diag.setPadding(0,0,0,12); body.addView(diag);
         TextView stop=button("■ 정지"); stop.setTextSize(16); stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); }); body.addView(stop);
-        sc.addView(body); root.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(root);
+        sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
-
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         status.setText(label+" 연결 중…");
