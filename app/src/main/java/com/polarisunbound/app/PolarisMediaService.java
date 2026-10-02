@@ -12,7 +12,26 @@ import java.util.*;
 public class PolarisMediaService extends MediaBrowserServiceCompat {
     private MediaSessionCompat session;
     private ExoPlayer player;
-    private static final String KIIS_URL="https://stream.revma.ihrhls.com/zc185";
+    private static final Map<String,String> STREAMS=new HashMap<>();
+    static {
+        STREAMS.put("kr1","https://2fm-ad.gscdn.kbs.co.kr/2fm_ad_192_1.m3u8?");
+        STREAMS.put("kr2","https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=mfm&callback=jarvis.miniInfo.loadOnAirComplete");
+        STREAMS.put("kr3","http://m-aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8");
+        STREAMS.put("kr4","https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=sfm&callback=jarvis.miniInfo.loadOnAirComplete");
+        STREAMS.put("kr5","https://playerservices.streamtheworld.com/api/livestream-redirect/AFNP_DGU_SC");
+        STREAMS.put("kr6","http://gorealra.sbs.co.kr/g4/protocol/GetStream.jsp?pmDevice=ios&pmNetwork=wifi&pmChannel=RA02&pmAppver=4.5.0&from=iphone");
+        STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
+    }
+    private static final Map<String,String> TITLES=new HashMap<>();
+    static {
+        TITLES.put("kr1","89.1 KBS CoolFM");
+        TITLES.put("kr2","91.9 MBC FM4U");
+        TITLES.put("kr3","93.9 CBS MusicFM");
+        TITLES.put("kr4","95.9 MBC 표준FM");
+        TITLES.put("kr5","102.7 AFN EagleFM");
+        TITLES.put("kr6","107.7 SBS PowerFM");
+        TITLES.put("kiis","102.7 KIIS-FM");
+    }
 
     @Override public void onCreate(){
         super.onCreate();
@@ -21,7 +40,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
-                if("kiis".equals(id)) playUrl(KIIS_URL,"102.7 KIIS-FM","Los Angeles");
+                String url=STREAMS.get(id);
+                if(url!=null) playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
             }
             @Override public void onPlay(){ player.play(); publishState(); }
             @Override public void onPause(){ player.pause(); publishState(); }
