@@ -14,6 +14,8 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 public class MainActivity extends AppCompatActivity {
     private LinearLayout body;
@@ -62,6 +64,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void base(String title){
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        ViewCompat.setOnApplyWindowInsetsListener(root,(v,insets)->{
+            int top=insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
+            v.setPadding(0,top,0,0);
+            return insets;
+        });
         LinearLayout tabs=new LinearLayout(this); tabs.setOrientation(LinearLayout.HORIZONTAL); tabs.setPadding(12,12,12,0);
         TextView t1=tab("1 국내라디오","domestic".equals(currentPage));
         TextView t2=tab("2 해외라디오","foreign".equals(currentPage));
