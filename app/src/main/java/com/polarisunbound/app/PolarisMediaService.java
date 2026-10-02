@@ -1,6 +1,7 @@
 package com.polarisunbound.app;
 
 import android.os.Bundle;
+import android.content.Intent;
 import android.content.ContentUris;
 import android.database.Cursor;
 import android.net.Uri;
@@ -18,6 +19,12 @@ import java.util.concurrent.*;
 import java.util.regex.*;
 
 public class PolarisMediaService extends MediaBrowserServiceCompat {
+    private void trace(String step){
+        Intent i=new Intent("com.polarisunbound.app.DIAG");
+        i.setPackage(getPackageName());
+        i.putExtra("step",step);
+        sendBroadcast(i);
+    }
     private MediaSessionCompat session;
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
@@ -49,12 +56,14 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
+                trace("SERVICE onPlayFromMediaId: "+id);
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                     String url=STREAMS.get(id);
+                    trace("STREAM selected: "+id);
                     if(url==null) return;
-                    if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) resolveAndPlay(id,url);
-                    else playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
+                    if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) { trace("resolver start: "+id); resolveAndPlay(id,url); }
+                    else { trace("direct play start: "+id); playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live"); }
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlay(){ player.play(); publishState(); }
@@ -172,15 +181,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void playUrlOnMain(String url,String title,String subtitle){
+        trace("PLAYER enter: "+title);
         try{
         session.setMetadata(new MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle).build());
+        trace("PLAYER setMediaItem");
         player.setMediaItem(MediaItem.fromUri(url));
+        trace("PLAYER prepare");
         player.prepare();
+        trace("PLAYER play");
         player.play();
         publishState();
-        }catch(Throwable e){ publishError("player: "+e); }
+        }catch(Throwable e){ trace("PLAYER ERROR: "+e); publishError("player: "+e); }
     }
 
     private void publishState(){
