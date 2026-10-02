@@ -1,6 +1,10 @@
 package com.polarisunbound.app;
 
 import android.os.Bundle;
+import android.content.ContentUris;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.MediaStore;
 import android.support.v4.media.*;
 import android.support.v4.media.session.*;
 import androidx.media.MediaBrowserServiceCompat;
@@ -45,6 +49,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
+                if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                 String url=STREAMS.get(id);
                 if(url==null) return;
                 if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) resolveAndPlay(id,url);
@@ -63,6 +68,49 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         publishState();
     }
 
+
+
+    private void playLocalAudio(String id){
+        try{
+            long mediaId=Long.parseLong(id.substring(4));
+            Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
+            String title="Local audio";
+            String artist="";
+            String[] projection={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST};
+            try(Cursor c=getContentResolver().query(uri,projection,null,null,null)){
+                if(c!=null && c.moveToFirst()){
+                    title=c.getString(0);
+                    artist=c.getString(1);
+                }
+            }
+            playUrl(uri.toString(),title,artist);
+        }catch(Exception e){
+            session.setPlaybackState(new PlaybackStateCompat.Builder()
+                .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
+                .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
+                .setErrorMessage(e.getMessage()).build());
+        }
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadLocalAudio(){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        String[] projection={MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST};
+        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
+        try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,projection,selection,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")){
+            if(c!=null){
+                int idCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
+                int titleCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
+                int artistCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST);
+                while(c.moveToNext()){
+                    long id=c.getLong(idCol);
+                    String title=c.getString(titleCol);
+                    String artist=c.getString(artistCol);
+                    out.add(item("mp3:"+id,title,artist==null ? "" : artist));
+                }
+            }
+        }catch(SecurityException ignored){}
+        return out;
+    }
 
     private void resolveAndPlay(final String id,final String lookupUrl){
         resolver.execute(() -> {
@@ -154,6 +202,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             for(int i=0;i<n.length;i++) x.add(item("kr"+(i+1),n[i],"현재 프로그램"));
         } else if(parent.equals("foreign")){
             x.add(item("kiis","102.7 KIIS-FM","Los Angeles"));
+        } else if(parent.equals("mp3")){
+            x.addAll(loadLocalAudio());
         }
         result.sendResult(x);
     }
