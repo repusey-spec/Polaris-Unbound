@@ -30,6 +30,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private MediaSessionCompat session;
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
+    private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private String currentRadioId=null;
+    private int retryCount=0;
+    private boolean userStopped=false;
     private static final Map<String,String> STREAMS=new HashMap<>();
     static {
         STREAMS.put("kr1","https://cfpwwwapi.kbs.co.kr/api/v1/landing/live/channel_code/25");
