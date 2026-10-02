@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import java.util.*;
 import java.io.*;
 import java.net.*;
+import androidx.media3.datasource.HttpDataSource;
 import java.util.concurrent.*;
 import java.util.regex.*;
 
@@ -76,6 +77,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onPlaybackStateChanged(int state){ publishState(); }
             @Override public void onPlayerError(PlaybackException error){
                 String msg="Media3 "+error.getErrorCodeName()+": "+error.getMessage();
+                Throwable cause=error;
+                while(cause!=null){
+                    if(cause instanceof HttpDataSource.InvalidResponseCodeException){
+                        HttpDataSource.InvalidResponseCodeException h=(HttpDataSource.InvalidResponseCodeException)cause;
+                        msg+=" HTTP "+h.responseCode;
+                        break;
+                    }
+                    cause=cause.getCause();
+                }
                 trace("PLAYER ERROR: "+msg); publishError(msg);
             }
         });
@@ -139,8 +149,16 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){
                     String line; while((line=r.readLine())!=null) b.append(line);
                 }
-                String resolved=extractStreamUrl(b.toString());
-                if(resolved==null) throw new IOException("No stream URL in resolver response");
+                String raw=b.toString();
+                trace("resolver HTTP "+con.getResponseCode()+": "+id+" bytes="+raw.length());
+                String resolved=extractStreamUrl(raw);
+                if(resolved==null){
+                    String preview=raw.replace("\n"," ").replace("\r"," ");
+                    if(preview.length()>240) preview=preview.substring(0,240);
+                    trace("resolver no URL: "+id+" body="+preview);
+                    throw new IOException("No stream URL in resolver response");
+                }
+                trace("resolver URL: "+id+" -> "+resolved);
                 final String u=resolved;
                 runOnPlayerThread(() -> playUrl(u,TITLES.get(id),"Live"));
             }catch(Exception e){
