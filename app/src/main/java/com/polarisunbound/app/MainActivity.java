@@ -11,6 +11,11 @@ import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.widget.*;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.util.Base64;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import android.graphics.drawable.GradientDrawable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -72,8 +77,28 @@ public class MainActivity extends AppCompatActivity {
         v.setTextColor(active ? Color.WHITE : Color.DKGRAY); v.setBackground(bg); return v;
     }
 
+    private Bitmap loadBackgroundBitmap(){
+        try(InputStream in=getResources().openRawResource(R.raw.polaris_background);
+            ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            byte[] buf=new byte[4096]; int n;
+            while((n=in.read(buf))!=-1) out.write(buf,0,n);
+            String encoded=out.toString("US-ASCII").replaceAll("\\s","");
+            byte[] jpg=Base64.decode(encoded,Base64.DEFAULT);
+            return BitmapFactory.decodeByteArray(jpg,0,jpg.length);
+        }catch(Exception e){ return null; }
+    }
+
     private void ensureShell(){
         if(tabsBar!=null && pageHost!=null) return;
+        FrameLayout shell=new FrameLayout(this);
+        ImageView background=new ImageView(this);
+        Bitmap bg=loadBackgroundBitmap();
+        if(bg!=null) background.setImageBitmap(bg);
+        background.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        shell.addView(background,new FrameLayout.LayoutParams(-1,-1));
+        View shade=new View(this); shade.setBackgroundColor(0x66000000);
+        shell.addView(shade,new FrameLayout.LayoutParams(-1,-1));
+
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         ViewCompat.setOnApplyWindowInsetsListener(root,(v,insets)->{
             int top=insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
@@ -82,7 +107,8 @@ public class MainActivity extends AppCompatActivity {
         tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
         root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
         pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
-        setContentView(root);
+        shell.addView(root,new FrameLayout.LayoutParams(-1,-1));
+        setContentView(shell);
     }
 
     private void addTab(TextView v){
@@ -102,9 +128,9 @@ public class MainActivity extends AppCompatActivity {
     private void base(String title){
         ensureShell(); refreshTabs(); pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
-        TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setPadding(0,8,0,12); body.addView(h);
-        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setPadding(0,0,0,12); body.addView(status);
-        diag=new TextView(this); diag.setText("진단: 대기"); diag.setTextSize(14); diag.setPadding(0,0,0,12); body.addView(diag);
+        TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
+        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setTextColor(Color.WHITE); status.setPadding(0,0,0,12); body.addView(status);
+        diag=new TextView(this); diag.setText("진단: 대기"); diag.setTextSize(14); diag.setTextColor(Color.WHITE); diag.setPadding(0,0,0,12); body.addView(diag);
         TextView stop=button("■ 정지"); stop.setTextSize(16); stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); }); body.addView(stop);
         sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
