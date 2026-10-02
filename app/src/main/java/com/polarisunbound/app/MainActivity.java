@@ -196,8 +196,46 @@ public class MainActivity extends AppCompatActivity {
         addSchedulePanel();
         TextView probe=button("나무위키 접근 테스트");
         probe.setTextSize(14);
-        probe.setOnClickListener(v->probeNamuWiki());
+        probe.setOnClickListener(v->probeNamuWikiAll());
         body.addView(probe);
+    }
+
+
+    private void probeNamuWikiAll(){
+        final TextView target=scheduleView;
+        if(target==null) return;
+        target.setText("5개 나무위키 편성표 분석 중…");
+        scheduleExecutor.execute(()->{
+            String[][] docs={
+                {"KBS","https://namu.wiki/w/KBS%202FM?from=KBS%20Cool%20FM"},
+                {"MBC FM4U","https://namu.wiki/w/MBC%20FM4U?from=MBC%20FM"},
+                {"CBS","https://namu.wiki/w/CBS%20%EC%9D%8C%EC%95%85FM?from=CBS%20FM"},
+                {"MBC 표준FM","https://namu.wiki/w/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4"},
+                {"SBS","https://namu.wiki/w/SBS%20%ED%8C%8C%EC%9B%8CFM"}
+            };
+            StringBuilder report=new StringBuilder();
+            for(String[] d:docs){
+                try{
+                    HttpURLConnection c=(HttpURLConnection)new URL(d[1]).openConnection();
+                    c.setConnectTimeout(10000); c.setReadTimeout(12000);
+                    c.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 16; Mobile) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36");
+                    c.setRequestProperty("Accept-Language","ko-KR,ko;q=0.9");
+                    int code=c.getResponseCode();
+                    ByteArrayOutputStream b=new ByteArrayOutputStream();
+                    try(InputStream in=c.getInputStream()){ byte[] z=new byte[8192]; int n; while((n=in.read(z))!=-1 && b.size()<1800000)b.write(z,0,n); }
+                    String h=b.toString("UTF-8");
+                    String plain=h.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
+                    int p=plain.indexOf("편성표");
+                    String sample=p>=0?plain.substring(p,Math.min(plain.length(),p+260)):"편성표 문구 없음";
+                    java.util.regex.Matcher im=java.util.regex.Pattern.compile("(?i)(?:src|data-src)=[\\\"']([^\\\"']+)").matcher(h);
+                    int imgs=0; while(im.find()) imgs++;
+                    report.append(d[0]).append(": HTTP ").append(code).append(" / img ").append(imgs).append("\n").append(sample).append("\n\n");
+                    c.disconnect();
+                }catch(Exception e){ report.append(d[0]).append(": 실패 ").append(e.getClass().getSimpleName()).append("\n\n"); }
+            }
+            final String out=report.toString();
+            runOnUiThread(()->{ if(scheduleView==target) target.setText(out); });
+        });
     }
 
     private void probeNamuWiki(){
