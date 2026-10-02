@@ -159,6 +159,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void playUrl(String url,String title,String subtitle){
+        runOnPlayerThread(() -> playUrlOnMain(url,title,subtitle));
+    }
+
+    private void playUrlOnMain(String url,String title,String subtitle){
         session.setMetadata(new MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle).build());
