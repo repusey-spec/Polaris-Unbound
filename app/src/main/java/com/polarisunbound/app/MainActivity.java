@@ -17,15 +17,12 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import android.view.View;
-import android.view.View;
 
 public class MainActivity extends AppCompatActivity {
     private LinearLayout body;
     private MediaBrowserCompat browser;
     private MediaControllerCompat controller;
     private TextView status;
-    private LinearLayout tabsBar;
-    private FrameLayout pageHost;
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
     private TextView diag;
@@ -69,30 +66,6 @@ public class MainActivity extends AppCompatActivity {
         bg.setCornerRadii(new float[]{18,18,18,18,0,0,0,0});
         bg.setColor(active ? Color.rgb(70,130,180) : Color.rgb(205,205,205));
         v.setTextColor(active ? Color.WHITE : Color.DKGRAY); v.setBackground(bg); return v;
-    }
-
-    private void ensureShell(){
-        if(tabsBar!=null && pageHost!=null) return;
-        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        ViewCompat.setOnApplyWindowInsetsListener(root,(v,insets)->{
-            int top=insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
-            v.setPadding(0,top,0,0); return insets;
-        });
-        tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
-        root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
-        pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
-        setContentView(root);
-    }
-
-    private void refreshTabs(){
-        tabsBar.removeAllViews();
-        TextView t1=tab("1 국내라디오","domestic".equals(currentPage));
-        TextView t2=tab("2 해외라디오","foreign".equals(currentPage));
-        TextView t3=tab("3 MP3","mp3".equals(currentPage));
-        tabsBar.addView(t1,new LinearLayout.LayoutParams(0,-2,1));
-        tabsBar.addView(t2,new LinearLayout.LayoutParams(0,-2,1));
-        tabsBar.addView(t3,new LinearLayout.LayoutParams(0,-2,1));
-        t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showForeign()); t3.setOnClickListener(v->showMp3());
     }
 
     private void ensureShell(){
