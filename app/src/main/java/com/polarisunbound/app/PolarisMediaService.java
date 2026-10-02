@@ -32,12 +32,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
     private static final Map<String,String> STREAMS=new HashMap<>();
     static {
-        STREAMS.put("kr1","https://2fm-ad.gscdn.kbs.co.kr/2fm_ad_192_1.m3u8?");
+        STREAMS.put("kr1","https://cfpwwwapi.kbs.co.kr/api/v1/landing/live/channel_code/25");
         STREAMS.put("kr2","https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=mfm&callback=jarvis.miniInfo.loadOnAirComplete");
         STREAMS.put("kr3","http://m-aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8");
         STREAMS.put("kr4","https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=sfm&callback=jarvis.miniInfo.loadOnAirComplete");
         STREAMS.put("kr5","https://playerservices.streamtheworld.com/api/livestream-redirect/AFNP_DGU_SC");
-        STREAMS.put("kr6","http://gorealra.sbs.co.kr/g4/protocol/GetStream.jsp?pmDevice=ios&pmNetwork=wifi&pmChannel=RA02&pmAppver=4.5.0&from=iphone");
+        STREAMS.put("kr6","https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y");
         STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
     }
     private static final Map<String,String> TITLES=new HashMap<>();
@@ -64,7 +64,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     String url=STREAMS.get(id);
                     trace("STREAM selected: "+id);
                     if(url==null) return;
-                    if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) { trace("resolver start: "+id); resolveAndPlay(id,url); }
+                    if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) { trace("resolver start: "+id); resolveAndPlay(id,url); }
                     else { trace("direct play start: "+id); playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live"); }
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
