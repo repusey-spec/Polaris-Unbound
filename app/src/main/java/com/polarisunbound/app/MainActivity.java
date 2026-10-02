@@ -176,11 +176,11 @@ public class MainActivity extends AppCompatActivity {
         for(int i=0;i<6;i++){
             if(i%3==0){ row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); body.addView(row,new LinearLayout.LayoutParams(-1,-2)); }
             final int slot=i, station=presetStation(i);
-            TextView v=button((i+1)+"\n"+RADIO_NAMES[station]); v.setTextSize(14);
+            TextView v=button(RADIO_NAMES[station]); v.setTextSize(14);
             v.setOnClickListener(x->playId("kr"+(station+1),RADIO_NAMES[station]));
             v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-2,1);
-            bp.setMargins(7,7,7,7);
+            bp.setMargins(12,12,12,12);
             row.addView(v,bp);
         }
     }
