@@ -75,7 +75,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onIsPlayingChanged(boolean playing){ publishState(); }
             @Override public void onPlaybackStateChanged(int state){ publishState(); }
             @Override public void onPlayerError(PlaybackException error){
-                String msg="Media3 "+error.errorCodeName+": "+error.getMessage();
+                String msg="Media3 "+error.getErrorCodeName()+": "+error.getMessage();
                 trace("PLAYER ERROR: "+msg); publishError(msg);
             }
         });
