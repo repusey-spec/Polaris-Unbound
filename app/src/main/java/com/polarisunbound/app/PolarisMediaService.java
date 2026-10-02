@@ -8,10 +8,15 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import java.util.*;
+import java.io.*;
+import java.net.*;
+import java.util.concurrent.*;
+import java.util.regex.*;
 
 public class PolarisMediaService extends MediaBrowserServiceCompat {
     private MediaSessionCompat session;
     private ExoPlayer player;
+    private final ExecutorService resolver=Executors.newSingleThreadExecutor();
     private static final Map<String,String> STREAMS=new HashMap<>();
     static {
         STREAMS.put("kr1","https://2fm-ad.gscdn.kbs.co.kr/2fm_ad_192_1.m3u8?");
@@ -41,7 +46,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
                 String url=STREAMS.get(id);
-                if(url!=null) playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
+                if(url==null) return;
+                if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) resolveAndPlay(id,url);
+                else playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
             }
             @Override public void onPlay(){ player.play(); publishState(); }
             @Override public void onPause(){ player.pause(); publishState(); }
@@ -54,6 +61,53 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         setSessionToken(session.getSessionToken());
         session.setActive(true);
         publishState();
+    }
+
+
+    private void resolveAndPlay(final String id,final String lookupUrl){
+        resolver.execute(() -> {
+            try{
+                HttpURLConnection con=(HttpURLConnection)new URL(lookupUrl).openConnection();
+                con.setConnectTimeout(8000); con.setReadTimeout(8000);
+                con.setInstanceFollowRedirects(true);
+                con.setRequestProperty("User-Agent","Mozilla/5.0");
+                StringBuilder b=new StringBuilder();
+                try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){
+                    String line; while((line=r.readLine())!=null) b.append(line);
+                }
+                String resolved=extractStreamUrl(b.toString());
+                if(resolved==null) throw new IOException("No stream URL in resolver response");
+                final String u=resolved;
+                runOnPlayerThread(() -> playUrl(u,TITLES.get(id),"Live"));
+            }catch(Exception e){
+                runOnPlayerThread(() -> {
+                    session.setMetadata(new MediaMetadataCompat.Builder()
+                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE,TITLES.get(id))
+                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,"Stream resolver error").build());
+                    session.setPlaybackState(new PlaybackStateCompat.Builder()
+                        .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
+                        .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
+                        .setErrorMessage(e.getMessage()).build());
+                });
+            }
+        });
+    }
+
+    private String extractStreamUrl(String raw){
+        if(raw==null) return null;
+        String s=raw.replace("\\\/","/").replace("\\u0026","&").replace("&amp;","&");
+        Matcher m=Pattern.compile("https?://[^\\\"'\\s,}\\)]+",Pattern.CASE_INSENSITIVE).matcher(s);
+        String fallback=null;
+        while(m.find()){
+            String u=m.group();
+            if(u.contains(".m3u8")||u.contains(".aac")||u.contains(".mp3")||u.contains("stream")) return u;
+            if(fallback==null) fallback=u;
+        }
+        return fallback;
+    }
+
+    private void runOnPlayerThread(Runnable r){
+        new android.os.Handler(getMainLooper()).post(r);
     }
 
     private void playUrl(String url,String title,String subtitle){
@@ -106,6 +160,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     @Override public void onDestroy(){
         if(player!=null) player.release();
+        resolver.shutdownNow();
         if(session!=null) session.release();
         super.onDestroy();
     }
