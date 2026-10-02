@@ -22,6 +22,14 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import android.view.View;
+import android.os.Handler;
+import android.os.Looper;
+import java.net.*;
+import java.io.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.text.SimpleDateFormat;
+import java.util.TimeZone;
 
 public class MainActivity extends AppCompatActivity {
     private LinearLayout body;
@@ -30,8 +38,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView status;
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
-    private TextView diag;
-    private final BroadcastReceiver diagReceiver=new BroadcastReceiver(){ @Override public void onReceive(Context c,Intent i){ if(diag!=null) diag.setText("진단: "+i.getStringExtra("step")); } };
+    private TextView scheduleView;
+    private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
+    private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
+    private String selectedRadioId=null;
     private String currentPage="home";
     private static final String[] RADIO_NAMES={"89.1 KBS CoolFM","91.9 MBC FM4U","93.9 CBS MusicFM","95.9 MBC 표준FM","102.7 AFN EagleFM","107.7 SBS PowerFM"};
     private int presetStation(int slot){ return getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot); }
@@ -53,7 +63,6 @@ public class MainActivity extends AppCompatActivity {
                     }catch(Exception e){ if(status!=null) status.setText("서비스 연결 오류"); }
                 }
             },null);
-        registerReceiver(diagReceiver,new IntentFilter("com.polarisunbound.app.DIAG"),Context.RECEIVER_NOT_EXPORTED);
         browser.connect();
         showDomestic();
         requestAudioPermission();
@@ -137,16 +146,16 @@ public class MainActivity extends AppCompatActivity {
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setTextColor(Color.WHITE); status.setPadding(0,0,0,12); body.addView(status);
-        diag=new TextView(this); diag.setText("진단: 대기"); diag.setTextSize(14); diag.setTextColor(Color.WHITE); diag.setPadding(0,0,0,12); body.addView(diag);
         TextView stop=button("■ 정지"); stop.setTextSize(16); stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); }); body.addView(stop);
         sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         status.setText(label+" 연결 중…");
-        diag.setText("진단: UI playFromMediaId "+id);
+        selectedRadioId=id;
+        refreshSchedule(id);
         try{ controller.getTransportControls().playFromMediaId(id,null); }
-        catch(Throwable e){ diag.setText("진단: UI ERROR "+e); }
+        catch(Throwable e){ status.setText("재생 요청 오류"); }
     }
 
     private void updateStatus(PlaybackStateCompat s){
@@ -183,11 +192,13 @@ public class MainActivity extends AppCompatActivity {
             bp.setMargins(12,12,12,12);
             row.addView(v,bp);
         }
+        addSchedulePanel();
     }
 
     private void showForeign(){
         currentPage="foreign"; base("해외라디오");
         TextView v=button("102.7 KIIS-FM\nLos Angeles"); v.setOnClickListener(x->playId("kiis","102.7 KIIS-FM")); body.addView(v);
+        addSchedulePanel();
     }
 
     private void showMp3(){
@@ -207,6 +218,59 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void addSchedulePanel(){
+        scheduleView=new TextView(this); scheduleView.setText("편성정보"); scheduleView.setTextSize(17);
+        scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(12,24,12,20);
+        body.addView(scheduleView,new LinearLayout.LayoutParams(-1,-2));
+        if(selectedRadioId!=null) refreshSchedule(selectedRadioId);
+        scheduleNextRefresh();
+    }
+    private void scheduleNextRefresh(){
+        scheduleHandler.removeCallbacksAndMessages(null);
+        Calendar c=Calendar.getInstance(); int m=c.get(Calendar.MINUTE), sec=c.get(Calendar.SECOND);
+        int[] marks={0,5,10,30,35,60}; int next=60;
+        for(int x:marks) if(x>m){ next=x; break; }
+        long delay=((next-m)*60L-sec)*1000L; if(delay<1000) delay=1000;
+        scheduleHandler.postDelayed(()->{ if(selectedRadioId!=null) refreshSchedule(selectedRadioId); scheduleNextRefresh(); },delay);
+    }
+    private String scheduleUrl(String id){
+        if("kr1".equals(id)) return "https://program.kbs.co.kr/2fm/radio/schedule.html";
+        if("kr2".equals(id)||"kr4".equals(id)) return "https://m.imbc.com/radiomain";
+        if("kr3".equals(id)) return "https://www.cbs.co.kr/schedule?type=musicFm";
+        if("kr5".equals(id)) return "https://www.afnpacific.net/AFN-360/";
+        if("kr6".equals(id)) return "https://www.sbs.co.kr/live/S17";
+        if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
+        return null;
+    }
+    private void refreshSchedule(final String id){
+        final TextView target=scheduleView; if(target==null) return; target.setText("편성정보 불러오는 중…");
+        scheduleExecutor.execute(()->{
+            String line;
+            try{
+                HttpURLConnection con=(HttpURLConnection)new URL(scheduleUrl(id)).openConnection();
+                con.setConnectTimeout(7000); con.setReadTimeout(7000); con.setRequestProperty("User-Agent","Mozilla/5.0");
+                StringBuilder b=new StringBuilder();
+                try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){ String x; while((x=r.readLine())!=null) b.append(x).append(' '); }
+                line=parseSchedule(id,b.toString());
+            }catch(Exception e){ line="편성정보를 불러오지 못했습니다"; }
+            final String out=line; runOnUiThread(()->{ if(scheduleView==target && id.equals(selectedRadioId)) target.setText(out); });
+        });
+    }
+    private String parseSchedule(String id,String html){
+        String text=html.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
+        String station="kiis".equals(id)?"102.7 KIIS-FM":RADIO_NAMES[Math.max(0,Integer.parseInt(id.substring(2))-1)];
+        String now="";
+        java.util.regex.Matcher m=java.util.regex.Pattern.compile("(.{0,70}?)(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?\\s*(?:-|~|–)\\s*\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)(.{0,70})",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
+        if(m.find()) now=(m.group(1)+" "+m.group(2)+" "+m.group(3)).replaceAll("\\s+"," ").trim();
+        if(now.length()>150) now=now.substring(0,150);
+        if(now.isEmpty()) now="현재 프로그램 정보 확인 중";
+        String out=station+"  |  "+now;
+        if("kiis".equals(id)){ SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US); f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles")); out+="  |  현지시간 "+f.format(new Date()); }
+        return out;
+    }
     @Override public void onBackPressed(){ super.onBackPressed(); }
-    @Override protected void onDestroy(){ try{ unregisterReceiver(diagReceiver); }catch(Exception ignored){} if(browser!=null){ if(browser.isConnected()) browser.disconnect(); } super.onDestroy(); }
+    @Override protected void onDestroy(){
+        scheduleHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
+        if(browser!=null && browser.isConnected()) browser.disconnect(); super.onDestroy();
+    }
 }
