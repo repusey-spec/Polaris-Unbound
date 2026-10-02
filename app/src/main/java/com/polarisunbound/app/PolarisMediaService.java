@@ -163,7 +163,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("retry scheduled: "+id+" in "+delay+"ms");
         retryHandler.removeCallbacksAndMessages(null);
         retryHandler.postDelayed(() -> {
-            if(!userStopped && id.equals(currentRadioId)) startRadio(id);
+            if(!userStopped && id.equals(currentRadioId)){
+                trace("retry start: "+id+" #"+retryCount);
+                startRadio(id);
+            }
         },delay);
     }
 
@@ -231,7 +234,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }
                 trace("resolver URL: "+id+" -> "+resolved);
                 final String u=resolved;
-                runOnPlayerThread(() -> playUrl(u,TITLES.get(id),"Live"));
+                runOnPlayerThread(() -> {
+                    if(!userStopped && id.equals(currentRadioId)) playUrl(u,TITLES.get(id),"Live");
+                });
             }catch(Exception e){
                 runOnPlayerThread(() -> {
                     session.setMetadata(new MediaMetadataCompat.Builder()
