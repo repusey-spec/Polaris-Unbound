@@ -208,6 +208,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
                         .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
                         .setErrorMessage(e.getMessage()).build());
+                    trace("resolver error: "+id+" / "+e);
+                    if(id.equals(currentRadioId)) scheduleRetry();
                 });
             }
         });
@@ -298,6 +300,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onDestroy(){
+        retryHandler.removeCallbacksAndMessages(null);
         if(player!=null) player.release();
         resolver.shutdownNow();
         if(session!=null) session.release();
