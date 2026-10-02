@@ -49,11 +49,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
-                if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
-                String url=STREAMS.get(id);
-                if(url==null) return;
-                if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) resolveAndPlay(id,url);
-                else playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
+                try{
+                    if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
+                    String url=STREAMS.get(id);
+                    if(url==null) return;
+                    if("kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) resolveAndPlay(id,url);
+                    else playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
+                }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlay(){ player.play(); publishState(); }
             @Override public void onPause(){ player.pause(); publishState(); }
@@ -162,7 +164,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         runOnPlayerThread(() -> playUrlOnMain(url,title,subtitle));
     }
 
+    private void publishError(String message){
+        session.setPlaybackState(new PlaybackStateCompat.Builder()
+            .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
+            .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
+            .setErrorMessage(message).build());
+    }
+
     private void playUrlOnMain(String url,String title,String subtitle){
+        try{
         session.setMetadata(new MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle).build());
@@ -170,6 +180,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         player.prepare();
         player.play();
         publishState();
+        }catch(Throwable e){ publishError("player: "+e); }
     }
 
     private void publishState(){
