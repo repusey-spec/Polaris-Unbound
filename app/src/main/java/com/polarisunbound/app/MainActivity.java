@@ -194,6 +194,43 @@ public class MainActivity extends AppCompatActivity {
             row.addView(v,bp);
         }
         addSchedulePanel();
+        TextView probe=button("나무위키 접근 테스트");
+        probe.setTextSize(14);
+        probe.setOnClickListener(v->probeNamuWiki());
+        body.addView(probe);
+    }
+
+    private void probeNamuWiki(){
+        final TextView target=scheduleView;
+        if(target==null) return;
+        target.setText("나무위키 접속 테스트 중…");
+        scheduleExecutor.execute(()->{
+            String out;
+            HttpURLConnection con=null;
+            try{
+                URL u=new URL("https://namu.wiki/w/KBS%202FM?from=KBS%20Cool%20FM");
+                con=(HttpURLConnection)u.openConnection();
+                con.setConnectTimeout(10000); con.setReadTimeout(10000);
+                con.setInstanceFollowRedirects(true);
+                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 16; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36");
+                con.setRequestProperty("Accept","text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+                con.setRequestProperty("Accept-Language","ko-KR,ko;q=0.9,en;q=0.7");
+                int code=con.getResponseCode();
+                InputStream in=(code>=200&&code<400)?con.getInputStream():con.getErrorStream();
+                ByteArrayOutputStream b=new ByteArrayOutputStream();
+                if(in!=null){ byte[] buf=new byte[8192]; int n; while((n=in.read(buf))!=-1 && b.size()<1500000) b.write(buf,0,n); in.close(); }
+                String html=b.toString("UTF-8");
+                java.util.regex.Matcher im=java.util.regex.Pattern.compile("(?i)<img[^>]+(?:src|data-src)=[\\\"']([^\\\"']+)").matcher(html);
+                int images=0; while(im.find()) images++;
+                String title="";
+                java.util.regex.Matcher tm=java.util.regex.Pattern.compile("(?is)<title[^>]*>(.*?)</title>").matcher(html);
+                if(tm.find()) title=tm.group(1).replaceAll("<[^>]+>"," ").replaceAll("\\s+"," ").trim();
+                out="나무위키 테스트: HTTP "+code+" | "+b.size()+" bytes | 이미지 "+images+"개"+(title.isEmpty()?"":" | "+title);
+            }catch(Exception e){ out="나무위키 테스트 실패: "+e.getClass().getSimpleName()+" - "+String.valueOf(e.getMessage()); }
+            finally{ if(con!=null) con.disconnect(); }
+            final String result=out;
+            runOnUiThread(()->{ if(scheduleView==target) target.setText(result); });
+        });
     }
 
     private void showForeign(){
