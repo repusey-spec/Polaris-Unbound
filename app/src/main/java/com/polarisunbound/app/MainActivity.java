@@ -22,6 +22,8 @@ public class MainActivity extends AppCompatActivity {
     private MediaBrowserCompat browser;
     private MediaControllerCompat controller;
     private TextView status;
+    private TextView diag;
+    private final BroadcastReceiver diagReceiver=new BroadcastReceiver(){ @Override public void onReceive(Context c,Intent i){ if(diag!=null) diag.setText("진단: "+i.getStringExtra("step")); } };
     private String currentPage="home";
 
     @Override public void onCreate(Bundle b){
@@ -39,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
                     }catch(Exception e){ if(status!=null) status.setText("서비스 연결 오류"); }
                 }
             },null);
+        registerReceiver(diagReceiver,new IntentFilter("com.polarisunbound.app.DIAG"),Context.RECEIVER_NOT_EXPORTED);
         browser.connect();
         showDomestic();
         requestAudioPermission();
@@ -79,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setPadding(0,8,0,12); body.addView(h);
         status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setPadding(0,0,0,12); body.addView(status);
+        diag=new TextView(this); diag.setText("진단: 대기"); diag.setTextSize(14); diag.setPadding(0,0,0,12); body.addView(diag);
         TextView stop=button("■ 정지"); stop.setTextSize(16); stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); }); body.addView(stop);
         sc.addView(body); root.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(root);
     }
@@ -86,7 +90,9 @@ public class MainActivity extends AppCompatActivity {
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         status.setText(label+" 연결 중…");
-        controller.getTransportControls().playFromMediaId(id,null);
+        diag.setText("진단: UI playFromMediaId "+id);
+        try{ controller.getTransportControls().playFromMediaId(id,null); }
+        catch(Throwable e){ diag.setText("진단: UI ERROR "+e); }
     }
 
     private void updateStatus(PlaybackStateCompat s){
@@ -145,5 +151,5 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override public void onBackPressed(){ super.onBackPressed(); }
-    @Override protected void onDestroy(){ if(browser!=null){ if(browser.isConnected()) browser.disconnect(); } super.onDestroy(); }
+    @Override protected void onDestroy(){ try{ unregisterReceiver(diagReceiver); }catch(Exception ignored){} if(browser!=null){ if(browser.isConnected()) browser.disconnect(); } super.onDestroy(); }
 }
