@@ -28,6 +28,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView diag;
     private final BroadcastReceiver diagReceiver=new BroadcastReceiver(){ @Override public void onReceive(Context c,Intent i){ if(diag!=null) diag.setText("진단: "+i.getStringExtra("step")); } };
     private String currentPage="home";
+    private static final String[] RADIO_NAMES={"89.1 KBS CoolFM","91.9 MBC FM4U","93.9 CBS MusicFM","95.9 MBC 표준FM","102.7 AFN EagleFM","107.7 SBS PowerFM"};
+    private int presetStation(int slot){ return getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot); }
+    private void choosePreset(int slot){ new androidx.appcompat.app.AlertDialog.Builder(this).setTitle((slot+1)+"번 프리셋에 저장").setItems(RADIO_NAMES,(d,which)->{ getSharedPreferences("radio_presets",MODE_PRIVATE).edit().putInt("slot"+slot,which).apply(); showDomestic(); Toast.makeText(this,(slot+1)+"번 → "+RADIO_NAMES[which],Toast.LENGTH_SHORT).show(); }).show(); }
+
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
@@ -81,14 +85,17 @@ public class MainActivity extends AppCompatActivity {
         setContentView(root);
     }
 
+    private void addTab(TextView v){
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
+        lp.setMargins(6,0,6,0); tabsBar.addView(v,lp);
+    }
+
     private void refreshTabs(){
         tabsBar.removeAllViews();
         TextView t1=tab("1 국내라디오","domestic".equals(currentPage));
         TextView t2=tab("2 해외라디오","foreign".equals(currentPage));
         TextView t3=tab("3 MP3","mp3".equals(currentPage));
-        tabsBar.addView(t1,new LinearLayout.LayoutParams(0,-2,1));
-        tabsBar.addView(t2,new LinearLayout.LayoutParams(0,-2,1));
-        tabsBar.addView(t3,new LinearLayout.LayoutParams(0,-2,1));
+        addTab(t1); addTab(t2); addTab(t3);
         t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showForeign()); t3.setOnClickListener(v->showMp3());
     }
 
@@ -132,12 +139,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void showDomestic(){
         currentPage="domestic"; base("국내라디오");
-        String[] n={"89.1 KBS CoolFM","91.9 MBC FM4U","93.9 CBS MusicFM","95.9 MBC 표준FM","102.7 AFN EagleFM","107.7 SBS PowerFM"};
         LinearLayout row=null;
-        for(int i=0;i<n.length;i++){
+        for(int i=0;i<6;i++){
             if(i%3==0){ row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); body.addView(row,new LinearLayout.LayoutParams(-1,-2)); }
-            final int index=i; TextView v=button((i+1)+"\n"+n[i]+"\n현재 프로그램"); v.setTextSize(14);
-            v.setOnClickListener(x->playId("kr"+(index+1),n[index]));
+            final int slot=i, station=presetStation(i);
+            TextView v=button((i+1)+"\n"+RADIO_NAMES[station]+"\n현재 프로그램"); v.setTextSize(14);
+            v.setOnClickListener(x->playId("kr"+(station+1),RADIO_NAMES[station]));
+            v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
             row.addView(v,new LinearLayout.LayoutParams(0,-2,1));
         }
     }

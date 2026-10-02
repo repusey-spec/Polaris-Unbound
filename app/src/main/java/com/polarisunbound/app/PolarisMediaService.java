@@ -11,6 +11,7 @@ import android.support.v4.media.session.*;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
+import androidx.media3.common.PlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
 import java.util.*;
 import java.io.*;
@@ -73,6 +74,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         player.addListener(new Player.Listener(){
             @Override public void onIsPlayingChanged(boolean playing){ publishState(); }
             @Override public void onPlaybackStateChanged(int state){ publishState(); }
+            @Override public void onPlayerError(PlaybackException error){
+                String msg="Media3 "+error.errorCodeName+": "+error.getMessage();
+                trace("PLAYER ERROR: "+msg); publishError(msg);
+            }
         });
         setSessionToken(session.getSessionToken());
         session.setActive(true);
