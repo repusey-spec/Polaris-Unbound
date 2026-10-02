@@ -65,16 +65,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 trace("SERVICE onPlayFromMediaId: "+id);
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
-                    String url=STREAMS.get(id);
-                    trace("STREAM selected: "+id);
-                    if(url==null) return;
-                    if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)) { trace("resolver start: "+id); resolveAndPlay(id,url); }
-                    else { trace("direct play start: "+id); playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live"); }
+                    currentRadioId=id;
+                    retryCount=0;
+                    userStopped=false;
+                    retryHandler.removeCallbacksAndMessages(null);
+                    startRadio(id);
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlay(){ player.play(); publishState(); }
             @Override public void onPause(){ player.pause(); publishState(); }
-            @Override public void onStop(){ player.stop(); publishState(); }
+            @Override public void onStop(){
+                userStopped=true;
+                currentRadioId=null;
+                retryCount=0;
+                retryHandler.removeCallbacksAndMessages(null);
+                player.stop();
+                publishState();
+            }
         });
         player.addListener(new Player.Listener(){
             @Override public void onIsPlayingChanged(boolean playing){ publishState(); }
@@ -99,6 +106,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
 
+
+    private void startRadio(String id){
+        String url=STREAMS.get(id);
+        if(url==null || userStopped) return;
+        trace("STREAM selected: "+id);
+        if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
+            trace("resolver start: "+id);
+            resolveAndPlay(id,url);
+        } else {
+            trace("direct play start: "+id);
+            playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
+        }
+    }
 
     private void playLocalAudio(String id){
         try{
