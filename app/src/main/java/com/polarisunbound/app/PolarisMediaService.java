@@ -2,6 +2,11 @@ package com.polarisunbound.app;
 
 import android.os.Bundle;
 import android.content.Intent;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.os.Build;
+import androidx.core.app.NotificationCompat;
 import android.content.ContentUris;
 import android.database.Cursor;
 import android.net.Uri;
@@ -34,6 +39,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private String currentRadioId=null;
     private int retryCount=0;
     private boolean userStopped=false;
+    private static final String CHANNEL_ID="polaris_playback";
+    private static final int NOTIFICATION_ID=71;
     private static final Map<String,String> STREAMS=new HashMap<>();
     static {
         STREAMS.put("kr1","https://cfpwwwapi.kbs.co.kr/api/v1/landing/live/channel_code/25");
@@ -57,6 +64,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     @Override public void onCreate(){
         super.onCreate();
+        ensurePlaybackChannel();
         player=new ExoPlayer.Builder(this).build();
         session=new MediaSessionCompat(this,"PolarisUnbound");
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
@@ -66,6 +74,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                     currentRadioId=id;
+                    enterPlaybackForeground(TITLES.get(id));
                     retryCount=0;
                     userStopped=false;
                     retryHandler.removeCallbacksAndMessages(null);
@@ -79,6 +88,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 currentRadioId=null;
                 retryCount=0;
                 retryHandler.removeCallbacksAndMessages(null);
+                leavePlaybackForeground();
                 player.stop();
                 publishState();
             }
@@ -108,6 +118,29 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
 
+
+    private void ensurePlaybackChannel(){
+        if(Build.VERSION.SDK_INT>=26){
+            NotificationManager nm=getSystemService(NotificationManager.class);
+            if(nm!=null) nm.createNotificationChannel(new NotificationChannel(CHANNEL_ID,"Polaris Unbound 재생",NotificationManager.IMPORTANCE_LOW));
+        }
+    }
+
+    private void enterPlaybackForeground(String title){
+        Notification n=new NotificationCompat.Builder(this,CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("Polaris Unbound")
+            .setContentText(title==null ? "라디오 재생 중" : title)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .build();
+        startForeground(NOTIFICATION_ID,n);
+    }
+
+    private void leavePlaybackForeground(){
+        stopForeground(true);
+    }
 
     private void startRadio(String id){
         String url=STREAMS.get(id);
