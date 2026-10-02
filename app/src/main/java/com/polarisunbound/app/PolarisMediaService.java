@@ -50,6 +50,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         STREAMS.put("kr5","https://playerservices.streamtheworld.com/api/livestream-redirect/AFNP_DGU_SC");
         STREAMS.put("kr6","https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y");
         STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
+        STREAMS.put("gallery","https://streaming.live365.com/a94394");
     }
     private static final Map<String,String> TITLES=new HashMap<>();
     static {
@@ -60,6 +61,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         TITLES.put("kr5","102.7 AFN EagleFM");
         TITLES.put("kr6","107.7 SBS PowerFM");
         TITLES.put("kiis","102.7 KIIS-FM");
+        TITLES.put("gallery","Jazz from Gallery 41");
     }
 
     @Override public void onCreate(){
@@ -151,7 +153,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             resolveAndPlay(id,url);
         } else {
             trace("direct play start: "+id);
-            playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
+            playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : ("gallery".equals(id) ? "San Francisco Bay" : "Live"));
         }
     }
 
@@ -323,14 +325,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     @Override public void onLoadChildren(String parent,Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> x=new ArrayList<>();
         if(parent.equals("root")){
-            x.add(folder("domestic","국내라디오"));
-            x.add(folder("foreign","해외라디오"));
+            x.add(folder("radio","라디오"));
             x.add(folder("mp3","MP3"));
-        } else if(parent.equals("domestic")){
+        } else if(parent.equals("radio")){
             String[] n={"KBS CoolFM","MBC FM4U","CBS MusicFM","MBC 표준FM","AFN EagleFM","SBS PowerFM"};
             for(int i=0;i<n.length;i++) x.add(item("kr"+(i+1),n[i],"현재 프로그램"));
-        } else if(parent.equals("foreign")){
             x.add(item("kiis","102.7 KIIS-FM","Los Angeles"));
+            x.add(item("gallery","Jazz from Gallery 41","San Francisco Bay"));
         } else if(parent.equals("mp3")){
             x.addAll(loadLocalAudio());
         }
