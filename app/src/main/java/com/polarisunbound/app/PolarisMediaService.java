@@ -97,7 +97,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     }
                     cause=cause.getCause();
                 }
-                trace("PLAYER ERROR: "+msg); publishError(msg);
+                trace("PLAYER ERROR: "+msg);
+                publishError(msg);
+                scheduleRetry();
             }
         });
         setSessionToken(session.getSessionToken());
@@ -118,6 +120,18 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             trace("direct play start: "+id);
             playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
         }
+    }
+
+    private void scheduleRetry(){
+        if(userStopped || currentRadioId==null) return;
+        retryCount++;
+        long delay=retryCount==1 ? 2000L : retryCount==2 ? 5000L : 10000L;
+        final String id=currentRadioId;
+        trace("retry scheduled: "+id+" in "+delay+"ms");
+        retryHandler.removeCallbacksAndMessages(null);
+        retryHandler.postDelayed(() -> {
+            if(!userStopped && id.equals(currentRadioId)) startRadio(id);
+        },delay);
     }
 
     private void playLocalAudio(String id){
