@@ -134,11 +134,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshTabs(){
         tabsBar.removeAllViews();
-        TextView t1=tab("1 국내라디오","domestic".equals(currentPage));
-        TextView t2=tab("2 해외라디오","foreign".equals(currentPage));
-        TextView t3=tab("3 MP3","mp3".equals(currentPage));
-        addTab(t1); addTab(t2); addTab(t3);
-        t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showForeign()); t3.setOnClickListener(v->showMp3());
+        TextView t1=tab("1 라디오","radio".equals(currentPage));
+        TextView t2=tab("2 MP3","mp3".equals(currentPage));
+        addTab(t1); addTab(t2);
+        t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showMp3());
     }
 
     private void base(String title){
@@ -181,14 +180,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void showDomestic(){
         selectedRadioId=null;
-        currentPage="domestic"; base("국내라디오");
+        currentPage="radio"; base("라디오");
         LinearLayout row=null;
-        for(int i=0;i<6;i++){
-            if(i%3==0){ row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); body.addView(row,new LinearLayout.LayoutParams(-1,-2)); }
-            final int slot=i, station=presetStation(i);
-            TextView v=button(RADIO_NAMES[station]); v.setTextSize(14);
-            v.setOnClickListener(x->playId("kr"+(station+1),RADIO_NAMES[station]));
-            v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
+        for(int i=0;i<8;i++){
+            if(i%4==0){ row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); body.addView(row,new LinearLayout.LayoutParams(-1,-2)); }
+            final int slot=i;
+            final String id=i<6 ? "kr"+(i+1) : (i==6 ? "kiis" : "gallery");
+            final String label=i<6 ? RADIO_NAMES[i] : (i==6 ? "102.7 KIIS-FM" : "Jazz from Gallery 41");
+            TextView v=button(label); v.setTextSize(12);
+            v.setOnClickListener(x->playId(id,label));
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-2,1);
             bp.setMargins(12,12,12,12);
             row.addView(v,bp);
@@ -307,17 +307,19 @@ public class MainActivity extends AppCompatActivity {
     private void scheduleNextRefresh(){
         scheduleHandler.removeCallbacksAndMessages(null);
         Calendar c=Calendar.getInstance(); int m=c.get(Calendar.MINUTE), sec=c.get(Calendar.SECOND);
-        int[] marks={0,5,10,30,35,60}; int next=60;
+        int[] marks={60}; int next=60;
         for(int x:marks) if(x>m){ next=x; break; }
         long delay=((next-m)*60L-sec)*1000L; if(delay<1000) delay=1000;
         scheduleHandler.postDelayed(()->{ if(selectedRadioId!=null) refreshSchedule(selectedRadioId); scheduleNextRefresh(); },delay);
     }
     private String scheduleUrl(String id){
-        if("kr1".equals(id)) return "https://program.kbs.co.kr/2fm/radio/schedule.html";
-        if("kr2".equals(id)||"kr4".equals(id)) return "https://m.imbc.com/radiomain";
-        if("kr3".equals(id)) return "https://www.cbs.co.kr/schedule?type=musicFm";
-        if("kr6".equals(id)) return "https://www.sbs.co.kr/live/S17";
+        if("kr1".equals(id)) return "https://namu.wiki/w/KBS%202FM?from=KBS%20Cool%20FM";
+        if("kr2".equals(id)) return "https://namu.wiki/w/MBC%20FM4U?from=MBC%20FM";
+        if("kr3".equals(id)) return "https://namu.wiki/w/CBS%20%EC%9D%8C%EC%95%85FM?from=CBS%20FM";
+        if("kr4".equals(id)) return "https://namu.wiki/w/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4";
+        if("kr6".equals(id)) return "https://namu.wiki/w/SBS%20%ED%8C%8C%EC%9B%8CFM";
         if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
+        if("gallery".equals(id)) return "https://live365.com/station/Jazz-from-Gallery-41-a94394";
         return null;
     }
     private void refreshSchedule(final String id){
@@ -343,14 +345,14 @@ public class MainActivity extends AppCompatActivity {
                 .replaceAll("(?i)헤더 메뉴|본문 콘텐츠|푸터 메뉴|플레이어 키보드 단축키 안내"," ")
                 .replaceAll("(?i)재생/정지|영상 10초 앞으로|영상 10초 뒤로"," ").replaceAll("\\s+"," ").trim();
         }
-        String station="kiis".equals(id)?"102.7 KIIS-FM":RADIO_NAMES[Math.max(0,Integer.parseInt(id.substring(2))-1)];
+        String station="kiis".equals(id)?"102.7 KIIS-FM":("gallery".equals(id)?"Jazz from Gallery 41":RADIO_NAMES[Math.max(0,Integer.parseInt(id.substring(2))-1)]);
         String now="";
         java.util.regex.Matcher m=java.util.regex.Pattern.compile("(.{0,70}?)(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?\\s*(?:-|~|–)\\s*\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)(.{0,70})",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
         if(m.find()) now=(m.group(1)+" "+m.group(2)+" "+m.group(3)).replaceAll("\\s+"," ").trim();
         if(now.length()>150) now=now.substring(0,150);
         if(now.isEmpty()) now="현재 프로그램 정보 확인 중";
         String out=station+"  |  "+now;
-        if("kiis".equals(id)){ SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US); f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles")); out+="  |  현지시간 "+f.format(new Date()); }
+        if("kiis".equals(id)||"gallery".equals(id)){ SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US); f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles")); out+="  |  현지시간 "+f.format(new Date()); }
         return out;
     }
     @Override public void onBackPressed(){ super.onBackPressed(); }
