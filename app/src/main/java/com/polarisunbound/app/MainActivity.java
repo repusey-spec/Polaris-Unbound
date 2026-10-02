@@ -180,6 +180,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showDomestic(){
+        selectedRadioId=null;
         currentPage="domestic"; base("국내라디오");
         LinearLayout row=null;
         for(int i=0;i<6;i++){
@@ -196,12 +197,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showForeign(){
+        selectedRadioId=null;
         currentPage="foreign"; base("해외라디오");
         TextView v=button("102.7 KIIS-FM\nLos Angeles"); v.setOnClickListener(x->playId("kiis","102.7 KIIS-FM")); body.addView(v);
         addSchedulePanel();
     }
 
     private void showMp3(){
+        selectedRadioId=null;
+        scheduleHandler.removeCallbacksAndMessages(null);
         currentPage="mp3"; base("MP3");
         if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
             TextView t=new TextView(this); t.setText("음악 권한을 허용한 뒤 MP3 메뉴를 다시 열어주세요."); t.setTextSize(18); body.addView(t); requestAudioPermission(); return;
@@ -237,13 +241,14 @@ public class MainActivity extends AppCompatActivity {
         if("kr1".equals(id)) return "https://program.kbs.co.kr/2fm/radio/schedule.html";
         if("kr2".equals(id)||"kr4".equals(id)) return "https://m.imbc.com/radiomain";
         if("kr3".equals(id)) return "https://www.cbs.co.kr/schedule?type=musicFm";
-        if("kr5".equals(id)) return "https://www.afnpacific.net/AFN-360/";
         if("kr6".equals(id)) return "https://www.sbs.co.kr/live/S17";
         if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
         return null;
     }
     private void refreshSchedule(final String id){
-        final TextView target=scheduleView; if(target==null) return; target.setText("편성정보 불러오는 중…");
+        final TextView target=scheduleView; if(target==null) return;
+        if("kr5".equals(id)){ target.setText("102.7 AFN EagleFM"); return; }
+        target.setText("편성정보 불러오는 중…");
         scheduleExecutor.execute(()->{
             String line;
             try{
@@ -258,6 +263,11 @@ public class MainActivity extends AppCompatActivity {
     }
     private String parseSchedule(String id,String html){
         String text=html.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
+        if("kr6".equals(id)){
+            text=text.replaceAll("(?i)SBS 라이브"," ").replaceAll("(?i)인인권리의 편편투데이"," ")
+                .replaceAll("(?i)헤더 메뉴|본문 콘텐츠|푸터 메뉴|플레이어 키보드 단축키 안내"," ")
+                .replaceAll("(?i)재생/정지|영상 10초 앞으로|영상 10초 뒤로"," ").replaceAll("\\s+"," ").trim();
+        }
         String station="kiis".equals(id)?"102.7 KIIS-FM":RADIO_NAMES[Math.max(0,Integer.parseInt(id.substring(2))-1)];
         String now="";
         java.util.regex.Matcher m=java.util.regex.Pattern.compile("(.{0,70}?)(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?\\s*(?:-|~|–)\\s*\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)(.{0,70})",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
