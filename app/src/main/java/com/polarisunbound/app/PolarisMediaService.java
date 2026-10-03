@@ -50,7 +50,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         STREAMS.put("kr5","https://playerservices.streamtheworld.com/api/livestream-redirect/AFNP_DGU_SC");
         STREAMS.put("kr6","https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y");
         STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
-        STREAMS.put("gallery","https://streaming.live365.com/a94394");
+        STREAMS.put("gallery","https://radio.garden/api/ara/content/listen/kWNLnJEl/channel.mp3");
     }
     private static final Map<String,String> TITLES=new HashMap<>();
     static {
