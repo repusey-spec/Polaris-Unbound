@@ -115,6 +115,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
             @Override public void onSkipToNext(){ skipRadio(1); }
             @Override public void onSkipToPrevious(){ skipRadio(-1); }
+            @Override public void onFastForward(){ skipRadio(1); }
+            @Override public void onRewind(){ skipRadio(-1); }
             @Override public void onPause(){ player.pause(); publishState(); }
             @Override public void onStop(){
                 userStopped=true;
@@ -440,7 +442,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         else if(player!=null && player.getPlaybackState()==Player.STATE_BUFFERING) state=PlaybackStateCompat.STATE_BUFFERING;
         else if(player!=null && player.getPlaybackState()==Player.STATE_READY) state=PlaybackStateCompat.STATE_PAUSED;
         session.setPlaybackState(new PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
+            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND)
             .setState(state,0,1f).build());
     }
 
