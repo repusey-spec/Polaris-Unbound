@@ -2,6 +2,7 @@ package com.polarisunbound.app;
 
 import android.Manifest;
 import android.content.*;
+import android.content.ContentUris;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.os.Bundle;
