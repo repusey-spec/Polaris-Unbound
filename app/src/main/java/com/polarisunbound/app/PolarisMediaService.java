@@ -50,7 +50,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         STREAMS.put("kr5","https://playerservices.streamtheworld.com/api/livestream-redirect/AFNP_DGU_SC");
         STREAMS.put("kr6","https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y");
         STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
-        STREAMS.put("gallery","https://player.live365.com/a94394");
+        STREAMS.put("gallery","https://streaming.live365.com/a94394");
     }
     private static final Map<String,String> TITLES=new HashMap<>();
     static {
@@ -148,7 +148,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         String url=STREAMS.get(id);
         if(url==null || userStopped) return;
         trace("STREAM selected: "+id);
-        if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)||"gallery".equals(id)){
+        if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
             trace("resolver start: "+id);
             resolveAndPlay(id,url);
         } else {
