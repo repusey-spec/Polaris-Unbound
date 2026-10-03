@@ -51,6 +51,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
     private static final int NOTIFICATION_ID=71;
+    private static final String[] RADIO_ORDER={"kr1","kr2","kr3","kr4","kr5","kr6","kiis","gallery"};
     private static final Map<String,String> STREAMS=new HashMap<>();
     static {
         STREAMS.put("kr1","https://cfpwwwapi.kbs.co.kr/api/v1/landing/live/channel_code/25");
@@ -112,6 +113,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
+            @Override public void onSkipToNext(){ skipRadio(1); }
+            @Override public void onSkipToPrevious(){ skipRadio(-1); }
             @Override public void onPause(){ player.pause(); publishState(); }
             @Override public void onStop(){
                 userStopped=true;
@@ -149,6 +152,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
 
+
+    private void skipRadio(int delta){
+        if(currentRadioId==null || !STREAMS.containsKey(currentRadioId)) return;
+        int at=-1;
+        for(int i=0;i<RADIO_ORDER.length;i++) if(RADIO_ORDER[i].equals(currentRadioId)){ at=i; break; }
+        if(at<0) return;
+        int next=(at+delta+RADIO_ORDER.length)%RADIO_ORDER.length;
+        String id=RADIO_ORDER[next];
+        trace("RADIO skip "+currentRadioId+" -> "+id);
+        currentRadioId=id;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
+        retryCount=0;
+        userStopped=false;
+        retryHandler.removeCallbacksAndMessages(null);
+        enterPlaybackForeground(TITLES.get(id));
+        startRadio(id);
+    }
 
     private boolean requestPlaybackFocus(){
         if(audioManager==null) return true;
@@ -420,7 +440,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         else if(player!=null && player.getPlaybackState()==Player.STATE_BUFFERING) state=PlaybackStateCompat.STATE_BUFFERING;
         else if(player!=null && player.getPlaybackState()==Player.STATE_READY) state=PlaybackStateCompat.STATE_PAUSED;
         session.setPlaybackState(new PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
+            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
             .setState(state,0,1f).build());
     }
 
@@ -442,32 +462,58 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                             enterPlaybackForeground(TITLES.get(last));
                             startRadio(last);
                         }
-                    },1200L);
+                    },4000L);
                 }
             }
         }
-        return new BrowserRoot("root",null);
+        Bundle style=new Bundle();
+        style.putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT",1);
+        style.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
+        return new BrowserRoot("root",style);
     }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem folder(String id,String title){
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
         return new android.support.v4.media.MediaBrowserCompat.MediaItem(
-            new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).build(),
+            new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setExtras(e).build(),
             android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
     }
+    private Uri stationIcon(String id){
+        // Official broadcaster/station assets only. Remote URIs let the AA host render station artwork.
+        if("kr1".equals(id)) return Uri.parse("https://kstar.kbs.co.kr/images/kstar/2021/04/16/1618536768314.jpg");
+        if("kr6".equals(id)) return Uri.parse("https://www.sbs.co.kr/radio/ci.html");
+        return null;
+    }
     private android.support.v4.media.MediaBrowserCompat.MediaItem item(String id,String title,String sub){
+        MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
+            .setMediaId(id).setTitle(title).setSubtitle(sub);
+        Uri icon=stationIcon(id);
+        if(icon!=null) b.setIconUri(icon);
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
+        b.setExtras(e);
         return new android.support.v4.media.MediaBrowserCompat.MediaItem(
-            new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setSubtitle(sub).build(),
-            android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
+            b.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
     }
 
     @Override public void onLoadChildren(String parent,Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> x=new ArrayList<>();
         if(parent.equals("root")){
+            // Keep root children browsable so Android Auto can render them as navigation tabs.
+            x.add(folder("home","홈"));
+            x.add(folder("radio","라디오"));
+            x.add(folder("mp3","MP3"));
+        } else if(parent.equals("home")){
             x.add(folder("radio","라디오"));
             x.add(folder("mp3","MP3"));
         } else if(parent.equals("radio")){
-            String[] n={"KBS CoolFM","MBC FM4U","CBS MusicFM","MBC 표준FM","AFN EagleFM","SBS PowerFM"};
-            for(int i=0;i<n.length;i++) x.add(item("kr"+(i+1),n[i],"현재 프로그램"));
+            x.add(item("kr1","89.1 KBS CoolFM","Korea"));
+            x.add(item("kr2","91.9 MBC FM4U","Korea"));
+            x.add(item("kr3","93.9 CBS MusicFM","Korea"));
+            x.add(item("kr4","95.9 MBC 표준FM","Korea"));
+            x.add(item("kr5","102.7 AFN EagleFM","Korea"));
+            x.add(item("kr6","107.7 SBS PowerFM","Korea"));
             x.add(item("kiis","102.7 KIIS-FM","Los Angeles"));
             x.add(item("gallery","Jazz from Gallery 41","San Francisco Bay"));
         } else if(parent.equals("mp3")){
