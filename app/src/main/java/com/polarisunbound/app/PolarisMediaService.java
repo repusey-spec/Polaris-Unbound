@@ -30,11 +30,16 @@ import java.util.*;
 import java.io.*;
 import java.net.*;
 import androidx.media3.datasource.HttpDataSource;
+import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.DefaultDataSource;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
+import androidx.media3.exoplayer.source.MediaSource;
 import java.util.concurrent.*;
 import java.util.regex.*;
 
 public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void trace(String step){
+        android.util.Log.i("PolarisUnbound",step);
         Intent i=new Intent("com.polarisunbound.app.DIAG");
         i.setPackage(getPackageName());
         i.putExtra("step",step);
@@ -247,9 +252,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(url==null || userStopped) return;
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
-            // Stable Live365 entry point; Media3 follows the current CDN redirect.
-            trace("Gallery Live365 entry: "+url);
-            playUrl(url,TITLES.get(id),"San Francisco Bay");
+            trace("Gallery Live365 resolver start: "+url);
+            resolveGalleryAndPlay(id,url);
         } else if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
             trace("resolver start: "+id);
             resolveAndPlay(id,url);
@@ -261,6 +265,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void scheduleRetry(){
         if(userStopped || currentRadioId==null) return;
+        if("gallery".equals(currentRadioId) && retryCount>=3){
+            trace("Gallery retry limit reached");
+            return;
+        }
         retryCount++;
         long delay=retryCount==1 ? 2000L : retryCount==2 ? 5000L : 10000L;
         final String id=currentRadioId;
@@ -454,6 +462,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return loadGroupItems(column,"mp3_folder:");
     }
 
+    private void applyLive365Headers(HttpURLConnection con){
+        con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 14; SM-N900S) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36");
+        con.setRequestProperty("Referer","https://live365.com/");
+        con.setRequestProperty("Accept","*/*");
+        con.setRequestProperty("Icy-MetaData","1");
+        con.setRequestProperty("Connection","keep-alive");
+    }
+
+    private Map<String,String> live365PlayerHeaders(){
+        Map<String,String> h=new HashMap<>();
+        h.put("Referer","https://live365.com/");
+        h.put("Accept","*/*");
+        h.put("Icy-MetaData","1");
+        h.put("Connection","keep-alive");
+        return h;
+    }
+
     private void resolveGalleryAndPlay(final String id,final String lookupUrl){
         resolver.execute(() -> {
             HttpURLConnection con=null;
@@ -461,33 +486,39 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 String next=lookupUrl;
                 for(int hop=0;hop<6;hop++){
                     con=(HttpURLConnection)new URL(next).openConnection();
-                    con.setConnectTimeout(10000); con.setReadTimeout(10000);
+                    con.setConnectTimeout(10000);
+                    con.setReadTimeout(10000);
                     con.setInstanceFollowRedirects(false);
-                    con.setRequestProperty("User-Agent","Radio Garden Android");
-                    con.setRequestProperty("Referer","https://radio.garden/");
-                    con.setRequestProperty("Origin","https://radio.garden");
-                    con.setRequestProperty("Accept","*/*");
-                    con.setRequestProperty("Icy-MetaData","1");
+                    applyLive365Headers(con);
+
                     int code=con.getResponseCode();
                     String type=con.getContentType();
                     String loc=con.getHeaderField("Location");
                     trace("Gallery hop "+hop+" HTTP "+code+" type="+type+" loc="+loc);
+
                     if(code>=300 && code<400 && loc!=null){
                         URL base=new URL(next);
                         next=new URL(base,loc).toString();
-                        con.disconnect(); con=null;
+                        con.disconnect();
+                        con=null;
                         continue;
                     }
-                    if(code>=200 && code<300 && type!=null && (type.toLowerCase(Locale.US).startsWith("audio/") || type.toLowerCase(Locale.US).contains("mpeg"))){
+
+                    if(code>=200 && code<300){
                         final String streamUrl=next;
-                        if(con!=null){ con.disconnect(); con=null; }
+                        if(con!=null){
+                            con.disconnect();
+                            con=null;
+                        }
+                        trace("Gallery resolved CDN: "+streamUrl);
                         runOnPlayerThread(() -> {
                             if(!userStopped && id.equals(currentRadioId))
-                                playUrl(streamUrl,TITLES.get(id),"San Francisco Bay");
+                                playGalleryUrl(streamUrl,TITLES.get(id),"San Francisco Bay");
                         });
                         return;
                     }
-                    throw new IOException("Gallery stream HTTP "+code+" type="+type);
+
+                    throw new IOException("Gallery resolver HTTP "+code+" type="+type);
                 }
                 throw new IOException("Too many Gallery redirects");
             }catch(Exception e){
@@ -500,6 +531,36 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
         });
     }
+
+    private void playGalleryUrl(String url,String title,String subtitle){
+        trace("Gallery player enter: "+url);
+        try{
+            MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle)
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,"gallery",256));
+            session.setMetadata(mb.build());
+
+            DefaultHttpDataSource.Factory httpFactory=new DefaultHttpDataSource.Factory()
+                .setUserAgent("Mozilla/5.0 (Linux; Android 14; SM-N900S) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36")
+                .setAllowCrossProtocolRedirects(true)
+                .setDefaultRequestProperties(live365PlayerHeaders());
+            DefaultDataSource.Factory dataFactory=new DefaultDataSource.Factory(this,httpFactory);
+            MediaSource source=new ProgressiveMediaSource.Factory(dataFactory)
+                .createMediaSource(MediaItem.fromUri(url));
+
+            player.setMediaSource(source);
+            player.prepare();
+            if(requestPlaybackFocus()) player.play();
+            else trace("Gallery audio focus denied");
+            publishState();
+        }catch(Throwable e){
+            trace("Gallery PLAYER ERROR: "+e);
+            publishError("Gallery player: "+e);
+            scheduleRetry();
+        }
+    }
+
 
     private void resolveAndPlay(final String id,final String lookupUrl){
         resolver.execute(() -> {
