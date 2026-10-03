@@ -11,7 +11,9 @@ import android.graphics.Typeface;
 public final class StationArt {
     private StationArt(){}
 
-    public static Bitmap bitmap(Context context,String id){
+    public static Bitmap bitmap(Context context,String id){ return bitmap(context,id,512); }
+
+    public static Bitmap bitmap(Context context,String id,int size){
         Bitmap out=Bitmap.createBitmap(512,512,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out);
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -40,7 +42,10 @@ public final class StationArt {
         p.setStrokeWidth(4f);
         p.setColor(0x55FFFFFF);
         c.drawLine(100,430,412,430,p);
-        return out;
+        if(size==512) return out;
+        Bitmap scaled=Bitmap.createScaledBitmap(out,size,size,true);
+        out.recycle();
+        return scaled;
     }
 
     private static Spec spec(String id){
