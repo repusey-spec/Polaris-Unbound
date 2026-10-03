@@ -14,6 +14,9 @@ import android.content.ContentUris;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.MediaStore;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import android.support.v4.media.*;
 import android.support.v4.media.session.*;
 import androidx.media.MediaBrowserServiceCompat;
@@ -46,6 +49,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private boolean userStopped=false;
     private static final String PREFS="polaris_playback_state";
     private static final String PREF_LAST_RADIO="last_radio_id";
+    private static final String MP3_PREFS="polaris_mp3";
+    private static final String PREF_MP3_RECENT="recent_ids";
+    private static final String PREF_MP3_FAVORITES="favorite_ids";
+    private final List<Long> currentMp3Queue=new ArrayList<>();
+    private int currentMp3Index=-1;
     private long lastAutoResumeAt=0L;
     private AudioManager audioManager;
     private AudioFocusRequest focusRequest;
@@ -61,7 +69,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         STREAMS.put("kr5","https://playerservices.streamtheworld.com/api/livestream-redirect/AFNP_DGU_SC");
         STREAMS.put("kr6","https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y");
         STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
-        STREAMS.put("gallery","https://radio.garden/api/ara/content/listen/kWNLnJEl/channel.mp3");
+        STREAMS.put("gallery","https://streaming.live365.com/a94394");
     }
     private static final Map<String,String> TITLES=new HashMap<>();
     static {
@@ -113,10 +121,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
-            @Override public void onSkipToNext(){ skipRadio(1); }
-            @Override public void onSkipToPrevious(){ skipRadio(-1); }
-            @Override public void onFastForward(){ skipRadio(1); }
-            @Override public void onRewind(){ skipRadio(-1); }
+            @Override public void onSkipToNext(){ skipCurrent(1); }
+            @Override public void onSkipToPrevious(){ skipCurrent(-1); }
+            @Override public void onFastForward(){ skipCurrent(1); }
+            @Override public void onRewind(){ skipCurrent(-1); }
             @Override public void onPause(){ player.pause(); publishState(); }
             @Override public void onStop(){
                 userStopped=true;
@@ -154,6 +162,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
 
+
+    private void skipCurrent(int delta){
+        if(currentRadioId!=null) skipRadio(delta);
+        else skipMp3(delta);
+    }
 
     private void skipRadio(int delta){
         if(currentRadioId==null || !STREAMS.containsKey(currentRadioId)) return;
@@ -234,8 +247,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(url==null || userStopped) return;
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
-            // Diagnostic: let Media3 follow the Radio Garden redirect chain itself.
-            trace("Gallery Media3 direct redirect test: "+url);
+            // Stable Live365 entry point; Media3 follows the current CDN redirect.
+            trace("Gallery Live365 entry: "+url);
             playUrl(url,TITLES.get(id),"San Francisco Bay");
         } else if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
             trace("resolver start: "+id);
