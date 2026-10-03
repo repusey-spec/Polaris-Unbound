@@ -15,6 +15,8 @@ import android.support.v4.media.*;
 import android.support.v4.media.session.*;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
 import androidx.media3.common.Player;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -39,6 +41,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private String currentRadioId=null;
     private int retryCount=0;
     private boolean userStopped=false;
+    private static final String PREFS="polaris_playback_state";
+    private static final String PREF_LAST_RADIO="last_radio_id";
+    private long lastAutoResumeAt=0L;
     private static final String CHANNEL_ID="polaris_playback";
     private static final int NOTIFICATION_ID=71;
     private static final Map<String,String> STREAMS=new HashMap<>();
@@ -68,6 +73,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         super.onCreate();
         ensurePlaybackChannel();
         player=new ExoPlayer.Builder(this).build();
+        AudioAttributes audioAttributes=new AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build();
+        // Let ExoPlayer request/release Android audio focus for every playback session.
+        player.setAudioAttributes(audioAttributes,true);
         session=new MediaSessionCompat(this,"PolarisUnbound");
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new MediaSessionCompat.Callback(){
@@ -76,6 +87,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                     currentRadioId=id;
+                    getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
                     enterPlaybackForeground(TITLES.get(id));
                     retryCount=0;
                     userStopped=false;
@@ -360,7 +372,30 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             .setState(state,0,1f).build());
     }
 
-    @Override public BrowserRoot onGetRoot(String pkg,int uid,Bundle hints){ return new BrowserRoot("root",null); }
+    @Override public BrowserRoot onGetRoot(String pkg,int uid,Bundle hints){
+        // JC-style behavior: when Android Auto reconnects, restore the last radio source.
+        if("com.google.android.projection.gearhead".equals(pkg)){
+            long now=android.os.SystemClock.elapsedRealtime();
+            if(now-lastAutoResumeAt>5000L){
+                lastAutoResumeAt=now;
+                final String last=getSharedPreferences(PREFS,MODE_PRIVATE).getString(PREF_LAST_RADIO,null);
+                if(last!=null && STREAMS.containsKey(last)){
+                    retryHandler.postDelayed(() -> {
+                        if(!player.isPlaying()){
+                            trace("AA reconnect auto-resume: "+last);
+                            currentRadioId=last;
+                            userStopped=false;
+                            retryCount=0;
+                            retryHandler.removeCallbacksAndMessages(null);
+                            enterPlaybackForeground(TITLES.get(last));
+                            startRadio(last);
+                        }
+                    },1200L);
+                }
+            }
+        }
+        return new BrowserRoot("root",null);
+    }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem folder(String id,String title){
         return new android.support.v4.media.MediaBrowserCompat.MediaItem(
