@@ -628,6 +628,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return new BrowserRoot("root",style);
     }
 
+    private String presetRadioId(int slot){
+        int station=getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot);
+        if(station<0||station>5) station=slot;
+        return "kr"+(station+1);
+    }
+
     private android.support.v4.media.MediaBrowserCompat.MediaItem folder(String id,String title){
         Bundle e=new Bundle();
         e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
@@ -657,12 +663,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(folder("radio","라디오"));
             x.add(folder("mp3","MP3"));
         } else if(parent.equals("radio")){
-            x.add(item("kr1","89.1 KBS CoolFM","Korea"));
-            x.add(item("kr2","91.9 MBC FM4U","Korea"));
-            x.add(item("kr3","93.9 CBS MusicFM","Korea"));
-            x.add(item("kr4","95.9 MBC 표준FM","Korea"));
-            x.add(item("kr5","102.7 AFN EagleFM","Korea"));
-            x.add(item("kr6","107.7 SBS PowerFM","Korea"));
+            for(int slot=0;slot<6;slot++){
+                String id=presetRadioId(slot);
+                x.add(item(id,TITLES.get(id),"Preset "+(slot+1)));
+            }
             x.add(item("kiis","102.7 KIIS-FM","Los Angeles"));
             x.add(item("gallery","Jazz from Gallery 41","San Francisco Bay"));
         } else if(parent.equals("mp3")){
