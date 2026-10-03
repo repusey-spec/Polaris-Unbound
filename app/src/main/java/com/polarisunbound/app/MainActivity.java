@@ -207,13 +207,11 @@ public class MainActivity extends AppCompatActivity {
     private void probeRadioGarden(){
         final TextView target=scheduleView;
         if(target==null) return;
-        target.setText("Radio Garden kWNLnJEl 진단 중…");
+        target.setText("Radio Garden / Live365 헤더 진단 중…");
         scheduleExecutor.execute(()->{
             String[] urls={
                 "https://radio.garden/api/ara/content/listen/kWNLnJEl/channel.mp3",
-                "https://radio.garden/api/ara/content/listen/kWNLnJEl/channel",
-                "https://radio.garden/api/ara/content/channel/kWNLnJEl",
-                "https://radio.garden/api/ara/content/page/kWNLnJEl"
+                "https://streaming.live365.com/a94394"
             };
             StringBuilder report=new StringBuilder();
             for(String u:urls){
@@ -222,35 +220,34 @@ public class MainActivity extends AppCompatActivity {
                     c=(HttpURLConnection)new URL(u).openConnection();
                     c.setInstanceFollowRedirects(false);
                     c.setConnectTimeout(10000); c.setReadTimeout(10000);
-                    c.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36");
+                    c.setRequestProperty("User-Agent","Radio Garden Android");
                     c.setRequestProperty("Accept","*/*");
+                    c.setRequestProperty("Icy-MetaData","1");
                     int code=c.getResponseCode();
-                    String loc=c.getHeaderField("Location");
-                    String type=c.getContentType();
-                    report.append(u.replace("https://radio.garden","")).append("\nHTTP ").append(code)
-                        .append(" | ").append(type==null?"?":type);
-                    if(loc!=null) report.append("\nLocation: ").append(loc);
-                    if(loc==null && code>=200 && code<400){
-                        InputStream in=c.getInputStream();
-                        ByteArrayOutputStream b=new ByteArrayOutputStream();
-                        byte[] z=new byte[4096]; int n;
-                        while((n=in.read(z))!=-1 && b.size()<20000) b.write(z,0,n);
-                        in.close();
-                        String body=b.toString("UTF-8");
-                        java.util.regex.Matcher m=java.util.regex.Pattern.compile("https?://[^\\s\\\"'<>]+").matcher(body);
-                        int found=0;
-                        while(m.find() && found<8){
-                            String x=m.group();
-                            if(x.contains("stream")||x.contains("listen")||x.contains(".mp3")||x.contains(".aac")||x.contains(".m3u")||x.contains("live365")){
-                                report.append("\nURL: ").append(x); found++;
-                            }
-                        }
-                        if(found==0) report.append("\nBody: ").append(body.substring(0,Math.min(body.length(),500)).replaceAll("\\s+"," "));
+                    report.append(u).append("\nHTTP ").append(code).append("\n");
+                    for(Map.Entry<String,List<String>> e:c.getHeaderFields().entrySet()){
+                        if(e.getKey()!=null) report.append(e.getKey()).append(": ").append(e.getValue()).append("\n");
                     }
-                }catch(Exception e){
-                    report.append(u.replace("https://radio.garden","")).append("\nERROR ").append(e.getClass().getSimpleName()).append(": ").append(String.valueOf(e.getMessage()));
-                }finally{ if(c!=null)c.disconnect(); }
-                report.append("\n\n");
+                    String loc=c.getHeaderField("Location");
+                    if(loc!=null){
+                        HttpURLConnection d=(HttpURLConnection)new URL(loc).openConnection();
+                        d.setInstanceFollowRedirects(false);
+                        d.setConnectTimeout(10000); d.setReadTimeout(10000);
+                        d.setRequestProperty("User-Agent","Radio Garden Android");
+                        d.setRequestProperty("Referer","https://radio.garden/");
+                        d.setRequestProperty("Origin","https://radio.garden");
+                        d.setRequestProperty("Accept","*/*");
+                        d.setRequestProperty("Icy-MetaData","1");
+                        int dc=d.getResponseCode();
+                        report.append("FOLLOW -> ").append(loc).append("\nHTTP ").append(dc).append("\n");
+                        for(Map.Entry<String,List<String>> e:d.getHeaderFields().entrySet()){
+                            if(e.getKey()!=null) report.append(e.getKey()).append(": ").append(e.getValue()).append("\n");
+                        }
+                        d.disconnect();
+                    }
+                }catch(Exception e){ report.append("ERROR ").append(e.getClass().getSimpleName()).append(": ").append(String.valueOf(e.getMessage())).append("\n"); }
+                finally{ if(c!=null)c.disconnect(); }
+                report.append("\n");
             }
             final String out=report.toString();
             runOnUiThread(()->{ if(scheduleView==target) target.setText(out); });
