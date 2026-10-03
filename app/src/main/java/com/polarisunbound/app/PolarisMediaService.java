@@ -149,14 +149,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(url==null || userStopped) return;
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
-            trace("Gallery redirect resolver start");
-            resolveGalleryAndPlay(id,url);
+            // Diagnostic: let Media3 follow the Radio Garden redirect chain itself.
+            trace("Gallery Media3 direct redirect test: "+url);
+            playUrl(url,TITLES.get(id),"San Francisco Bay");
         } else if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
             trace("resolver start: "+id);
             resolveAndPlay(id,url);
         } else {
             trace("direct play start: "+id);
-            playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : ("gallery".equals(id) ? "San Francisco Bay" : "Live"));
+            playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
         }
     }
 
