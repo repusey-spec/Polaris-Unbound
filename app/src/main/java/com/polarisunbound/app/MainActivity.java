@@ -40,6 +40,7 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout pageHost;
     private TextView scheduleView;
     private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
+    private final Handler galleryHandler=new Handler(Looper.getMainLooper());
     private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
     private String currentPage="home";
@@ -152,7 +153,9 @@ public class MainActivity extends AppCompatActivity {
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         status.setText(label+" 연결 중…");
         selectedRadioId=id;
+        galleryHandler.removeCallbacksAndMessages(null);
         refreshSchedule(id);
+        if("gallery".equals(id)) scheduleGalleryRefresh();
         try{ controller.getTransportControls().playFromMediaId(id,null); }
         catch(Throwable e){ status.setText("재생 요청 오류"); }
     }
@@ -281,6 +284,7 @@ public class MainActivity extends AppCompatActivity {
     private void showMp3(){
         selectedRadioId=null;
         scheduleHandler.removeCallbacksAndMessages(null);
+        galleryHandler.removeCallbacksAndMessages(null);
         currentPage="mp3"; base("MP3");
         if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
             TextView t=new TextView(this); t.setText("음악 권한을 허용한 뒤 MP3 메뉴를 다시 열어주세요."); t.setTextSize(18); body.addView(t); requestAudioPermission(); return;
@@ -295,6 +299,17 @@ public class MainActivity extends AppCompatActivity {
                 v.setOnClickListener(x->playId("mp3:"+id,title)); body.addView(v);
             }
         }
+    }
+
+    private void scheduleGalleryRefresh(){
+        galleryHandler.removeCallbacksAndMessages(null);
+        if(!"gallery".equals(selectedRadioId)) return;
+        galleryHandler.postDelayed(()->{
+            if("gallery".equals(selectedRadioId)){
+                refreshSchedule("gallery");
+                scheduleGalleryRefresh();
+            }
+        },30000L);
     }
 
     private void addSchedulePanel(){
@@ -333,11 +348,23 @@ public class MainActivity extends AppCompatActivity {
                 con.setConnectTimeout(7000); con.setReadTimeout(7000); con.setRequestProperty("User-Agent","Mozilla/5.0");
                 StringBuilder b=new StringBuilder();
                 try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){ String x; while((x=r.readLine())!=null) b.append(x).append(' '); }
-                line=parseSchedule(id,b.toString());
+                if("gallery".equals(id)) line=parseGalleryNowPlaying(b.toString());
+                else line=parseSchedule(id,b.toString());
             }catch(Exception e){ line="편성정보를 불러오지 못했습니다"; }
             final String out=line; runOnUiThread(()->{ if(scheduleView==target && id.equals(selectedRadioId)) target.setText(out); });
         });
     }
+    private String parseGalleryNowPlaying(String html){
+        String text=html.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
+        String low=text.toLowerCase(Locale.US);
+        int a=low.indexOf("now playing"), b=low.indexOf("last played",Math.max(0,a));
+        String now=(a>=0 && b>a) ? text.substring(a+"now playing".length(),b).trim() : "";
+        if(now.length()>180) now=now.substring(0,180).trim();
+        SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US);
+        f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles"));
+        return "Jazz from Gallery 41  |  SF "+f.format(new Date())+"\n"+(now.isEmpty()?"Now Playing 정보를 불러오지 못했습니다":now);
+    }
+
     private String parseSchedule(String id,String html){
         String text=html.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
         if("kr6".equals(id)){
@@ -357,7 +384,7 @@ public class MainActivity extends AppCompatActivity {
     }
     @Override public void onBackPressed(){ super.onBackPressed(); }
     @Override protected void onDestroy(){
-        scheduleHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
+        scheduleHandler.removeCallbacksAndMessages(null); galleryHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
         if(browser!=null && browser.isConnected()) browser.disconnect(); super.onDestroy();
     }
 }
