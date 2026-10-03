@@ -148,7 +148,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         String url=STREAMS.get(id);
         if(url==null || userStopped) return;
         trace("STREAM selected: "+id);
-        if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
+        if("gallery".equals(id)){
+            trace("Gallery redirect resolver start");
+            resolveGalleryAndPlay(id,url);
+        } else if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
             trace("resolver start: "+id);
             resolveAndPlay(id,url);
         } else {
@@ -212,6 +215,53 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
         }catch(SecurityException ignored){}
         return out;
+    }
+
+    private void resolveGalleryAndPlay(final String id,final String lookupUrl){
+        resolver.execute(() -> {
+            HttpURLConnection con=null;
+            try{
+                String next=lookupUrl;
+                for(int hop=0;hop<6;hop++){
+                    con=(HttpURLConnection)new URL(next).openConnection();
+                    con.setConnectTimeout(10000); con.setReadTimeout(10000);
+                    con.setInstanceFollowRedirects(false);
+                    con.setRequestProperty("User-Agent","Radio Garden Android");
+                    con.setRequestProperty("Referer","https://radio.garden/");
+                    con.setRequestProperty("Origin","https://radio.garden");
+                    con.setRequestProperty("Accept","*/*");
+                    con.setRequestProperty("Icy-MetaData","1");
+                    int code=con.getResponseCode();
+                    String type=con.getContentType();
+                    String loc=con.getHeaderField("Location");
+                    trace("Gallery hop "+hop+" HTTP "+code+" type="+type+" loc="+loc);
+                    if(code>=300 && code<400 && loc!=null){
+                        URL base=new URL(next);
+                        next=new URL(base,loc).toString();
+                        con.disconnect(); con=null;
+                        continue;
+                    }
+                    if(code>=200 && code<300 && type!=null && (type.toLowerCase(Locale.US).startsWith("audio/") || type.toLowerCase(Locale.US).contains("mpeg"))){
+                        final String streamUrl=next;
+                        if(con!=null){ con.disconnect(); con=null; }
+                        runOnPlayerThread(() -> {
+                            if(!userStopped && id.equals(currentRadioId))
+                                playUrl(streamUrl,TITLES.get(id),"San Francisco Bay");
+                        });
+                        return;
+                    }
+                    throw new IOException("Gallery stream HTTP "+code+" type="+type);
+                }
+                throw new IOException("Too many Gallery redirects");
+            }catch(Exception e){
+                if(con!=null) con.disconnect();
+                runOnPlayerThread(() -> {
+                    trace("Gallery resolver error: "+e);
+                    publishError("Gallery resolver: "+e.getMessage());
+                    if(id.equals(currentRadioId)) scheduleRetry();
+                });
+            }
+        });
     }
 
     private void resolveAndPlay(final String id,final String lookupUrl){
