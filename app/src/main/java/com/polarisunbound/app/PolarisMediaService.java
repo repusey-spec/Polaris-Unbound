@@ -573,9 +573,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void playUrlOnMain(String url,String title,String subtitle){
         trace("PLAYER enter: "+title);
         try{
-        session.setMetadata(new MediaMetadataCompat.Builder()
+        MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle).build());
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle);
+        if(currentRadioId!=null && STREAMS.containsKey(currentRadioId))
+            mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,currentRadioId,256));
+        session.setMetadata(mb.build());
         trace("PLAYER setMediaItem");
         player.setMediaItem(MediaItem.fromUri(url));
         trace("PLAYER prepare");
@@ -632,17 +635,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setExtras(e).build(),
             android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
     }
-    private Uri stationIcon(String id){
-        // Official broadcaster/station assets only. Remote URIs let the AA host render station artwork.
-        if("kr1".equals(id)) return Uri.parse("https://kstar.kbs.co.kr/images/kstar/2021/04/16/1618536768314.jpg");
-        if("kr6".equals(id)) return Uri.parse("https://www.sbs.co.kr/radio/ci.html");
-        return null;
-    }
     private android.support.v4.media.MediaBrowserCompat.MediaItem item(String id,String title,String sub){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
             .setMediaId(id).setTitle(title).setSubtitle(sub);
-        Uri icon=stationIcon(id);
-        if(icon!=null) b.setIconUri(icon);
+        if(STREAMS.containsKey(id)) b.setIconBitmap(StationArt.bitmap(this,id,128));
         Bundle e=new Bundle();
         e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
         b.setExtras(e);
@@ -670,7 +666,36 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(item("kiis","102.7 KIIS-FM","Los Angeles"));
             x.add(item("gallery","Jazz from Gallery 41","San Francisco Bay"));
         } else if(parent.equals("mp3")){
-            x.addAll(loadLocalAudio());
+            x.add(folder("mp3_recent","최근 재생"));
+            x.add(folder("mp3_folders","폴더"));
+            x.add(folder("mp3_albums","앨범"));
+            x.add(folder("mp3_artists","아티스트"));
+            x.add(folder("mp3_all","전체 곡"));
+            x.add(folder("mp3_favorites","즐겨찾기"));
+        } else if(parent.equals("mp3_recent")){
+            x.addAll(loadAudioByIds(recentIds()));
+        } else if(parent.equals("mp3_folders")){
+            x.addAll(loadMp3Folders());
+        } else if(parent.equals("mp3_albums")){
+            x.addAll(loadGroupItems(MediaStore.Audio.Media.ALBUM,"mp3_album:"));
+        } else if(parent.equals("mp3_artists")){
+            x.addAll(loadGroupItems(MediaStore.Audio.Media.ARTIST,"mp3_artist:"));
+        } else if(parent.equals("mp3_all")){
+            x.addAll(loadLocalAudio(null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
+        } else if(parent.equals("mp3_favorites")){
+            x.addAll(loadAudioByIds(favoriteIds()));
+        } else if(parent.startsWith("mp3_album:")){
+            String value=Uri.decode(parent.substring("mp3_album:".length()));
+            x.addAll(loadLocalAudio(MediaStore.Audio.Media.ALBUM+"=?",new String[]{value},MediaStore.Audio.Media.TRACK+" ASC"));
+        } else if(parent.startsWith("mp3_artist:")){
+            String value=Uri.decode(parent.substring("mp3_artist:".length()));
+            x.addAll(loadLocalAudio(MediaStore.Audio.Media.ARTIST+"=?",new String[]{value},MediaStore.Audio.Media.ALBUM+" COLLATE NOCASE ASC, "+MediaStore.Audio.Media.TRACK+" ASC"));
+        } else if(parent.startsWith("mp3_folder:")){
+            String value=Uri.decode(parent.substring("mp3_folder:".length()));
+            if(Build.VERSION.SDK_INT>=29)
+                x.addAll(loadLocalAudio(MediaStore.Audio.Media.RELATIVE_PATH+"=?",new String[]{value},MediaStore.Audio.Media.TRACK+" ASC"));
+            else
+                x.addAll(loadLocalAudio(MediaStore.Audio.Media.DATA+" LIKE ?",new String[]{value.endsWith("/")?value+"%":value+"/%"},MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
         }
         result.sendResult(x);
     }
