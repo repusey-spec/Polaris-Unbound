@@ -277,43 +277,181 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void playLocalAudio(String id){
         try{
             long mediaId=Long.parseLong(id.substring(4));
+            currentRadioId=null;
+            retryCount=0;
+            userStopped=false;
+            retryHandler.removeCallbacksAndMessages(null);
+
+            currentMp3Queue.clear();
+            currentMp3Queue.addAll(loadAllMp3Ids());
+            currentMp3Index=currentMp3Queue.indexOf(mediaId);
+
             Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
             String title="Local audio";
             String artist="";
-            String[] projection={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST};
+            String album="";
+            String[] projection={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
             try(Cursor c=getContentResolver().query(uri,projection,null,null,null)){
                 if(c!=null && c.moveToFirst()){
-                    title=c.getString(0);
-                    artist=c.getString(1);
+                    title=safe(c.getString(0));
+                    artist=safe(c.getString(1));
+                    album=safe(c.getString(2));
                 }
             }
-            playUrl(uri.toString(),title,artist);
+            rememberRecent(mediaId);
+            enterPlaybackForeground(title);
+            final String t=title, a=artist, al=album;
+            final Bitmap art=embeddedArt(uri);
+            runOnPlayerThread(() -> {
+                try{
+                    MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE,t)
+                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,a)
+                        .putString(MediaMetadataCompat.METADATA_KEY_ALBUM,al);
+                    if(art!=null) mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,art);
+                    session.setMetadata(mb.build());
+                    player.setMediaItem(MediaItem.fromUri(uri));
+                    player.prepare();
+                    if(requestPlaybackFocus()) player.play();
+                    publishState();
+                }catch(Throwable e){ publishError("local audio: "+e); }
+            });
         }catch(Exception e){
-            session.setPlaybackState(new PlaybackStateCompat.Builder()
-                .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
-                .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
-                .setErrorMessage(e.getMessage()).build());
+            publishError("local audio: "+e.getMessage());
         }
     }
 
-    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadLocalAudio(){
-        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
-        String[] projection={MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST};
+    private void skipMp3(int delta){
+        if(currentMp3Queue.isEmpty()) currentMp3Queue.addAll(loadAllMp3Ids());
+        if(currentMp3Queue.isEmpty()) return;
+        if(currentMp3Index<0) currentMp3Index=0;
+        currentMp3Index=(currentMp3Index+delta+currentMp3Queue.size())%currentMp3Queue.size();
+        playLocalAudio("mp3:"+currentMp3Queue.get(currentMp3Index));
+    }
+
+    private String safe(String s){ return s==null ? "" : s; }
+
+    private Bitmap embeddedArt(Uri uri){
+        MediaMetadataRetriever mmr=new MediaMetadataRetriever();
+        try{
+            mmr.setDataSource(this,uri);
+            byte[] data=mmr.getEmbeddedPicture();
+            if(data==null||data.length==0) return null;
+            Bitmap b=BitmapFactory.decodeByteArray(data,0,data.length);
+            if(b==null) return null;
+            if(b.getWidth()<=512 && b.getHeight()<=512) return b;
+            float scale=Math.min(512f/b.getWidth(),512f/b.getHeight());
+            Bitmap scaled=Bitmap.createScaledBitmap(b,Math.max(1,(int)(b.getWidth()*scale)),Math.max(1,(int)(b.getHeight()*scale)),true);
+            if(scaled!=b) b.recycle();
+            return scaled;
+        }catch(Exception ignored){ return null; }
+        finally{ try{ mmr.release(); }catch(Exception ignored){} }
+    }
+
+    private List<Long> loadAllMp3Ids(){
+        List<Long> out=new ArrayList<>();
+        String[] projection={MediaStore.Audio.Media._ID};
         String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
         try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,projection,selection,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")){
+            if(c!=null){ int idCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID); while(c.moveToNext()) out.add(c.getLong(idCol)); }
+        }catch(SecurityException ignored){}
+        return out;
+    }
+
+    private void rememberRecent(long id){
+        String old=getSharedPreferences(MP3_PREFS,MODE_PRIVATE).getString(PREF_MP3_RECENT,"");
+        LinkedHashSet<String> ids=new LinkedHashSet<>();
+        ids.add(String.valueOf(id));
+        if(old!=null&&!old.isEmpty()){
+            for(String x:old.split(",")) if(!x.isEmpty()&&!x.equals(String.valueOf(id))) ids.add(x);
+        }
+        StringBuilder b=new StringBuilder();
+        int n=0;
+        for(String x:ids){ if(n++>=30) break; if(b.length()>0)b.append(','); b.append(x); }
+        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit().putString(PREF_MP3_RECENT,b.toString()).apply();
+    }
+
+    private List<Long> recentIds(){
+        List<Long> out=new ArrayList<>();
+        String raw=getSharedPreferences(MP3_PREFS,MODE_PRIVATE).getString(PREF_MP3_RECENT,"");
+        if(raw!=null&&!raw.isEmpty()) for(String x:raw.split(",")) try{ out.add(Long.parseLong(x)); }catch(Exception ignored){}
+        return out;
+    }
+
+    private List<Long> favoriteIds(){
+        List<Long> out=new ArrayList<>();
+        Set<String> set=getSharedPreferences(MP3_PREFS,MODE_PRIVATE).getStringSet(PREF_MP3_FAVORITES,Collections.emptySet());
+        for(String x:set) try{ out.add(Long.parseLong(x)); }catch(Exception ignored){}
+        return out;
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadAudioByIds(List<Long> ids){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        for(Long mediaId:ids){
+            Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
+            String[] p={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+            try(Cursor c=getContentResolver().query(uri,p,null,null,null)){
+                if(c!=null&&c.moveToFirst()){
+                    String title=safe(c.getString(0)), artist=safe(c.getString(1)), album=safe(c.getString(2));
+                    String sub=artist+(album.isEmpty()?"":" · "+album);
+                    out.add(item("mp3:"+mediaId,title,sub));
+                }
+            }catch(SecurityException ignored){}
+        }
+        return out;
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadLocalAudio(String extraSelection,String[] args,String sort){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        String[] projection={MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
+        if(extraSelection!=null&&!extraSelection.isEmpty()) selection+=" AND ("+extraSelection+")";
+        try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,projection,selection,args,sort==null?MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC":sort)){
             if(c!=null){
                 int idCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
                 int titleCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
                 int artistCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST);
+                int albumCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM);
                 while(c.moveToNext()){
-                    long id=c.getLong(idCol);
-                    String title=c.getString(titleCol);
-                    String artist=c.getString(artistCol);
-                    out.add(item("mp3:"+id,title,artist==null ? "" : artist));
+                    long mid=c.getLong(idCol);
+                    String title=safe(c.getString(titleCol));
+                    String artist=safe(c.getString(artistCol));
+                    String album=safe(c.getString(albumCol));
+                    String sub=artist+(album.isEmpty()?"":" · "+album);
+                    out.add(item("mp3:"+mid,title,sub));
                 }
             }
         }catch(SecurityException ignored){}
         return out;
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadGroupItems(String column,String prefix){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        LinkedHashSet<String> seen=new LinkedHashSet<>();
+        String[] projection={column};
+        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
+        try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,projection,selection,null,column+" COLLATE NOCASE ASC")){
+            if(c!=null){
+                int col=c.getColumnIndexOrThrow(column);
+                while(c.moveToNext()){
+                    String value=safe(c.getString(col)).trim();
+                    if(value.isEmpty()||!seen.add(value)) continue;
+                    String title=value;
+                    if(prefix.equals("mp3_folder:")){
+                        String v=value.endsWith("/")?value.substring(0,value.length()-1):value;
+                        int slash=v.lastIndexOf('/');
+                        title=slash>=0?v.substring(slash+1):v;
+                    }
+                    out.add(folder(prefix+Uri.encode(value),title));
+                }
+            }
+        }catch(Exception ignored){}
+        return out;
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadMp3Folders(){
+        String column=Build.VERSION.SDK_INT>=29 ? MediaStore.Audio.Media.RELATIVE_PATH : MediaStore.Audio.Media.DATA;
+        return loadGroupItems(column,"mp3_folder:");
     }
 
     private void resolveGalleryAndPlay(final String id,final String lookupUrl){
