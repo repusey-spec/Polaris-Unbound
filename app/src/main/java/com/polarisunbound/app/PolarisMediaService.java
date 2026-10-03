@@ -2,6 +2,9 @@ package com.polarisunbound.app;
 
 import android.os.Bundle;
 import android.content.Intent;
+import android.content.Context;
+import android.media.AudioManager;
+import android.media.AudioFocusRequest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -44,6 +47,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private static final String PREFS="polaris_playback_state";
     private static final String PREF_LAST_RADIO="last_radio_id";
     private long lastAutoResumeAt=0L;
+    private AudioManager audioManager;
+    private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
     private static final int NOTIFICATION_ID=71;
     private static final Map<String,String> STREAMS=new HashMap<>();
@@ -72,13 +77,24 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     @Override public void onCreate(){
         super.onCreate();
         ensurePlaybackChannel();
+        audioManager=(AudioManager)getSystemService(Context.AUDIO_SERVICE);
         player=new ExoPlayer.Builder(this).build();
         AudioAttributes audioAttributes=new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build();
         // Let ExoPlayer request/release Android audio focus for every playback session.
-        player.setAudioAttributes(audioAttributes,true);
+        player.setAudioAttributes(audioAttributes,false);
+        if(Build.VERSION.SDK_INT>=26){
+            android.media.AudioAttributes platformAttrs=new android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build();
+            focusRequest=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(platformAttrs)
+                .setOnAudioFocusChangeListener(this::onAudioFocusChange)
+                .build();
+        }
         session=new MediaSessionCompat(this,"PolarisUnbound");
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new MediaSessionCompat.Callback(){
@@ -95,7 +111,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     startRadio(id);
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
-            @Override public void onPlay(){ player.play(); publishState(); }
+            @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
             @Override public void onPause(){ player.pause(); publishState(); }
             @Override public void onStop(){
                 userStopped=true;
@@ -103,6 +119,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 retryCount=0;
                 retryHandler.removeCallbacksAndMessages(null);
                 leavePlaybackForeground();
+                abandonPlaybackFocus();
                 player.stop();
                 publishState();
             }
@@ -132,6 +149,40 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
 
+
+    private boolean requestPlaybackFocus(){
+        if(audioManager==null) return true;
+        int result;
+        if(Build.VERSION.SDK_INT>=26){
+            result=audioManager.requestAudioFocus(focusRequest);
+        }else{
+            result=audioManager.requestAudioFocus(this::onAudioFocusChange,
+                AudioManager.STREAM_MUSIC,AudioManager.AUDIOFOCUS_GAIN);
+        }
+        trace("AUDIO FOCUS request="+result);
+        return result==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    private void onAudioFocusChange(int change){
+        runOnPlayerThread(() -> {
+            trace("AUDIO FOCUS change="+change);
+            if(change==AudioManager.AUDIOFOCUS_LOSS ||
+               change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
+               change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK){
+                // Radio behavior: another media source wins -> stop this stream and stay paused.
+                retryHandler.removeCallbacksAndMessages(null);
+                if(player!=null) player.pause();
+                publishState();
+            }
+            // Deliberately do not auto-resume on AUDIOFOCUS_GAIN.
+            // User selection or the next AA reconnect starts playback again.
+        });
+    }
+
+    private void abandonPlaybackFocus(){
+        if(audioManager==null) return;
+        if(Build.VERSION.SDK_INT>=26 && focusRequest!=null) audioManager.abandonAudioFocusRequest(focusRequest);
+    }
 
     private void ensurePlaybackChannel(){
         if(Build.VERSION.SDK_INT>=26){
@@ -357,7 +408,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("PLAYER prepare");
         player.prepare();
         trace("PLAYER play");
-        player.play();
+        if(requestPlaybackFocus()) player.play();
+        else trace("PLAYER audio focus denied");
         publishState();
         }catch(Throwable e){ trace("PLAYER ERROR: "+e); publishError("player: "+e); }
     }
@@ -426,6 +478,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     @Override public void onDestroy(){
         retryHandler.removeCallbacksAndMessages(null);
+        abandonPlaybackFocus();
         if(player!=null) player.release();
         resolver.shutdownNow();
         if(session!=null) session.release();
