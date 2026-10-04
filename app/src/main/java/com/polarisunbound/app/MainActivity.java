@@ -316,10 +316,72 @@ public class MainActivity extends AppCompatActivity {
         times.addView(mp3Duration,new LinearLayout.LayoutParams(0,-2,1));
         wrap.addView(times,new LinearLayout.LayoutParams(-1,-2));
 
+        LinearLayout modes=new LinearLayout(this);
+        modes.setOrientation(LinearLayout.HORIZONTAL);
+        modes.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        modes.setPadding(0,dp(6),0,0);
+
+        final TextView repeat=mp3ModeButton("");
+        final TextView shuffle=mp3ModeButton("");
+        updateMp3ModeButtons(repeat,shuffle);
+
+        repeat.setOnClickListener(v->{
+            android.content.SharedPreferences prefs=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+            int mode=prefs.getInt("repeat_mode",PlaybackStateCompat.REPEAT_MODE_NONE);
+            int next;
+            if(mode==PlaybackStateCompat.REPEAT_MODE_NONE) next=PlaybackStateCompat.REPEAT_MODE_ALL;
+            else if(mode==PlaybackStateCompat.REPEAT_MODE_ALL) next=PlaybackStateCompat.REPEAT_MODE_ONE;
+            else next=PlaybackStateCompat.REPEAT_MODE_NONE;
+            prefs.edit().putInt("repeat_mode",next).apply();
+            if(controller!=null) controller.getTransportControls().setRepeatMode(next);
+            updateMp3ModeButtons(repeat,shuffle);
+        });
+
+        shuffle.setOnClickListener(v->{
+            android.content.SharedPreferences prefs=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+            boolean enabled=!prefs.getBoolean("shuffle",false);
+            prefs.edit().putBoolean("shuffle",enabled).apply();
+            if(controller!=null) controller.getTransportControls().setShuffleMode(
+                enabled ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
+            updateMp3ModeButtons(repeat,shuffle);
+        });
+
+        LinearLayout.LayoutParams modeLp=new LinearLayout.LayoutParams(0,dp(38),1);
+        modeLp.setMargins(0,0,dp(6),0);
+        modes.addView(repeat,modeLp);
+        LinearLayout.LayoutParams shuffleLp=new LinearLayout.LayoutParams(0,dp(38),1);
+        shuffleLp.setMargins(dp(6),0,0,0);
+        modes.addView(shuffle,shuffleLp);
+        wrap.addView(modes,new LinearLayout.LayoutParams(-1,-2));
+
         body.addView(wrap,new LinearLayout.LayoutParams(-1,-2));
         progressHandler.removeCallbacks(progressTick);
         progressHandler.post(progressTick);
         updateMp3Progress();
+    }
+
+    private TextView mp3ModeButton(String text){
+        TextView v=new TextView(this);
+        v.setText(text);
+        v.setTextSize(13);
+        v.setGravity(17);
+        v.setTextColor(Color.WHITE);
+        v.setBackground(roundedBg(0x88303038,18));
+        return v;
+    }
+
+    private void updateMp3ModeButtons(TextView repeat,TextView shuffle){
+        android.content.SharedPreferences prefs=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+        int mode=prefs.getInt("repeat_mode",PlaybackStateCompat.REPEAT_MODE_NONE);
+        boolean shuffled=prefs.getBoolean("shuffle",false);
+
+        if(mode==PlaybackStateCompat.REPEAT_MODE_ALL) repeat.setText("↻  전체 반복");
+        else if(mode==PlaybackStateCompat.REPEAT_MODE_ONE) repeat.setText("↻  1곡 반복");
+        else repeat.setText("↻  반복 끔");
+
+        shuffle.setText(shuffled?"🔀  랜덤 켬":"🔀  랜덤 끔");
+        repeat.setAlpha(mode==PlaybackStateCompat.REPEAT_MODE_NONE?0.65f:1f);
+        shuffle.setAlpha(shuffled?1f:0.65f);
     }
 
     private long mp3DurationMs(){
