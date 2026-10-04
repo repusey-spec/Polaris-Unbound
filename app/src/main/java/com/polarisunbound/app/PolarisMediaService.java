@@ -54,7 +54,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private String currentRadioId=null;
     private int retryCount=0;
     private boolean userStopped=false;
-    private boolean pausedByTransientFocusLoss=false;
+    private boolean resumeAfterVoiceFocus=false;
+    private long lastMp3OrRadioPlayingAt=0L;
+    private long lastVoicePlaySearchAt=0L;
     private static final String PREFS="polaris_playback_state";
     private static final String PREF_LAST_RADIO="last_radio_id";
     private static final String MP3_PREFS="polaris_mp3";
@@ -130,7 +132,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setShuffleMode(mp3Shuffle ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
-                pausedByTransientFocusLoss=false;
+                resumeAfterVoiceFocus=false;
                 trace("SERVICE onPlayFromMediaId: "+id);
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
@@ -145,12 +147,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlayFromSearch(String query,Bundle extras){
-                pausedByTransientFocusLoss=false;
+                // Assistant normally dispatches the media command while it still owns audio focus.
+                // Keep a resume request alive so the requested radio/MP3 starts when Assistant releases focus.
+                lastVoicePlaySearchAt=android.os.SystemClock.elapsedRealtime();
+                resumeAfterVoiceFocus=true;
                 trace("SERVICE onPlayFromSearch: query="+query+" extras="+String.valueOf(extras));
                 handleVoicePlaySearch(query,extras);
             }
             @Override public void onPlay(){
-                pausedByTransientFocusLoss=false;
+                resumeAfterVoiceFocus=false;
                 if(requestPlaybackFocus()) player.play();
                 publishState();
             }
@@ -159,7 +164,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onFastForward(){ skipCurrent(1); }
             @Override public void onRewind(){ skipCurrent(-1); }
             @Override public void onPause(){
-                pausedByTransientFocusLoss=false;
+                // Assistant/AA may issue PAUSE just before the audio-focus callback.
+                // Do not erase the resume decision here; focus loss/gain decides whether this was temporary.
                 player.pause();
                 publishState();
             }
@@ -187,7 +193,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 trace("MP3 shuffle="+mp3Shuffle);
             }
             @Override public void onStop(){
-                pausedByTransientFocusLoss=false;
+                resumeAfterVoiceFocus=false;
                 userStopped=true;
                 currentRadioId=null;
                 currentMp3Id=-1L;
@@ -200,7 +206,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
         });
         player.addListener(new Player.Listener(){
-            @Override public void onIsPlayingChanged(boolean playing){ publishState(); }
+            @Override public void onIsPlayingChanged(boolean playing){
+                if(playing && (currentRadioId!=null || currentMp3Id>=0))
+                    lastMp3OrRadioPlayingAt=android.os.SystemClock.elapsedRealtime();
+                publishState();
+            }
             @Override public void onPlaybackStateChanged(int state){
                 publishState();
                 if(state==Player.STATE_ENDED && currentMp3Id>=0 && !mp3EndHandled){
@@ -374,6 +384,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void startVoiceRandomMp3(){
+        resumeAfterVoiceFocus=true;
         currentMp3Queue.clear();
         currentMp3Queue.addAll(loadAllMp3Ids());
         if(currentMp3Queue.isEmpty()){
@@ -390,6 +401,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void playVoiceRadio(String id){
+        resumeAfterVoiceFocus=true;
         if(id==null||!STREAMS.containsKey(id)){
             publishError("라디오 채널을 찾지 못했습니다");
             return;
@@ -431,6 +443,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             long id=findMp3Title(wanted);
             if(id>=0){
                 trace("VOICE MP3 title -> "+wanted+" / "+id);
+                resumeAfterVoiceFocus=true;
                 ensureMp3Queue(id);
                 playLocalAudioId(id);
             }else{
@@ -444,6 +457,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             long id=findMp3Title(normalized);
             if(id>=0){
                 trace("VOICE plain title -> "+normalized+" / "+id);
+                resumeAfterVoiceFocus=true;
                 ensureMp3Queue(id);
                 playLocalAudioId(id);
                 return;
@@ -455,7 +469,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void skipCurrent(int delta){
-        pausedByTransientFocusLoss=false;
+        resumeAfterVoiceFocus=false;
         if(currentRadioId!=null) skipRadio(delta);
         else if(currentMp3Id>=0 || !currentMp3Queue.isEmpty()) skipMp3(delta);
     }
@@ -493,41 +507,42 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void onAudioFocusChange(int change){
         runOnPlayerThread(() -> {
+            long now=android.os.SystemClock.elapsedRealtime();
+            boolean activeSource=currentRadioId!=null || currentMp3Id>=0;
+            boolean playingNow=player!=null && player.isPlaying();
+            boolean wasRecentlyPlaying=playingNow || (now-lastMp3OrRadioPlayingAt)<2500L;
+            boolean recentVoiceCommand=(now-lastVoicePlaySearchAt)<12000L;
+
             trace("AUDIO FOCUS change="+change+
-                " transientResume="+pausedByTransientFocusLoss+
+                " resume="+resumeAfterVoiceFocus+
+                " recentPlaying="+wasRecentlyPlaying+
+                " recentVoice="+recentVoiceCommand+
                 " radio="+currentRadioId+" mp3="+currentMp3Id);
 
             if(change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
-               change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK){
+               change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK ||
+               change==AudioManager.AUDIOFOCUS_LOSS){
                 retryHandler.removeCallbacksAndMessages(null);
-                boolean activeSource=currentRadioId!=null || currentMp3Id>=0;
-                boolean wasPlaying=player!=null && player.isPlaying();
-                pausedByTransientFocusLoss=activeSource && wasPlaying && !userStopped;
-                if(wasPlaying && player!=null) player.pause();
-                publishState();
-                trace("AUDIO FOCUS transient pause resumeLater="+pausedByTransientFocusLoss);
-                return;
-            }
 
-            if(change==AudioManager.AUDIOFOCUS_LOSS){
-                // A permanent loss means another source has taken over. Do not revive Polaris.
-                pausedByTransientFocusLoss=false;
-                retryHandler.removeCallbacksAndMessages(null);
-                if(player!=null) player.pause();
+                // AA/Google Assistant is not consistent about whether it reports LOSS or LOSS_TRANSIENT.
+                // If Polaris was playing just before the voice interruption, remember that it must resume.
+                if(activeSource && !userStopped && (wasRecentlyPlaying || recentVoiceCommand))
+                    resumeAfterVoiceFocus=true;
+
+                if(player!=null && player.isPlaying()) player.pause();
                 publishState();
-                trace("AUDIO FOCUS permanent loss -> stay paused");
+                trace("AUDIO FOCUS voice interruption -> resumeLater="+resumeAfterVoiceFocus);
                 return;
             }
 
             if(change==AudioManager.AUDIOFOCUS_GAIN){
-                boolean activeSource=currentRadioId!=null || currentMp3Id>=0;
-                if(pausedByTransientFocusLoss && activeSource && !userStopped && player!=null){
-                    pausedByTransientFocusLoss=false;
+                if(resumeAfterVoiceFocus && activeSource && !userStopped && player!=null){
+                    resumeAfterVoiceFocus=false;
                     player.play();
                     publishState();
-                    trace("AUDIO FOCUS gain -> resume interrupted Polaris playback");
+                    trace("AUDIO FOCUS gain -> resume Polaris");
                 }else{
-                    pausedByTransientFocusLoss=false;
+                    resumeAfterVoiceFocus=false;
                 }
             }
         });
@@ -818,25 +833,47 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         Bitmap cached=mp3AlbumArtCache.get(albumId);
         if(cached!=null && !cached.isRecycled()) return cached;
 
-        Uri artUri=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),albumId);
-        try(InputStream in=getContentResolver().openInputStream(artUri)){
-            if(in==null) return null;
-            Bitmap raw=BitmapFactory.decodeStream(in);
-            if(raw==null) return null;
-            int target=160;
-            Bitmap out=raw;
-            if(raw.getWidth()>target || raw.getHeight()>target){
-                float scale=Math.min((float)target/raw.getWidth(),(float)target/raw.getHeight());
-                out=Bitmap.createScaledBitmap(raw,
-                    Math.max(1,(int)(raw.getWidth()*scale)),
-                    Math.max(1,(int)(raw.getHeight()*scale)),true);
-                if(out!=raw) raw.recycle();
+        Bitmap raw=null;
+
+        // First try embedded artwork from a representative track. This is much more reliable
+        // on current Android than the legacy /audio/albumart provider.
+        String[] projection={MediaStore.Audio.Media._ID};
+        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0 AND "+
+            MediaStore.Audio.Media.ALBUM_ID+"=?";
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection,selection,new String[]{String.valueOf(albumId)},null)){
+            if(c!=null && c.moveToFirst()){
+                Uri track=ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,c.getLong(0));
+                raw=embeddedArt(track);
             }
-            mp3AlbumArtCache.put(albumId,out);
-            return out;
-        }catch(Exception ignored){
-            return null;
+        }catch(Exception ignored){}
+
+        // Fallback for files whose album art only exists in MediaStore's album-art cache.
+        if(raw==null){
+            Uri artUri=ContentUris.withAppendedId(
+                Uri.parse("content://media/external/audio/albumart"),albumId);
+            try(InputStream in=getContentResolver().openInputStream(artUri)){
+                if(in!=null) raw=BitmapFactory.decodeStream(in);
+            }catch(Exception ignored){}
         }
+
+        if(raw==null) return null;
+
+        // MediaBrowser results are sent across Binder. Keep thumbnails deliberately small
+        // so an album page cannot overflow the transaction and render broken covers in AA.
+        final int target=72;
+        Bitmap out=raw;
+        if(raw.getWidth()>target || raw.getHeight()>target){
+            float scale=Math.min((float)target/raw.getWidth(),(float)target/raw.getHeight());
+            out=Bitmap.createScaledBitmap(raw,
+                Math.max(1,(int)(raw.getWidth()*scale)),
+                Math.max(1,(int)(raw.getHeight()*scale)),true);
+            if(out!=raw) raw.recycle();
+        }
+        mp3AlbumArtCache.put(albumId,out);
+        return out;
     }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem folderWithArt(
