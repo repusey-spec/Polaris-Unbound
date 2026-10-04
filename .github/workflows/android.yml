@@ -28,46 +28,82 @@ jobs:
           from html.parser import HTMLParser
           from zoneinfo import ZoneInfo
 
-          class NaverScheduleHTMLParser(HTMLParser):
-              def __init__(self):
-                  super().__init__()
-                  self.in_list = False
-                  self.li_depth = 0
-                  self.active_divs = []
-                  self.cells = []
-                  self.rows = []
+          endpoint = "https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
+          referer = "https://m.search.naver.com/search.naver?where=m&query=%ED%8E%B8%EC%84%B1%ED%91%9C"
+          service_ids = {
+              "KBS CoolFM": "815457",
+              "MBC FM4U": "815463",
+              "CBS MusicFM": "815449",
+              "MBC StandardFM": "815464",
+              "SBS PowerFM": "815467",
+          }
+          day = datetime.datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d")
+          for name, sid in service_ids.items():
+              params = urllib.parse.urlencode({
+                  "key": "SingleChannelDailySchedule",
+                  "where": "m",
+                  "pkid": "66",
+                  "u1": sid,
+                  "u2": day,
+              })
+              req = urllib.request.Request(
+                  endpoint + "?" + params,
+                  headers={
+                      "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36",
+                      "Referer": referer,
+                      "Accept": "application/json,text/plain,*/*",
+                      "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.7",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=15) as res:
+                  data = json.loads(res.read().decode("utf-8"))
+              assert str(data.get("statusCode", "")).lower() == "success", (name, data.get("statusCode"))
+              html = "".join(data.get("dataHtml") or [])
+              assert html, f"{name}: empty dataHtml"
 
-              def handle_starttag(self, tag, attrs):
-                  attrs = dict(attrs)
-                  if tag == "li":
-                      classes = attrs.get("class", "").split()
-                      if self.in_list:
-                          self.li_depth += 1
-                      elif "list" in classes:
-                          self.in_list = True
-                          self.li_depth = 1
-                          self.active_divs = []
-                          self.cells = []
-                  if self.in_list and tag == "div":
-                      buf = []
-                      self.active_divs.append(buf)
-                      self.cells.append(buf)
+              entries = []
+              for row in re.findall(r'(?is)<li[^>]*class=["\\'][^"\\']*\\blist\\b[^"\\']*["\\'][^>]*>(.*?)</li>', html):
+                  tm = re.search(r'(?is)<div[^>]*class=["\\'][^"\\']*\\btime\\b[^"\\']*["\\'][^>]*>\\s*(\\d{1,2}:\\d{2})\\s*</div>', row)
+                  tt = re.search(r'(?is)<div[^>]*class=["\\'][^"\\']*\\bpr_title\\b[^"\\']*["\\'][^>]*>(.*?)</div>', row)
+                  if not tm or not tt:
+                      continue
+                  title = re.sub(r"(?is)<[^>]+>", " ", tt.group(1))
+                  title = re.sub(r"\\s+", " ", title).strip()
+                  if title and re.search(r"[A-Za-z가-힣]", title):
+                      entries.append((tm.group(1), title))
 
-              def handle_data(self, data):
-                  if self.in_list:
-                      for buf in self.active_divs:
-                          buf.append(data)
-
-              def handle_endtag(self, tag):
-                  if self.in_list and tag == "div" and self.active_divs:
-                      self.active_divs.pop()
-                  if self.in_list and tag == "li":
-                      self.li_depth -= 1
-                      if self.li_depth == 0:
-                          self.rows.append([" ".join(x).strip() for x in self.cells])
-                          self.in_list = False
-                          self.active_divs = []
-                          self.cells = []
+              if not entries:
+                  print("RAW_HTML_SAMPLE", name, repr(html[:6000]))
+              assert entries, f"{name}: semantic Naver parser found zero entries"
+name: Android APK
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Restore stable debug signing key
+        run: |
+          base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
+          keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
+      - name: Verify Naver radio schedule contract
+        run: |
+          python - <<'PY'
+          import datetime, json, re, urllib.parse, urllib.request
+          from html.parser import HTMLParser
+          from zoneinfo import ZoneInfo
 
           endpoint = "https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
           referer = "https://m.search.naver.com/search.naver?where=m&query=%ED%8E%B8%EC%84%B1%ED%91%9C"
