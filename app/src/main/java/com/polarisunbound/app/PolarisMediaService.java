@@ -54,7 +54,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private String currentRadioId=null;
     private int retryCount=0;
     private boolean userStopped=false;
-    private boolean pausedByTransientFocusLoss=false;
+    private boolean resumeAfterTransientFocusLoss=false;
     private static final String PREFS="polaris_playback_state";
     private static final String PREF_LAST_RADIO="last_radio_id";
     private static final String MP3_PREFS="polaris_mp3";
@@ -130,7 +130,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setShuffleMode(mp3Shuffle ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
-                pausedByTransientFocusLoss=false;
                 trace("SERVICE onPlayFromMediaId: "+id);
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
@@ -145,24 +144,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlayFromSearch(String query,Bundle extras){
-                pausedByTransientFocusLoss=false;
                 trace("SERVICE onPlayFromSearch: query="+query+" extras="+String.valueOf(extras));
                 handleVoicePlaySearch(query,extras);
             }
-            @Override public void onPlay(){
-                pausedByTransientFocusLoss=false;
-                if(requestPlaybackFocus()) player.play();
-                publishState();
-            }
+            @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
             @Override public void onSkipToNext(){ skipCurrent(1); }
             @Override public void onSkipToPrevious(){ skipCurrent(-1); }
             @Override public void onFastForward(){ skipCurrent(1); }
             @Override public void onRewind(){ skipCurrent(-1); }
-            @Override public void onPause(){
-                pausedByTransientFocusLoss=false;
-                player.pause();
-                publishState();
-            }
+            @Override public void onPause(){ player.pause(); publishState(); }
             @Override public void onSeekTo(long pos){
                 if(player!=null){
                     player.seekTo(Math.max(0L,pos));
@@ -187,7 +177,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 trace("MP3 shuffle="+mp3Shuffle);
             }
             @Override public void onStop(){
-                pausedByTransientFocusLoss=false;
                 userStopped=true;
                 currentRadioId=null;
                 currentMp3Id=-1L;
@@ -455,7 +444,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void skipCurrent(int delta){
-        pausedByTransientFocusLoss=false;
         if(currentRadioId!=null) skipRadio(delta);
         else if(currentMp3Id>=0 || !currentMp3Queue.isEmpty()) skipMp3(delta);
     }
@@ -493,42 +481,32 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void onAudioFocusChange(int change){
         runOnPlayerThread(() -> {
-            trace("AUDIO FOCUS change="+change+
-                " transientResume="+pausedByTransientFocusLoss+
-                " radio="+currentRadioId+" mp3="+currentMp3Id);
+            trace("AUDIO FOCUS change="+change);
 
             if(change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
                change==AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK){
                 retryHandler.removeCallbacksAndMessages(null);
-                boolean activeSource=currentRadioId!=null || currentMp3Id>=0;
-                boolean wasPlaying=player!=null && player.isPlaying();
-                pausedByTransientFocusLoss=activeSource && wasPlaying && !userStopped;
-                if(wasPlaying && player!=null) player.pause();
+                resumeAfterTransientFocusLoss=
+                    !userStopped && player!=null &&
+                    (player.isPlaying() || player.getPlayWhenReady());
+                if(player!=null) player.pause();
                 publishState();
-                trace("AUDIO FOCUS transient pause resumeLater="+pausedByTransientFocusLoss);
                 return;
             }
 
             if(change==AudioManager.AUDIOFOCUS_LOSS){
-                // A permanent loss means another source has taken over. Do not revive Polaris.
-                pausedByTransientFocusLoss=false;
+                resumeAfterTransientFocusLoss=false;
                 retryHandler.removeCallbacksAndMessages(null);
                 if(player!=null) player.pause();
                 publishState();
-                trace("AUDIO FOCUS permanent loss -> stay paused");
                 return;
             }
 
-            if(change==AudioManager.AUDIOFOCUS_GAIN){
-                boolean activeSource=currentRadioId!=null || currentMp3Id>=0;
-                if(pausedByTransientFocusLoss && activeSource && !userStopped && player!=null){
-                    pausedByTransientFocusLoss=false;
-                    player.play();
-                    publishState();
-                    trace("AUDIO FOCUS gain -> resume interrupted Polaris playback");
-                }else{
-                    pausedByTransientFocusLoss=false;
-                }
+            if(change==AudioManager.AUDIOFOCUS_GAIN &&
+               resumeAfterTransientFocusLoss && !userStopped && player!=null){
+                resumeAfterTransientFocusLoss=false;
+                player.play();
+                publishState();
             }
         });
     }
