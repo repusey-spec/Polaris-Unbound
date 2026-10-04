@@ -515,7 +515,7 @@ public class MainActivity extends AppCompatActivity {
         if("kr1".equals(id)) return "https://namu.wiki/w/KBS%202FM?from=KBS%20Cool%20FM";
         if("kr2".equals(id)) return "https://namu.wiki/w/MBC%20FM4U?from=MBC%20FM";
         if("kr3".equals(id)) return "https://namu.wiki/w/CBS%20%EC%9D%8C%EC%95%85FM?from=CBS%20FM";
-        if("kr4".equals(id)) return "https://namu.wiki/w/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4";
+        if("kr4".equals(id)) return "https://namu.wiki/w/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4/%ED%8E%B8%EC%84%B1%ED%91%9C";
         if("kr6".equals(id)) return "https://namu.wiki/w/SBS%20%ED%8C%8C%EC%9B%8CFM";
         if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
         if("gallery".equals(id)) return "https://live365.com/station/Jazz-from-Gallery-41-a94394";
