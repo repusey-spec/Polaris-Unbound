@@ -10,6 +10,21 @@ android {
         versionCode = 26
         versionName = "0.26"
     }
+
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = rootProject.file(".github/polaris-debug.keystore")
+            storePassword = "android"
+            keyAlias = "polarisdebug"
+            keyPassword = "android"
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("stableDebug")
+        }
+    }
 }
 
 dependencies {
