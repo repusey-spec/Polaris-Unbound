@@ -22,6 +22,13 @@ jobs:
           base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
           keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
       - run: gradle assembleDebug
+      - name: Verify APK signature
+        run: |
+          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$APK"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --print-certs "$APK"
       - name: Verify APK exists
         run: |
           ls -lh app/build/outputs/apk/debug/
