@@ -361,7 +361,6 @@ public class MainActivity extends AppCompatActivity {
     private void showMp3(){
         selectedRadioId=null;
         scheduleHandler.removeCallbacksAndMessages(null);
-        galleryHandler.removeCallbacksAndMessages(null);
         currentPage="mp3"; base("MP3");
         if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
             TextView t=new TextView(this); t.setText("음악 권한을 허용한 뒤 MP3 메뉴를 다시 열어주세요."); t.setTextSize(18); t.setTextColor(Color.WHITE); body.addView(t); requestAudioPermission(); return;
