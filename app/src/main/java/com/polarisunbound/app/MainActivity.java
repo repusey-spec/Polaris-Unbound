@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.speech.RecognizerIntent;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
@@ -50,6 +51,19 @@ public class MainActivity extends AppCompatActivity {
     private TextView miniPlayerToggle;
     private MediaMetadataCompat lastMetadata;
     private PlaybackStateCompat lastPlaybackState;
+    private SeekBar mp3Progress;
+    private TextView mp3Elapsed;
+    private TextView mp3Duration;
+    private boolean mp3UserSeeking=false;
+    private EditText voiceSearchTarget;
+    private static final int REQ_VOICE_SEARCH=881;
+    private final Handler progressHandler=new Handler(Looper.getMainLooper());
+    private final Runnable progressTick=new Runnable(){
+        @Override public void run(){
+            updateMp3Progress();
+            progressHandler.postDelayed(this,1000L);
+        }
+    };
     private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
     private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
@@ -72,10 +86,12 @@ public class MainActivity extends AppCompatActivity {
                                 lastPlaybackState=s;
                                 updateStatus(s);
                                 updateMiniPlayerState();
+                                updateMp3Progress();
                             }
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
                                 updateMiniPlayerMetadata();
+                                updateMp3Progress();
                             }
                         });
                         lastMetadata=controller.getMetadata();
@@ -199,8 +215,16 @@ public class MainActivity extends AppCompatActivity {
         ensureShell(); refreshTabs(); pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
-        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize("mp3".equals(currentPage)?13:16); status.setTextColor(0xDDFFFFFF); status.setPadding(0,0,0,"mp3".equals(currentPage)?8:12); body.addView(status);
-        if(!"mp3".equals(currentPage)){
+        if("mp3".equals(currentPage)){
+            status=null;
+            addMp3ProgressLine();
+        }else{
+            status=new TextView(this);
+            status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비");
+            status.setTextSize(16);
+            status.setTextColor(0xDDFFFFFF);
+            status.setPadding(0,0,0,12);
+            body.addView(status);
             TextView stop=stopButton();
             stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); });
             LinearLayout.LayoutParams stopLp=new LinearLayout.LayoutParams(-1,-2);
@@ -237,6 +261,98 @@ public class MainActivity extends AppCompatActivity {
         }
         lastPlaybackState=s;
         updateMiniPlayerState();
+    }
+
+    private void addMp3ProgressLine(){
+        LinearLayout wrap=new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(0,0,0,dp(8));
+
+        mp3Progress=new SeekBar(this);
+        mp3Progress.setMax(1000);
+        mp3Progress.setProgress(0);
+        mp3Progress.setPadding(0,0,0,0);
+        mp3Progress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar seekBar,int progress,boolean fromUser){
+                if(fromUser && mp3UserSeeking){
+                    long duration=mp3DurationMs();
+                    if(duration>0 && mp3Elapsed!=null)
+                        mp3Elapsed.setText(formatTime((duration*progress)/1000L));
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar){ mp3UserSeeking=true; }
+            @Override public void onStopTrackingTouch(SeekBar seekBar){
+                long duration=mp3DurationMs();
+                if(controller!=null && duration>0){
+                    long target=(duration*seekBar.getProgress())/1000L;
+                    controller.getTransportControls().seekTo(target);
+                }
+                mp3UserSeeking=false;
+                updateMp3Progress();
+            }
+        });
+        wrap.addView(mp3Progress,new LinearLayout.LayoutParams(-1,dp(28)));
+
+        LinearLayout times=new LinearLayout(this);
+        times.setOrientation(LinearLayout.HORIZONTAL);
+        mp3Elapsed=new TextView(this);
+        mp3Elapsed.setText("0:00");
+        mp3Elapsed.setTextSize(11);
+        mp3Elapsed.setTextColor(0x99FFFFFF);
+        mp3Duration=new TextView(this);
+        mp3Duration.setText("0:00");
+        mp3Duration.setTextSize(11);
+        mp3Duration.setGravity(android.view.Gravity.RIGHT);
+        mp3Duration.setTextColor(0x99FFFFFF);
+        times.addView(mp3Elapsed,new LinearLayout.LayoutParams(0,-2,1));
+        times.addView(mp3Duration,new LinearLayout.LayoutParams(0,-2,1));
+        wrap.addView(times,new LinearLayout.LayoutParams(-1,-2));
+
+        body.addView(wrap,new LinearLayout.LayoutParams(-1,-2));
+        progressHandler.removeCallbacks(progressTick);
+        progressHandler.post(progressTick);
+        updateMp3Progress();
+    }
+
+    private long mp3DurationMs(){
+        MediaMetadataCompat m=lastMetadata;
+        if(m==null && controller!=null) m=controller.getMetadata();
+        if(!isMp3Metadata(m)) return 0L;
+        return Math.max(0L,m.getLong(MediaMetadataCompat.METADATA_KEY_DURATION));
+    }
+
+    private long mp3PositionMs(){
+        PlaybackStateCompat st=lastPlaybackState;
+        if(st==null && controller!=null) st=controller.getPlaybackState();
+        if(st==null) return 0L;
+        long pos=Math.max(0L,st.getPosition());
+        if(st.getState()==PlaybackStateCompat.STATE_PLAYING){
+            long elapsed=android.os.SystemClock.elapsedRealtime()-st.getLastPositionUpdateTime();
+            if(elapsed>0) pos+=(long)(elapsed*st.getPlaybackSpeed());
+        }
+        long duration=mp3DurationMs();
+        if(duration>0) pos=Math.min(pos,duration);
+        return pos;
+    }
+
+    private void updateMp3Progress(){
+        if(!"mp3".equals(currentPage) || mp3Progress==null) return;
+        long duration=mp3DurationMs();
+        long position=mp3PositionMs();
+        if(!mp3UserSeeking){
+            int progress=duration>0?(int)Math.min(1000L,(position*1000L)/duration):0;
+            mp3Progress.setProgress(progress);
+            if(mp3Elapsed!=null) mp3Elapsed.setText(formatTime(position));
+        }
+        if(mp3Duration!=null) mp3Duration.setText(formatTime(duration));
+        mp3Progress.setEnabled(duration>0 && isMp3Metadata(lastMetadata));
+    }
+
+    private String formatTime(long ms){
+        long total=Math.max(0L,ms)/1000L;
+        long min=total/60L;
+        long sec=total%60L;
+        return String.format(Locale.US,"%d:%02d",min,sec);
     }
 
     private void showHome(){
@@ -701,18 +817,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addMp3Search(){
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
         EditText search=new EditText(this);
+        voiceSearchTarget=search;
         search.setHint("곡, 아티스트, 앨범 검색");
         search.setHintTextColor(0x99FFFFFF);
         search.setTextColor(Color.WHITE);
         search.setTextSize(16);
         search.setSingleLine(true);
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        search.setPadding(dp(18),0,dp(18),0);
+        search.setPadding(dp(18),0,dp(12),0);
         search.setBackground(roundedBg(0xAA2B2B31,24));
-        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(50));
-        lp.setMargins(0,dp(4),0,dp(10));
-        body.addView(search,lp);
+        LinearLayout.LayoutParams searchLp=new LinearLayout.LayoutParams(0,dp(50),1);
+        row.addView(search,searchLp);
+
+        TextView mic=new TextView(this);
+        mic.setText("🎙");
+        mic.setTextSize(23);
+        mic.setGravity(17);
+        mic.setContentDescription("음성으로 음악 검색");
+        mic.setTextColor(Color.WHITE);
+        mic.setBackground(roundedBg(0xCC34343C,24));
+        mic.setOnClickListener(v->startVoiceMusicSearch());
+        LinearLayout.LayoutParams micLp=new LinearLayout.LayoutParams(dp(50),dp(50));
+        micLp.setMargins(dp(8),0,0,0);
+        row.addView(mic,micLp);
+
+        LinearLayout.LayoutParams rowLp=new LinearLayout.LayoutParams(-1,dp(50));
+        rowLp.setMargins(0,dp(4),0,dp(10));
+        body.addView(row,rowLp);
+
         search.setOnEditorActionListener((v,action,event)->{
             if(action==EditorInfo.IME_ACTION_SEARCH || (event!=null && event.getAction()==android.view.KeyEvent.ACTION_DOWN)){
                 String q=v.getText().toString().trim();
@@ -721,6 +858,30 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
+    }
+
+    private void startVoiceMusicSearch(){
+        try{
+            Intent intent=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE,Locale.getDefault().toLanguageTag());
+            intent.putExtra(RecognizerIntent.EXTRA_PROMPT,"곡, 아티스트 또는 앨범명을 말씀하세요");
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,5);
+            startActivityForResult(intent,REQ_VOICE_SEARCH);
+        }catch(Exception e){
+            Toast.makeText(this,"음성 검색을 사용할 수 없습니다.",Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=REQ_VOICE_SEARCH || resultCode!=RESULT_OK || data==null) return;
+        ArrayList<String> results=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+        if(results==null||results.isEmpty()) return;
+        String q=results.get(0)==null?"":results.get(0).trim();
+        if(q.isEmpty()) return;
+        if(voiceSearchTarget!=null) voiceSearchTarget.setText(q);
+        showMp3Search(q);
     }
 
     private void showMp3Search(String query){
@@ -1176,6 +1337,7 @@ public class MainActivity extends AppCompatActivity {
     }
     @Override public void onBackPressed(){ super.onBackPressed(); }
     @Override protected void onDestroy(){
+        progressHandler.removeCallbacksAndMessages(null);
         scheduleHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
         if(browser!=null && browser.isConnected()) browser.disconnect(); super.onDestroy();
     }
