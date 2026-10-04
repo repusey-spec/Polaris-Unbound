@@ -205,33 +205,30 @@ public final class CurrentProgramResolver {
         if(rows.isEmpty()) rows=doc.select("li");
 
         for(Element row:rows){
+            Element timeElement=row.selectFirst("div.time");
+            Element titleElement=row.selectFirst("div.pr_title");
+
+            String timeText=timeElement==null?"":timeElement.text().replaceAll("\\s+"," ").trim();
+            String title=titleElement==null?"":titleElement.text().replaceAll("\\s+"," ").trim();
+
+            // Fallback to the historical Naver div positions if class names change.
             Elements cells=row.select("div");
-            if(cells.isEmpty()) continue;
+            if(timeText.isEmpty()&&cells.size()>1)
+                timeText=cells.get(1).text().replaceAll("\\s+"," ").trim();
+            if(title.isEmpty()&&cells.size()>4)
+                title=cells.get(4).text().replaceAll("\\s+"," ").trim();
 
-            int timeIndex=-1;
-            int hh=-1, mm=-1;
-            for(int i=0;i<cells.size();i++){
-                String text=cells.get(i).text().replaceAll("\\s+"," ").trim();
-                Matcher tm=timePattern.matcher(text);
-                if(tm.matches()){
-                    hh=parseInt(tm.group(1),-1);
-                    mm=parseInt(tm.group(2),-1);
-                    timeIndex=i;
-                    break;
-                }
-            }
-            if(timeIndex<0||hh<0||hh>23||mm<0||mm>59) continue;
+            Matcher tm=timePattern.matcher(timeText);
+            if(!tm.matches()) continue;
+            int hh=parseInt(tm.group(1),-1);
+            int mm=parseInt(tm.group(2),-1);
+            if(hh<0||hh>23||mm<0||mm>59) continue;
 
-            // Current Naver SingleChannelDailySchedule contract:
-            // div[1] = start time, div[4] = program title.
-            String title=cells.size()>4
-                ? cells.get(4).text().replaceAll("\\s+"," ").trim()
-                : "";
-
+            // Last-resort title fallback: choose a text-bearing descendant after the time.
             if(title.isEmpty()||!containsProgramText(title)||timePattern.matcher(title).matches()){
-                for(int i=timeIndex+1;i<cells.size();i++){
-                    String candidate=cells.get(i).text().replaceAll("\\s+"," ").trim();
-                    if(candidate.isEmpty()) continue;
+                for(Element cell:cells){
+                    String candidate=cell.text().replaceAll("\\s+"," ").trim();
+                    if(candidate.isEmpty()||candidate.equals(timeText)) continue;
                     if(timePattern.matcher(candidate).matches()) continue;
                     if(candidate.matches("(?i)^(재|재방송|본|본방송|[0-9]+세|전체)$")) continue;
                     if(!containsProgramText(candidate)) continue;
