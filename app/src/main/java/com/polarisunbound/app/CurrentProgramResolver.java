@@ -23,7 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class CurrentProgramResolver {
-    private static final String PREFS="polaris_current_program";
+    private static final String PREFS="polaris_current_program_v2";
     private static final long CACHE_MAX_AGE_MS=20L*60L*1000L;
 
     public static final class Result {
@@ -84,7 +84,7 @@ public final class CurrentProgramResolver {
         if("kr1".equals(id)) return "https://namu.wiki/w/KBS%202FM?from=KBS%20Cool%20FM";
         if("kr2".equals(id)) return "https://namu.wiki/w/MBC%20FM4U?from=MBC%20FM";
         if("kr3".equals(id)) return "https://namu.wiki/w/CBS%20%EC%9D%8C%EC%95%85FM?from=CBS%20FM";
-        if("kr4".equals(id)) return "https://namu.wiki/w/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4/%ED%8E%B8%EC%84%B1%ED%91%9C";
+        if("kr4".equals(id)) return "https://namu.wiki/edit/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4/%ED%8E%B8%EC%84%B1%ED%91%9C?section=2";
         if("kr6".equals(id)) return "https://namu.wiki/w/SBS%20%ED%8C%8C%EC%9B%8CFM";
         if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
         if("gallery".equals(id)) return "https://live365.com/station/Jazz-from-Gallery-41-a94394";
@@ -119,15 +119,19 @@ public final class CurrentProgramResolver {
 
         if("gallery".equals(id)) return parseGallery(id,b.toString());
         if("kiis".equals(id)) return parseKiis(id,b.toString());
+        if("kr4".equals(id)) return parseMbcStandardEdit(id,b.toString());
         return parseNamu(id,b.toString());
     }
 
     @SuppressWarnings("deprecation")
     private static String htmlText(String html){
-        String s=Html.fromHtml(html==null?"":html).toString();
-        s=s.replace('\u00a0',' ');
-        s=s.replace("&nbsp;"," ").replace("&amp;","&");
-        return s;
+        String safe=html==null?"":html;
+        safe=safe.replaceAll("(?is)<script\\b[^>]*>.*?</script>"," ")
+                 .replaceAll("(?is)<style\\b[^>]*>.*?</style>"," ");
+        String out=Html.fromHtml(safe).toString();
+        out=out.replace('\u00a0',' ');
+        out=out.replace("&nbsp;"," ").replace("&amp;","&");
+        return out;
     }
 
     private static Result parseGallery(String id,String html){
@@ -137,71 +141,244 @@ public final class CurrentProgramResolver {
         int a=low.indexOf("now playing");
         int b=low.indexOf("last played",Math.max(0,a));
         String now=(a>=0&&b>a)?text.substring(a+"now playing".length(),b).trim():"";
-        now=now.replaceAll("\\s+"," ").trim();
-        if(now.length()>96) now=now.substring(0,96).trim();
+        now=now.replaceAll("(?i)^image\\s*:?\\s*","")
+               .replaceAll("\\s+"," ").trim();
+        if(now.length()>120) now=now.substring(0,120).trim();
         if(now.isEmpty()) throw new IllegalStateException("No Gallery Now Playing");
         return new Result(station,now,"",-1,-1,System.currentTimeMillis());
     }
 
     private static Result parseNamu(String id,String html){
         String station=stationName(id);
-        String text=htmlText(html).replaceAll("[ \\t]+"," ").replaceAll("\\n+","\n");
-        Pattern p=Pattern.compile("(\\d{1,2}):(\\d{2})\\s+(.{1,140}?)\\s*(?:\\[편집\\]|편집)(?=\\s|$)",Pattern.CASE_INSENSITIVE);
-        Matcher m=p.matcher(text);
+        String text=htmlText(html).replaceAll("\\r","");
         LinkedHashMap<Integer,String> byStart=new LinkedHashMap<>();
-        while(m.find()){
-            int hh=parseInt(m.group(1),-1), mm=parseInt(m.group(2),-1);
-            if(hh<0||hh>23||mm<0||mm>59) continue;
-            String raw=cleanTitle(m.group(3));
-            if(raw.isEmpty()) continue;
 
-            if("kr3".equals(id)){
-                boolean mentionsRegion=raw.contains("서울")||raw.contains("부산")||raw.contains("대구")||raw.contains("광주");
-                if(mentionsRegion && !raw.contains("서울")) continue;
-                raw=raw.replaceAll("\\s*\\((?=[^)]*(?:서울|부산|대구|광주))[^)]*\\)\\s*$","").trim();
-            }
-
-            if(raw.length()>90) raw=raw.substring(0,90).trim();
-            int start=hh*60+mm;
-            if(!byStart.containsKey(start)) byStart.put(start,raw);
+        // NamuWiki renders schedule headings as one line ending in "편집".
+        Pattern heading=Pattern.compile(
+            "(?m)^\\s*(?:\\d+(?:\\.\\d+)*\\.?\\s*)?(\\d{1,2}):(\\d{2})\\s+([^\\n]{1,140}?)\\s*(?:\\[?편집\\]?)\\s*$",
+            Pattern.CASE_INSENSITIVE);
+        Matcher hm=heading.matcher(text);
+        while(hm.find()){
+            addNamuEntry(id,byStart,hm.group(1),hm.group(2),hm.group(3));
         }
+
+        // Fallback for pages where the heading is flattened into surrounding text.
+        if(byStart.size()<3){
+            Pattern fallback=Pattern.compile(
+                "(\\d{1,2}):(\\d{2})\\s+(.{1,120}?)\\s*(?:\\[편집\\]|편집)(?=\\s|$)",
+                Pattern.CASE_INSENSITIVE);
+            Matcher m=fallback.matcher(text);
+            while(m.find()){
+                addNamuEntry(id,byStart,m.group(1),m.group(2),m.group(3));
+            }
+        }
+
         if(byStart.isEmpty()) throw new IllegalStateException("No schedule entries for "+id);
         return selectCurrent(id,station,byStart);
     }
 
+    private static void addNamuEntry(String id,Map<Integer,String> byStart,String h,String min,String title){
+        int hh=parseInt(h,-1), mm=parseInt(min,-1);
+        if(hh<0||hh>23||mm<0||mm>59) return;
+        String raw=cleanTitle(title);
+        if(raw.isEmpty()||looksLikeTimeRange(raw)||!containsProgramText(raw)) return;
+
+        if("kr3".equals(id)){
+            boolean mentionsRegion=raw.contains("서울")||raw.contains("부산")||raw.contains("대구")||raw.contains("광주");
+            if(mentionsRegion && !raw.contains("서울")) return;
+            raw=raw.replaceAll("\\s*\\((?=[^)]*(?:서울|부산|대구|광주))[^)]*\\)\\s*$","").trim();
+        }
+
+        if(raw.length()>90) raw=raw.substring(0,90).trim();
+        int start=hh*60+mm;
+        if(!byStart.containsKey(start)) byStart.put(start,raw);
+    }
+
+    private static boolean looksLikeTimeRange(String s){
+        if(s==null) return true;
+        String x=s.trim();
+        if(x.matches("^[~\\-–—]?\\s*\\d{1,2}:\\d{2}.*")) return true;
+        if(x.matches("^.*\\d{1,2}:\\d{2}\\s*[~\\-–—]\\s*\\d{1,2}:\\d{2}.*") && !containsProgramText(x.replaceAll("\\d{1,2}:\\d{2}",""))) return true;
+        return false;
+    }
+
+    private static boolean containsProgramText(String s){
+        return s!=null && Pattern.compile("[가-힣A-Za-z]").matcher(s).find();
+    }
+
     private static Result parseKiis(String id,String html){
         String station=stationName(id);
-        String text=htmlText(html).replaceAll("\\r","").replace('\u00a0',' ');
-        Pattern times=Pattern.compile("(\\d{1,2}:\\d{2})\\s*(AM|PM)\\s*[-–~]\\s*(\\d{1,2}:\\d{2})\\s*(AM|PM)",Pattern.CASE_INSENSITIVE);
-        Matcher m=times.matcher(text);
+        String text=htmlText(html).replaceAll("\\r","");
         LinkedHashMap<Integer,String> byStart=new LinkedHashMap<>();
-        while(m.find()){
-            int start=to12HourMinutes(m.group(1),m.group(2));
-            if(start<0) continue;
-            String title=titleBefore(text,m.start());
-            title=title.replaceFirst("(?i)^Image:\\s*","")
-                       .replaceFirst("(?i)^On[- ]Air Now\\s*","")
-                       .replaceFirst("^[•*\\-]+\\s*","")
-                       .trim();
-            if(title.isEmpty()) continue;
-            if(title.length()>80) title=title.substring(Math.max(0,title.length()-80)).trim();
-            if(!byStart.containsKey(start)) byStart.put(start,title);
+        Pattern time=Pattern.compile("(\\d{1,2}:\\d{2})\\s*(AM|PM)\\s*[-–—]\\s*(\\d{1,2}:\\d{2})\\s*(AM|PM)",Pattern.CASE_INSENSITIVE);
+        String previous="";
+        for(String rawLine:text.split("\\n")){
+            String line=rawLine.replaceAll("\\s+"," ").trim();
+            if(line.isEmpty()) continue;
+            Matcher tm=time.matcher(line);
+            if(tm.find()){
+                int start=to12HourMinutes(tm.group(1),tm.group(2));
+                if(start>=0){
+                    String title=line.substring(0,tm.start()).trim();
+                    if(title.isEmpty()) title=previous;
+                    title=cleanKiisTitle(title);
+                    if(!title.isEmpty()&&!looksLikeTimeRange(title)&&containsProgramText(title))
+                        byStart.put(start,title);
+                }
+            }
+            if(!time.matcher(line).matches() && !line.matches("(?i)^(Mo|Tu|We|Th|Fr|Sa|Su|On-Air Now)$"))
+                previous=line;
         }
+
         if(byStart.isEmpty()) throw new IllegalStateException("No KIIS schedule entries");
         return selectCurrent(id,station,byStart);
     }
 
-    private static String titleBefore(String text,int pos){
-        int from=Math.max(0,pos-180);
-        String s=text.substring(from,pos).replace('\r','\n');
-        String[] lines=s.split("\\n");
-        for(int i=lines.length-1;i>=0;i--){
-            String x=lines[i].replaceAll("\\s+"," ").trim();
-            if(x.isEmpty()) continue;
-            if(x.matches("(?i).*(Mo|Tu|We|Th|Fr|Sa|Su)$")) continue;
-            return x;
+    private static String cleanKiisTitle(String title){
+        String x=title==null?"":title;
+        x=x.replaceFirst("(?i)^Image:\\s*","")
+           .replaceFirst("(?i)^On[- ]Air Now\\s*","")
+           .replaceFirst("^[•*\\-]+\\s*","")
+           .replaceAll("\\s+"," ").trim();
+        if(x.length()>80) x=x.substring(0,80).trim();
+        return x;
+    }
+
+    private static Result parseMbcStandardEdit(String id,String html){
+        String station=stationName(id);
+        String source=extractEditSource(html);
+        LinkedHashMap<Integer,String> byStart=new LinkedHashMap<>();
+
+        String[] spanText=new String[9];
+        int[] spanRows=new int[9];
+
+        for(String rawLine:source.split("\\r?\\n")){
+            String line=rawLine.trim();
+            if(!line.contains("||")) continue;
+
+            String[] row=new String[9];
+            boolean[] occupied=new boolean[9];
+            for(int c=0;c<9;c++){
+                if(spanRows[c]>0){
+                    row[c]=spanText[c];
+                    occupied[c]=true;
+                    spanRows[c]--;
+                    if(spanRows[c]==0) spanText[c]=null;
+                }
+            }
+
+            String[] cells=line.split("\\|\\|",-1);
+            int col=0;
+            for(String cell:cells){
+                if(cell==null||cell.trim().isEmpty()) continue;
+                while(col<9&&occupied[col]) col++;
+                if(col>=9) break;
+
+                int colspan=directiveNumber(cell,"<-",1);
+                int rowspan=directiveNumber(cell,"<|",1);
+                String value=cleanWikiCell(cell);
+                for(int n=0;n<colspan&&col+n<9;n++){
+                    int at=col+n;
+                    while(at<9&&occupied[at]) at++;
+                    if(at>=9) break;
+                    row[at]=value;
+                    occupied[at]=true;
+                    if(rowspan>1){
+                        spanText[at]=value;
+                        spanRows[at]=rowspan-1;
+                    }
+                }
+                col++;
+            }
+
+            int hh=parseInt(row[0],-1);
+            int mm=parseInt(row[1],-1);
+            if(hh<0||hh>23||mm<0||mm>59) continue;
+
+            int scheduleCol=mbcScheduleColumn();
+            String title=displayProgram(row[scheduleCol]);
+            if(title.isEmpty()){
+                for(int c=3;c<=6;c++){
+                    title=displayProgram(row[c]);
+                    if(!title.isEmpty()) break;
+                }
+            }
+            if(title.isEmpty()||!containsProgramText(title)) continue;
+
+            int start=hh*60+mm;
+            byStart.put(start,title);
         }
-        return "";
+
+        if(byStart.isEmpty()) throw new IllegalStateException("No MBC Standard FM table entries");
+        return selectCurrent(id,station,byStart);
+    }
+
+    private static int mbcScheduleColumn(){
+        Calendar c=Calendar.getInstance(TimeZone.getTimeZone("Asia/Seoul"));
+        int day=c.get(Calendar.DAY_OF_WEEK);
+        if(day==Calendar.SATURDAY) return 5;
+        if(day==Calendar.SUNDAY) return 6;
+        return 3;
+    }
+
+    private static int directiveNumber(String cell,String prefix,int fallback){
+        Pattern p=Pattern.compile(Pattern.quote(prefix)+"(\\d+)>");
+        Matcher m=p.matcher(cell);
+        if(m.find()) return Math.max(1,parseInt(m.group(1),fallback));
+        return fallback;
+    }
+
+    private static String extractEditSource(String html){
+        if(html==null) return "";
+        Matcher ta=Pattern.compile("(?is)<textarea[^>]*>(.*?)</textarea>").matcher(html);
+        if(ta.find()) return htmlText(ta.group(1));
+        String text=htmlText(html);
+        int at=text.indexOf("== 타임테이블 ==");
+        return at>=0?text.substring(at):text;
+    }
+
+    private static String cleanWikiCell(String cell){
+        if(cell==null) return "";
+        String x=cell;
+        x=x.replaceAll("<[^>]*>"," ")
+           .replace("[br]"," ")
+           .replace("'''","")
+           .replace("**","")
+           .replaceAll("\\{\\{\\{#[0-9A-Fa-f]+\\s*","")
+           .replace("}}}","");
+        return x.replaceAll("\\s+"," ").trim();
+    }
+
+    private static String displayProgram(String cell){
+        if(cell==null) return "";
+        String x=cell.trim();
+        if(x.isEmpty()) return "";
+
+        Matcher link=Pattern.compile("\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?\\]\\]").matcher(x);
+        String title="";
+        int end=-1;
+        if(link.find()){
+            title=(link.group(2)!=null?link.group(2):link.group(1)).trim();
+            end=link.end();
+        } else {
+            title=x.replaceAll("\\[\\*.*"," ")
+                   .replaceAll("\\[[^]]*]"," ")
+                   .replaceAll("\\s+"," ").trim();
+        }
+
+        if(end>=0&&end<x.length()){
+            String tail=x.substring(end)
+                .replaceAll("\\[\\*.*"," ")
+                .replaceAll("\\[[^]]*]"," ")
+                .replaceAll("\\s+"," ").trim();
+            if(tail.matches("(?i)^[0-9].*부.*")||tail.matches("(?i)^(1|2|3|4)[, ]+.*부.*"))
+                title=(title+" "+tail).trim();
+        }
+
+        if(title.matches("(?i)^(서울|춘천|원주|강원영동|충북|대전|전주|광주|목포|여수|대구|안동|포항|부산|울산|경남|제주)$"))
+            return "";
+        if(title.length()>90) title=title.substring(0,90).trim();
+        return title;
     }
 
     private static Result selectCurrent(String id,String station,Map<Integer,String> source){
