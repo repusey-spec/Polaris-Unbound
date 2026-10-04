@@ -219,6 +219,10 @@ public class MainActivity extends AppCompatActivity {
             status=null;
             addMp3ProgressLine();
         }else{
+            progressHandler.removeCallbacks(progressTick);
+            mp3Progress=null;
+            mp3Elapsed=null;
+            mp3Duration=null;
             status=new TextView(this);
             status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비");
             status.setTextSize(16);
