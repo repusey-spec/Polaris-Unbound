@@ -59,8 +59,32 @@ jobs:
               assert str(data.get("statusCode", "")).lower() == "success", (name, data.get("statusCode"))
               html = "".join(data.get("dataHtml") or [])
               assert html, f"{name}: empty dataHtml"
-              assert re.search(r"\b\d{1,2}:\d{2}\b", html), f"{name}: no schedule time"
-              print(name, "OK", sid, len(html))
+
+              entries = []
+              for row in re.findall(r"(?is)<li\\b[^>]*>(.*?)</li>", html):
+                  cells = []
+                  for raw_cell in re.findall(r"(?is)<div\\b[^>]*>(.*?)</div>", row):
+                      txt = re.sub(r"(?is)<[^>]+>", " ", raw_cell)
+                      txt = re.sub(r"\\s+", " ", txt).strip()
+                      cells.append(txt)
+                  time_idx = next((i for i, x in enumerate(cells) if re.fullmatch(r"\\d{1,2}:\\d{2}", x)), -1)
+                  if time_idx < 0:
+                      continue
+                  title = cells[4].strip() if len(cells) > 4 else ""
+                  if title and re.search(r"[A-Za-z가-힣]", title):
+                      entries.append((cells[time_idx], title))
+
+              assert entries, f"{name}: Java-compatible parser found zero entries"
+              now = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
+              now_min = now.hour * 60 + now.minute
+              current = None
+              for hhmm, title in entries:
+                  h, m = map(int, hhmm.split(":"))
+                  if h * 60 + m <= now_min:
+                      current = (hhmm, title)
+              if current is None:
+                  current = entries[-1]
+              print(name, "OK", sid, "rows", len(entries), "current", current[0], current[1])
           PY
       - run: gradle assembleDebug
       - name: Verify APK signature
