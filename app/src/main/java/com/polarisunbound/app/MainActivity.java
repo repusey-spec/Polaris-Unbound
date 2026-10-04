@@ -576,7 +576,7 @@ public class MainActivity extends AppCompatActivity {
 
     private Bitmap loadAlbumArt(long albumId,int targetPx){
         if(albumId<=0) return null;
-        android.net.Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,albumId);
+        android.net.Uri uri=ContentUris.withAppendedId(android.net.Uri.parse("content://media/external/audio/albumart"),albumId);
         try(InputStream in=getContentResolver().openInputStream(uri)){
             if(in==null) return null;
             Bitmap b=BitmapFactory.decodeStream(in);
