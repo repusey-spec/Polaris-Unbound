@@ -59,9 +59,16 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private static final String MP3_PREFS="polaris_mp3";
     private static final String PREF_MP3_RECENT="recent_ids";
     private static final String PREF_MP3_FAVORITES="favorite_ids";
+    private static final String PREF_MP3_REPEAT_MODE="repeat_mode";
+    private static final String PREF_MP3_SHUFFLE="shuffle";
     private final List<Long> currentMp3Queue=new ArrayList<>();
     private final android.util.LruCache<Long,Bitmap> mp3AlbumArtCache=new android.util.LruCache<>(48);
     private int currentMp3Index=-1;
+    private long currentMp3Id=-1L;
+    private int mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
+    private boolean mp3Shuffle=false;
+    private boolean mp3EndHandled=false;
+    private final Random mp3Random=new Random();
     private long lastAutoResumeAt=0L;
     private AudioManager audioManager;
     private AudioFocusRequest focusRequest;
@@ -114,12 +121,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
         session=new MediaSessionCompat(this,"PolarisUnbound");
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mp3RepeatMode=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getInt(PREF_MP3_REPEAT_MODE,PlaybackStateCompat.REPEAT_MODE_NONE);
+        mp3Shuffle=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getBoolean(PREF_MP3_SHUFFLE,false);
+        session.setRepeatMode(mp3RepeatMode);
+        session.setShuffleMode(mp3Shuffle ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
         session.setCallback(new MediaSessionCompat.Callback(){
             @Override public void onPlayFromMediaId(String id,Bundle extras){
                 trace("SERVICE onPlayFromMediaId: "+id);
                 try{
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                     currentRadioId=id;
+                    currentMp3Id=-1L;
                     getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
                     enterPlaybackForeground(TITLES.get(id));
                     retryCount=0;
@@ -140,9 +154,27 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     publishState();
                 }
             }
+            @Override public void onSetRepeatMode(int repeatMode){
+                if(repeatMode!=PlaybackStateCompat.REPEAT_MODE_ONE &&
+                   repeatMode!=PlaybackStateCompat.REPEAT_MODE_ALL)
+                    repeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
+                mp3RepeatMode=repeatMode;
+                getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+                    .putInt(PREF_MP3_REPEAT_MODE,mp3RepeatMode).apply();
+                session.setRepeatMode(mp3RepeatMode);
+                trace("MP3 repeat mode="+mp3RepeatMode);
+            }
+            @Override public void onSetShuffleMode(int shuffleMode){
+                mp3Shuffle=shuffleMode!=PlaybackStateCompat.SHUFFLE_MODE_NONE;
+                getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+                    .putBoolean(PREF_MP3_SHUFFLE,mp3Shuffle).apply();
+                session.setShuffleMode(mp3Shuffle ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
+                trace("MP3 shuffle="+mp3Shuffle);
+            }
             @Override public void onStop(){
                 userStopped=true;
                 currentRadioId=null;
+                currentMp3Id=-1L;
                 retryCount=0;
                 retryHandler.removeCallbacksAndMessages(null);
                 leavePlaybackForeground();
@@ -153,7 +185,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         });
         player.addListener(new Player.Listener(){
             @Override public void onIsPlayingChanged(boolean playing){ publishState(); }
-            @Override public void onPlaybackStateChanged(int state){ publishState(); }
+            @Override public void onPlaybackStateChanged(int state){
+                publishState();
+                if(state==Player.STATE_ENDED && currentMp3Id>=0 && !mp3EndHandled){
+                    mp3EndHandled=true;
+                    handleMp3Ended();
+                }
+            }
             @Override public void onPlayerError(PlaybackException error){
                 String msg="Media3 "+error.getErrorCodeName()+": "+error.getMessage();
                 Throwable cause=error;
@@ -230,7 +268,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void skipCurrent(int delta){
         if(currentRadioId!=null) skipRadio(delta);
-        else skipMp3(delta);
+        else if(currentMp3Id>=0 || !currentMp3Queue.isEmpty()) skipMp3(delta);
     }
 
     private void skipRadio(int delta){
@@ -242,6 +280,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         String id=RADIO_ORDER[next];
         trace("RADIO skip "+currentRadioId+" -> "+id);
         currentRadioId=id;
+        currentMp3Id=-1L;
         getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
         retryCount=0;
         userStopped=false;
@@ -345,21 +384,50 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void playLocalAudio(String id){
         try{
             long mediaId=Long.parseLong(id.substring(4));
-            currentRadioId=null;
-            retryCount=0;
-            userStopped=false;
-            retryHandler.removeCallbacksAndMessages(null);
+            ensureMp3Queue(mediaId);
+            playLocalAudioId(mediaId);
+        }catch(Exception e){
+            publishError("local audio: "+e.getMessage());
+        }
+    }
 
+    private void ensureMp3Queue(long mediaId){
+        if(currentMp3Queue.isEmpty() || !currentMp3Queue.contains(mediaId)){
             currentMp3Queue.clear();
             currentMp3Queue.addAll(loadAllMp3Ids());
-            currentMp3Index=currentMp3Queue.indexOf(mediaId);
+        }
+        currentMp3Index=currentMp3Queue.indexOf(mediaId);
+        if(currentMp3Index<0 && !currentMp3Queue.isEmpty()){
+            currentMp3Queue.add(mediaId);
+            currentMp3Index=currentMp3Queue.size()-1;
+        }
+    }
+
+    private void playLocalAudioId(long mediaId){
+        try{
+            currentRadioId=null;
+            currentMp3Id=mediaId;
+            retryCount=0;
+            userStopped=false;
+            mp3EndHandled=false;
+            retryHandler.removeCallbacksAndMessages(null);
+
+            if(currentMp3Queue.isEmpty() || !currentMp3Queue.contains(mediaId))
+                ensureMp3Queue(mediaId);
+            else
+                currentMp3Index=currentMp3Queue.indexOf(mediaId);
 
             Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
             String title="Local audio";
             String artist="";
             String album="";
             long duration=0L;
-            String[] projection={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM,MediaStore.Audio.Media.DURATION};
+            String[] projection={
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.DURATION
+            };
             try(Cursor c=getContentResolver().query(uri,projection,null,null,null)){
                 if(c!=null && c.moveToFirst()){
                     title=safe(c.getString(0));
@@ -368,11 +436,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     duration=Math.max(0L,c.getLong(3));
                 }
             }
+
             rememberRecent(mediaId);
             enterPlaybackForeground(title);
             final String t=title, a=artist, al=album;
             final long dur=duration;
             final Bitmap art=embeddedArt(uri);
+
             runOnPlayerThread(() -> {
                 try{
                     MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
@@ -383,23 +453,93 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         .putLong(MediaMetadataCompat.METADATA_KEY_DURATION,dur);
                     if(art!=null) mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,art);
                     session.setMetadata(mb.build());
+
                     player.setMediaItem(MediaItem.fromUri(uri));
                     player.prepare();
                     if(requestPlaybackFocus()) player.play();
                     publishState();
-                }catch(Throwable e){ publishError("local audio: "+e); }
+                    trace("MP3 play id="+mediaId+" index="+currentMp3Index+"/"+currentMp3Queue.size());
+                }catch(Throwable e){
+                    publishError("local audio: "+e);
+                }
             });
         }catch(Exception e){
             publishError("local audio: "+e.getMessage());
         }
     }
 
-    private void skipMp3(int delta){
-        if(currentMp3Queue.isEmpty()) currentMp3Queue.addAll(loadAllMp3Ids());
+    private int randomMp3Index(){
+        if(currentMp3Queue.isEmpty()) return -1;
+        if(currentMp3Queue.size()==1) return 0;
+        int next=currentMp3Index;
+        for(int tries=0;tries<8 && next==currentMp3Index;tries++)
+            next=mp3Random.nextInt(currentMp3Queue.size());
+        if(next==currentMp3Index)
+            next=(currentMp3Index+1)%currentMp3Queue.size();
+        return next;
+    }
+
+    private void handleMp3Ended(){
+        if(currentMp3Queue.isEmpty()){
+            currentMp3Queue.addAll(loadAllMp3Ids());
+            currentMp3Index=currentMp3Queue.indexOf(currentMp3Id);
+        }
         if(currentMp3Queue.isEmpty()) return;
-        if(currentMp3Index<0) currentMp3Index=0;
-        currentMp3Index=(currentMp3Index+delta+currentMp3Queue.size())%currentMp3Queue.size();
-        playLocalAudio("mp3:"+currentMp3Queue.get(currentMp3Index));
+
+        if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ONE){
+            trace("MP3 end -> repeat one");
+            playLocalAudioId(currentMp3Id);
+            return;
+        }
+
+        if(mp3Shuffle){
+            int next=randomMp3Index();
+            if(next>=0){
+                currentMp3Index=next;
+                trace("MP3 end -> shuffle index="+next);
+                playLocalAudioId(currentMp3Queue.get(next));
+            }
+            return;
+        }
+
+        int next=currentMp3Index+1;
+        if(next<currentMp3Queue.size()){
+            currentMp3Index=next;
+            trace("MP3 end -> next index="+next);
+            playLocalAudioId(currentMp3Queue.get(next));
+            return;
+        }
+
+        if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ALL){
+            currentMp3Index=0;
+            trace("MP3 end -> repeat all");
+            playLocalAudioId(currentMp3Queue.get(0));
+            return;
+        }
+
+        trace("MP3 end -> queue finished");
+        abandonPlaybackFocus();
+        leavePlaybackForeground();
+        publishState();
+    }
+
+    private void skipMp3(int delta){
+        if(currentMp3Queue.isEmpty()){
+            currentMp3Queue.addAll(loadAllMp3Ids());
+            currentMp3Index=currentMp3Queue.indexOf(currentMp3Id);
+        }
+        if(currentMp3Queue.isEmpty()) return;
+
+        int next;
+        if(mp3Shuffle && delta>0){
+            next=randomMp3Index();
+        }else{
+            if(currentMp3Index<0) currentMp3Index=0;
+            next=(currentMp3Index+delta+currentMp3Queue.size())%currentMp3Queue.size();
+        }
+        if(next<0) return;
+        currentMp3Index=next;
+        playLocalAudioId(currentMp3Queue.get(next));
     }
 
     private String safe(String s){ return s==null ? "" : s; }
@@ -882,7 +1022,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         float speed=state==PlaybackStateCompat.STATE_PLAYING?1f:0f;
 
         session.setPlaybackState(new PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND|PlaybackStateCompat.ACTION_SEEK_TO)
+            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND|PlaybackStateCompat.ACTION_SEEK_TO|PlaybackStateCompat.ACTION_SET_REPEAT_MODE|PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE)
             .setState(state,position,speed,android.os.SystemClock.elapsedRealtime()).build());
     }
 
@@ -904,7 +1044,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                             enterPlaybackForeground(TITLES.get(last));
                             startRadio(last);
                         }
-                    },4000L);
+                    },6000L);
                 }
             }
         }
