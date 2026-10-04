@@ -66,10 +66,10 @@ jobs:
               assert html, f"{name}: empty dataHtml"
 
               entries = []
-              rows = re.findall(r'(?is)<li[^>]*class=["\\'][^"\\']*\\blist\\b[^"\\']*["\\'][^>]*>(.*?)</li>', html)
+              rows = re.findall(r"(?is)<li[^>]*class=[\\\"'][^\\\"']*\\blist\\b[^\\\"']*[\\\"'][^>]*>(.*?)</li>", html)
               for row in rows:
-                  tm = re.search(r'(?is)<div[^>]*class=["\\'][^"\\']*\\btime\\b[^"\\']*["\\'][^>]*>\\s*(\\d{1,2}:\\d{2})\\s*</div>', row)
-                  tt = re.search(r'(?is)<div[^>]*class=["\\'][^"\\']*\\bpr_title\\b[^"\\']*["\\'][^>]*>(.*?)</div>', row)
+                  tm = re.search(r"(?is)<div[^>]*class=[\\\"'][^\\\"']*\\btime\\b[^\\\"']*[\\\"'][^>]*>\\s*(\\d{1,2}:\\d{2})\\s*</div>", row)
+                  tt = re.search(r"(?is)<div[^>]*class=[\\\"'][^\\\"']*\\bpr_title\\b[^\\\"']*[\\\"'][^>]*>(.*?)</div>", row)
                   if not tm or not tt:
                       continue
                   title = re.sub(r"(?is)<[^>]+>", " ", tt.group(1))
