@@ -7,6 +7,10 @@ import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -194,27 +198,21 @@ public final class CurrentProgramResolver {
     private static Result parseNaverSchedule(String id,String html){
         String station=stationName(id);
         LinkedHashMap<Integer,String> byStart=new LinkedHashMap<>();
-
-        Pattern rowPattern=Pattern.compile("(?is)<li\\b[^>]*>(.*?)</li>");
-        Pattern divPattern=Pattern.compile("(?is)<div\\b[^>]*>(.*?)</div>");
         Pattern timePattern=Pattern.compile("^(\\d{1,2}):(\\d{2})$");
 
-        Matcher rowMatcher=rowPattern.matcher(html);
-        while(rowMatcher.find()){
-            String row=rowMatcher.group(1);
-            List<String> cells=new ArrayList<>();
-            Matcher divMatcher=divPattern.matcher(row);
-            while(divMatcher.find()){
-                String value=htmlText(divMatcher.group(1)).replaceAll("\\s+"," ").trim();
-                cells.add(value);
-            }
+        Document doc=Jsoup.parseBodyFragment(html);
+        Elements rows=doc.select("li.list");
+        if(rows.isEmpty()) rows=doc.select("li");
 
+        for(Element row:rows){
+            Elements cells=row.select("div");
             if(cells.isEmpty()) continue;
 
             int timeIndex=-1;
             int hh=-1, mm=-1;
             for(int i=0;i<cells.size();i++){
-                Matcher tm=timePattern.matcher(cells.get(i));
+                String text=cells.get(i).text().replaceAll("\\s+"," ").trim();
+                Matcher tm=timePattern.matcher(text);
                 if(tm.matches()){
                     hh=parseInt(tm.group(1),-1);
                     mm=parseInt(tm.group(2),-1);
@@ -224,14 +222,15 @@ public final class CurrentProgramResolver {
             }
             if(timeIndex<0||hh<0||hh>23||mm<0||mm>59) continue;
 
-            String title="";
-            // Naver SingleChannelDailySchedule: time = div[1], title = div[4].
-            if(cells.size()>4) title=cells.get(4).trim();
+            // Current Naver SingleChannelDailySchedule contract:
+            // div[1] = start time, div[4] = program title.
+            String title=cells.size()>4
+                ? cells.get(4).text().replaceAll("\\s+"," ").trim()
+                : "";
 
-            // Defensive fallback if Naver changes wrapper count but keeps the row text.
             if(title.isEmpty()||!containsProgramText(title)||timePattern.matcher(title).matches()){
                 for(int i=timeIndex+1;i<cells.size();i++){
-                    String candidate=cells.get(i).trim();
+                    String candidate=cells.get(i).text().replaceAll("\\s+"," ").trim();
                     if(candidate.isEmpty()) continue;
                     if(timePattern.matcher(candidate).matches()) continue;
                     if(candidate.matches("(?i)^(재|재방송|본|본방송|[0-9]+세|전체)$")) continue;
