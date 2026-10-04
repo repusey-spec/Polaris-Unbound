@@ -48,7 +48,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private MediaSessionCompat session;
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
+    private final ExecutorService programExecutor=Executors.newSingleThreadExecutor();
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private String currentRadioId=null;
     private int retryCount=0;
     private boolean userStopped=false;
@@ -164,8 +166,59 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         setSessionToken(session.getSessionToken());
         session.setActive(true);
         publishState();
+        startProgramRefreshLoop();
     }
 
+
+
+    private void startProgramRefreshLoop(){
+        long stagger=0L;
+        for(String id:RADIO_ORDER){
+            if("kr5".equals(id)) continue;
+            final String stationId=id;
+            programHandler.postDelayed(() -> refreshProgramAsync(stationId),stagger);
+            stagger+=350L;
+        }
+    }
+
+    private void refreshProgramAsync(final String id){
+        if(id==null||"kr5".equals(id)) return;
+        programExecutor.execute(() -> {
+            try{
+                CurrentProgramResolver.Result old=CurrentProgramResolver.cached(this,id);
+                String oldTitle=old==null ? null : old.aaTitle();
+                CurrentProgramResolver.Result r=CurrentProgramResolver.resolve(id);
+                CurrentProgramResolver.save(this,id,r);
+                boolean changed=oldTitle==null || !oldTitle.equals(r.aaTitle());
+                programHandler.post(() -> {
+                    trace("PROGRAM "+id+" -> "+r.aaTitle()+(changed?" [changed]":""));
+                    if(changed) notifyChildrenChanged("radio");
+                    if(changed && id.equals(currentRadioId)) applyCurrentRadioMetadata(id);
+                    long delay=CurrentProgramResolver.nextRefreshDelay(id,r);
+                    programHandler.postDelayed(() -> refreshProgramAsync(id),delay);
+                });
+            }catch(Exception e){
+                trace("PROGRAM resolver error: "+id+" / "+e);
+                programHandler.postDelayed(() -> refreshProgramAsync(id),10L*60L*1000L);
+            }
+        });
+    }
+
+    private String radioProgramTitle(String id){
+        CurrentProgramResolver.Result r=CurrentProgramResolver.cached(this,id);
+        if(r==null) return TITLES.get(id);
+        String title=r.aaTitle();
+        return title==null||title.trim().isEmpty()?TITLES.get(id):title;
+    }
+
+    private void applyCurrentRadioMetadata(String id){
+        if(id==null||!id.equals(currentRadioId)||!STREAMS.containsKey(id)) return;
+        MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE,radioProgramTitle(id))
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,TITLES.get(id))
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,id,256));
+        session.setMetadata(mb.build());
+    }
 
 
     private void skipCurrent(int delta){
@@ -536,8 +589,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("Gallery player enter: "+url);
         try{
             MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE,radioProgramTitle("gallery"))
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,TITLES.get("gallery"))
                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,"gallery",256));
             session.setMetadata(mb.build());
 
@@ -634,9 +687,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void playUrlOnMain(String url,String title,String subtitle){
         trace("PLAYER enter: "+title);
         try{
+        String metaTitle=title;
+        String metaArtist=subtitle;
+        if(currentRadioId!=null && STREAMS.containsKey(currentRadioId)){
+            metaTitle=radioProgramTitle(currentRadioId);
+            metaArtist=TITLES.get(currentRadioId);
+        }
         MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE,title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,subtitle);
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE,metaTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,metaArtist);
         if(currentRadioId!=null && STREAMS.containsKey(currentRadioId))
             mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,currentRadioId,256));
         session.setMetadata(mb.build());
@@ -726,10 +785,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         } else if(parent.equals("radio")){
             for(int slot=0;slot<6;slot++){
                 String id=presetRadioId(slot);
-                x.add(item(id,TITLES.get(id),"Preset "+(slot+1)));
+                x.add(item(id,radioProgramTitle(id),TITLES.get(id)+" · Preset "+(slot+1)));
             }
-            x.add(item("kiis","102.7 KIIS-FM","Los Angeles"));
-            x.add(item("gallery","Jazz from Gallery 41","San Francisco Bay"));
+            x.add(item("kiis",radioProgramTitle("kiis"),TITLES.get("kiis")));
+            x.add(item("gallery",radioProgramTitle("gallery"),TITLES.get("gallery")));
         } else if(parent.equals("mp3")){
             x.add(folder("mp3_recent","최근 재생"));
             x.add(folder("mp3_folders","폴더"));
@@ -767,9 +826,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     @Override public void onDestroy(){
         retryHandler.removeCallbacksAndMessages(null);
+        programHandler.removeCallbacksAndMessages(null);
         abandonPlaybackFocus();
         if(player!=null) player.release();
         resolver.shutdownNow();
+        programExecutor.shutdownNow();
         if(session!=null) session.release();
         super.onDestroy();
     }

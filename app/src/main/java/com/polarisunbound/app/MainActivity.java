@@ -41,7 +41,6 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout pageHost;
     private TextView scheduleView;
     private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
-    private final Handler galleryHandler=new Handler(Looper.getMainLooper());
     private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
     private String currentPage="home";
@@ -164,14 +163,13 @@ public class MainActivity extends AppCompatActivity {
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         status.setText(label+" 연결 중…");
-        galleryHandler.removeCallbacksAndMessages(null);
         if(id!=null && id.startsWith("mp3:")){
             selectedRadioId=null;
             scheduleHandler.removeCallbacksAndMessages(null);
         }else{
             selectedRadioId=id;
+            scheduleHandler.removeCallbacksAndMessages(null);
             refreshSchedule(id);
-            if("gallery".equals(id)) scheduleGalleryRefresh();
         }
         try{ controller.getTransportControls().playFromMediaId(id,null); }
         catch(Throwable e){ status.setText("재생 요청 오류"); }
@@ -363,7 +361,6 @@ public class MainActivity extends AppCompatActivity {
     private void showMp3(){
         selectedRadioId=null;
         scheduleHandler.removeCallbacksAndMessages(null);
-        galleryHandler.removeCallbacksAndMessages(null);
         currentPage="mp3"; base("MP3");
         if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
             TextView t=new TextView(this); t.setText("음악 권한을 허용한 뒤 MP3 메뉴를 다시 열어주세요."); t.setTextSize(18); t.setTextColor(Color.WHITE); body.addView(t); requestAudioPermission(); return;
@@ -485,90 +482,54 @@ public class MainActivity extends AppCompatActivity {
         p.edit().putStringSet("favorite_ids",set).apply();
     }
 
-    private void scheduleGalleryRefresh(){
-        galleryHandler.removeCallbacksAndMessages(null);
-        if(!"gallery".equals(selectedRadioId)) return;
-        galleryHandler.postDelayed(()->{
-            if("gallery".equals(selectedRadioId)){
-                refreshSchedule("gallery");
-                scheduleGalleryRefresh();
-            }
-        },30000L);
-    }
-
     private void addSchedulePanel(){
         scheduleView=new TextView(this); scheduleView.setText("편성정보"); scheduleView.setTextSize(17);
         scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(12,24,12,20);
         body.addView(scheduleView,new LinearLayout.LayoutParams(-1,-2));
         if(selectedRadioId!=null) refreshSchedule(selectedRadioId);
-        scheduleNextRefresh();
-    }
-    private void scheduleNextRefresh(){
-        scheduleHandler.removeCallbacksAndMessages(null);
-        Calendar c=Calendar.getInstance(); int m=c.get(Calendar.MINUTE), sec=c.get(Calendar.SECOND);
-        int[] marks={60}; int next=60;
-        for(int x:marks) if(x>m){ next=x; break; }
-        long delay=((next-m)*60L-sec)*1000L; if(delay<1000) delay=1000;
-        scheduleHandler.postDelayed(()->{ if(selectedRadioId!=null) refreshSchedule(selectedRadioId); scheduleNextRefresh(); },delay);
-    }
-    private String scheduleUrl(String id){
-        if("kr1".equals(id)) return "https://namu.wiki/w/KBS%202FM?from=KBS%20Cool%20FM";
-        if("kr2".equals(id)) return "https://namu.wiki/w/MBC%20FM4U?from=MBC%20FM";
-        if("kr3".equals(id)) return "https://namu.wiki/w/CBS%20%EC%9D%8C%EC%95%85FM?from=CBS%20FM";
-        if("kr4".equals(id)) return "https://namu.wiki/w/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4/%ED%8E%B8%EC%84%B1%ED%91%9C";
-        if("kr6".equals(id)) return "https://namu.wiki/w/SBS%20%ED%8C%8C%EC%9B%8CFM";
-        if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
-        if("gallery".equals(id)) return "https://live365.com/station/Jazz-from-Gallery-41-a94394";
-        return null;
     }
     private void refreshSchedule(final String id){
-        final TextView target=scheduleView; if(target==null) return;
-        if("kr5".equals(id)){ target.setText("102.7 AFN EagleFM"); return; }
-        target.setText("편성정보 불러오는 중…");
-        scheduleExecutor.execute(()->{
-            String line;
-            try{
-                HttpURLConnection con=(HttpURLConnection)new URL(scheduleUrl(id)).openConnection();
-                con.setConnectTimeout(7000); con.setReadTimeout(7000); con.setRequestProperty("User-Agent","Mozilla/5.0");
-                StringBuilder b=new StringBuilder();
-                try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){ String x; while((x=r.readLine())!=null) b.append(x).append(' '); }
-                if("gallery".equals(id)) line=parseGalleryNowPlaying(b.toString());
-                else line=parseSchedule(id,b.toString());
-            }catch(Exception e){ line="편성정보를 불러오지 못했습니다"; }
-            final String out=line; runOnUiThread(()->{ if(scheduleView==target && id.equals(selectedRadioId)) target.setText(out); });
-        });
-    }
-    private String parseGalleryNowPlaying(String html){
-        String text=html.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
-        String low=text.toLowerCase(Locale.US);
-        int a=low.indexOf("now playing"), b=low.indexOf("last played",Math.max(0,a));
-        String now=(a>=0 && b>a) ? text.substring(a+"now playing".length(),b).trim() : "";
-        if(now.length()>180) now=now.substring(0,180).trim();
-        SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US);
-        f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles"));
-        return "Jazz from Gallery 41  |  SF "+f.format(new Date())+"\n"+(now.isEmpty()?"Now Playing 정보를 불러오지 못했습니다":now);
-    }
+        final TextView target=scheduleView;
+        if(target==null) return;
 
-    private String parseSchedule(String id,String html){
-        String text=html.replaceAll("(?is)<script.*?</script>"," ").replaceAll("(?is)<style.*?</style>"," ").replaceAll("(?is)<[^>]+>"," ").replace("&nbsp;"," ").replace("&amp;","&").replaceAll("\\s+"," ").trim();
-        if("kr6".equals(id)){
-            text=text.replaceAll("(?i)SBS 라이브"," ").replaceAll("(?i)인인권리의 편편투데이"," ")
-                .replaceAll("(?i)헤더 메뉴|본문 콘텐츠|푸터 메뉴|플레이어 키보드 단축키 안내"," ")
-                .replaceAll("(?i)재생/정지|영상 10초 앞으로|영상 10초 뒤로"," ").replaceAll("\\s+"," ").trim();
+        CurrentProgramResolver.Result cached=CurrentProgramResolver.cached(this,id);
+        if(cached!=null) target.setText(cached.phoneText(id));
+        else target.setText("편성정보 불러오는 중…");
+
+        if("kr5".equals(id)){
+            target.setText(CurrentProgramResolver.stationName(id));
+            return;
         }
-        String station="kiis".equals(id)?"102.7 KIIS-FM":("gallery".equals(id)?"Jazz from Gallery 41":RADIO_NAMES[Math.max(0,Integer.parseInt(id.substring(2))-1)]);
-        String now="";
-        java.util.regex.Matcher m=java.util.regex.Pattern.compile("(.{0,70}?)(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?\\s*(?:-|~|–)\\s*\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)(.{0,70})",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);
-        if(m.find()) now=(m.group(1)+" "+m.group(2)+" "+m.group(3)).replaceAll("\\s+"," ").trim();
-        if(now.length()>150) now=now.substring(0,150);
-        if(now.isEmpty()) now="현재 프로그램 정보 확인 중";
-        String out=station+"  |  "+now;
-        if("kiis".equals(id)||"gallery".equals(id)){ SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US); f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles")); out+="  |  현지시간 "+f.format(new Date()); }
-        return out;
+
+        scheduleExecutor.execute(()->{
+            CurrentProgramResolver.Result result=null;
+            String out;
+            try{
+                result=CurrentProgramResolver.resolve(id);
+                CurrentProgramResolver.save(MainActivity.this,id,result);
+                out=result.phoneText(id);
+            }catch(Exception e){
+                CurrentProgramResolver.Result fallback=CurrentProgramResolver.cached(MainActivity.this,id);
+                out=fallback!=null ? fallback.phoneText(id) : "편성정보를 불러오지 못했습니다";
+            }
+
+            final CurrentProgramResolver.Result finalResult=result;
+            final String finalOut=out;
+            runOnUiThread(()->{
+                if(scheduleView==target && id.equals(selectedRadioId)) target.setText(finalOut);
+                if(id.equals(selectedRadioId)){
+                    scheduleHandler.removeCallbacksAndMessages(null);
+                    long delay=CurrentProgramResolver.nextRefreshDelay(id,finalResult);
+                    scheduleHandler.postDelayed(()->{
+                        if(id.equals(selectedRadioId)) refreshSchedule(id);
+                    },delay);
+                }
+            });
+        });
     }
     @Override public void onBackPressed(){ super.onBackPressed(); }
     @Override protected void onDestroy(){
-        scheduleHandler.removeCallbacksAndMessages(null); galleryHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
+        scheduleHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
         if(browser!=null && browser.isConnected()) browser.disconnect(); super.onDestroy();
     }
 }

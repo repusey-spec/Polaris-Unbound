@@ -7,8 +7,8 @@ android {
         applicationId = "com.polarisunbound.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.25"
+        versionCode = 26
+        versionName = "0.26"
     }
 }
 
