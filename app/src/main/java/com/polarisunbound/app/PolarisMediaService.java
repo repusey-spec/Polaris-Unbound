@@ -133,6 +133,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onFastForward(){ skipCurrent(1); }
             @Override public void onRewind(){ skipCurrent(-1); }
             @Override public void onPause(){ player.pause(); publishState(); }
+            @Override public void onSeekTo(long pos){
+                if(player!=null){
+                    player.seekTo(Math.max(0L,pos));
+                    publishState();
+                }
+            }
             @Override public void onStop(){
                 userStopped=true;
                 currentRadioId=null;
@@ -351,17 +357,20 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             String title="Local audio";
             String artist="";
             String album="";
-            String[] projection={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+            long duration=0L;
+            String[] projection={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM,MediaStore.Audio.Media.DURATION};
             try(Cursor c=getContentResolver().query(uri,projection,null,null,null)){
                 if(c!=null && c.moveToFirst()){
                     title=safe(c.getString(0));
                     artist=safe(c.getString(1));
                     album=safe(c.getString(2));
+                    duration=Math.max(0L,c.getLong(3));
                 }
             }
             rememberRecent(mediaId);
             enterPlaybackForeground(title);
             final String t=title, a=artist, al=album;
+            final long dur=duration;
             final Bitmap art=embeddedArt(uri);
             runOnPlayerThread(() -> {
                 try{
@@ -369,7 +378,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,"mp3:"+mediaId)
                         .putString(MediaMetadataCompat.METADATA_KEY_TITLE,t)
                         .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,a)
-                        .putString(MediaMetadataCompat.METADATA_KEY_ALBUM,al);
+                        .putString(MediaMetadataCompat.METADATA_KEY_ALBUM,al)
+                        .putLong(MediaMetadataCompat.METADATA_KEY_DURATION,dur);
                     if(art!=null) mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,art);
                     session.setMetadata(mb.build());
                     player.setMediaItem(MediaItem.fromUri(uri));
@@ -716,9 +726,16 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(player!=null && player.isPlaying()) state=PlaybackStateCompat.STATE_PLAYING;
         else if(player!=null && player.getPlaybackState()==Player.STATE_BUFFERING) state=PlaybackStateCompat.STATE_BUFFERING;
         else if(player!=null && player.getPlaybackState()==Player.STATE_READY) state=PlaybackStateCompat.STATE_PAUSED;
+
+        long position=0L;
+        if(player!=null){
+            try{ position=Math.max(0L,player.getCurrentPosition()); }catch(Exception ignored){}
+        }
+        float speed=state==PlaybackStateCompat.STATE_PLAYING?1f:0f;
+
         session.setPlaybackState(new PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND)
-            .setState(state,0,1f).build());
+            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND|PlaybackStateCompat.ACTION_SEEK_TO)
+            .setState(state,position,speed,android.os.SystemClock.elapsedRealtime()).build());
     }
 
     @Override public BrowserRoot onGetRoot(String pkg,int uid,Bundle hints){
