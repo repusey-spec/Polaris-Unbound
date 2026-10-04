@@ -791,12 +791,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(item("kiis",radioProgramTitle("kiis"),TITLES.get("kiis")));
             x.add(item("gallery",radioProgramTitle("gallery"),TITLES.get("gallery")));
         } else if(parent.equals("mp3")){
+            x.add(folder("mp3_favorites","즐겨찾기"));
             x.add(folder("mp3_recent","최근 재생"));
-            x.add(folder("mp3_folders","폴더"));
             x.add(folder("mp3_albums","앨범"));
             x.add(folder("mp3_artists","아티스트"));
+            x.add(folder("mp3_folders","폴더"));
             x.add(folder("mp3_all","전체 곡"));
-            x.add(folder("mp3_favorites","즐겨찾기"));
         } else if(parent.equals("mp3_recent")){
             x.addAll(loadAudioByIds(recentIds()));
         } else if(parent.equals("mp3_folders")){
