@@ -23,7 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class CurrentProgramResolver {
-    private static final String PREFS="polaris_current_program";
+    private static final String PREFS="polaris_current_program_v2";
     private static final long CACHE_MAX_AGE_MS=20L*60L*1000L;
 
     public static final class Result {
@@ -267,7 +267,7 @@ public final class CurrentProgramResolver {
                 }
             }
 
-            String[] cells=line.split("\\\\|\\\\|",-1);
+            String[] cells=line.split("\\|\\|",-1);
             int col=0;
             for(String cell:cells){
                 if(cell==null||cell.trim().isEmpty()) continue;
@@ -354,7 +354,7 @@ public final class CurrentProgramResolver {
         String x=cell.trim();
         if(x.isEmpty()) return "";
 
-        Matcher link=Pattern.compile("\\\\[\\\\[([^\\]|]+)(?:\\|([^\\]]+))?\\\\]\\\\]").matcher(x);
+        Matcher link=Pattern.compile("\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?\\]\\]").matcher(x);
         String title="";
         int end=-1;
         if(link.find()){
