@@ -351,6 +351,111 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void probeOfficialSchedules(){
+        final TextView target=scheduleView;
+        if(target==null) return;
+        scheduleHandler.removeCallbacksAndMessages(null);
+        target.setText("공식 편성 소스 진단 중…\nKBS / MBC FM4U / CBS / MBC 표준FM / SBS");
+
+        scheduleExecutor.execute(()->{
+            String[][] probes={
+                {"1 KBS CoolFM",
+                 "https://static.api.kbs.co.kr/mediafactory/v1/schedule/onair_now?rtype=jsonp&channel_code=21,22,24,25&local_station_code=00&callback=getChannelInfoList",
+                 "program_title"},
+                {"2 MBC FM4U",
+                 "https://control.imbc.com/Schedule/Radio/Time?sType=FM4U",
+                 "Title"},
+                {"3 CBS MusicFM",
+                 "https://www2.cbs.co.kr/radio/timetable/music.asp",
+                 "CBS 음악FM 93.9MHz"},
+                {"4 MBC 표준FM",
+                 "https://control.imbc.com/Schedule/Radio/Time?sType=FM",
+                 "Title"},
+                {"6 SBS PowerFM",
+                 "https://www.sbs.co.kr/live/S17",
+                 "POWER FM"}
+            };
+
+            StringBuilder report=new StringBuilder();
+            for(String[] q:probes){
+                HttpURLConnection con=null;
+                try{
+                    con=(HttpURLConnection)new URL(q[1]).openConnection();
+                    con.setConnectTimeout(10000);
+                    con.setReadTimeout(12000);
+                    con.setInstanceFollowRedirects(true);
+                    con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+                    con.setRequestProperty("Accept","*/*");
+                    con.setRequestProperty("Accept-Language","ko-KR,ko;q=0.9,en-US;q=0.7");
+                    int code=con.getResponseCode();
+                    String type=String.valueOf(con.getContentType());
+
+                    InputStream in=(code>=200&&code<400)?con.getInputStream():con.getErrorStream();
+                    ByteArrayOutputStream bout=new ByteArrayOutputStream();
+                    if(in!=null){
+                        byte[] buf=new byte[4096]; int n;
+                        while((n=in.read(buf))!=-1 && bout.size()<180000) bout.write(buf,0,n);
+                        in.close();
+                    }
+                    String raw=bout.toString("UTF-8");
+                    String plain=raw
+                        .replaceAll("(?is)<script\\b[^>]*>.*?</script>"," ")
+                        .replaceAll("(?is)<style\\b[^>]*>.*?</style>"," ")
+                        .replaceAll("(?is)<[^>]+>"," ")
+                        .replace("&nbsp;"," ").replace("&amp;","&")
+                        .replaceAll("\\s+"," ").trim();
+
+                    boolean marker=raw.contains(q[2])||plain.contains(q[2]);
+                    String sample=officialProbeSample(q[0],raw,plain);
+                    report.append(q[0]).append("\n")
+                        .append("HTTP ").append(code)
+                        .append(" | ").append(type)
+                        .append(" | marker=").append(marker?"OK":"NO").append("\n")
+                        .append(sample).append("\n\n");
+                }catch(Exception e){
+                    report.append(q[0]).append("\nERROR ")
+                        .append(e.getClass().getSimpleName()).append(": ")
+                        .append(String.valueOf(e.getMessage())).append("\n\n");
+                }finally{
+                    if(con!=null) con.disconnect();
+                }
+            }
+            report.append("5 AFN EagleFM\n공식 시간표 소스 미확인 → 방송국명 유지\n");
+
+            final String out=report.toString();
+            runOnUiThread(()->{ if(scheduleView==target) target.setText(out); });
+        });
+    }
+
+    private String officialProbeSample(String name,String raw,String plain){
+        String src=raw==null?"":raw;
+        String text=plain==null?"":plain;
+        String sample="";
+
+        if(name.startsWith("1 ")){
+            int p=src.indexOf("\"channel_code\":\"25\"");
+            if(p<0) p=src.indexOf("program_title");
+            if(p>=0) sample=src.substring(Math.max(0,p-80),Math.min(src.length(),p+520));
+        }else if(name.startsWith("2 ")||name.startsWith("4 ")){
+            int p=src.indexOf("\"Title\"");
+            if(p<0) p=src.indexOf("StartTime");
+            if(p>=0) sample=src.substring(Math.max(0,p-80),Math.min(src.length(),p+520));
+        }else if(name.startsWith("3 ")){
+            int p=text.indexOf("CBS 음악FM 93.9MHz");
+            if(p<0) p=text.indexOf("현재");
+            if(p>=0) sample=text.substring(p,Math.min(text.length(),p+520));
+        }else if(name.startsWith("6 ")){
+            int p=text.indexOf("POWER FM");
+            if(p>=0) sample=text.substring(p,Math.min(text.length(),p+520));
+        }
+
+        if(sample.isEmpty()){
+            sample=!text.isEmpty()?text:src;
+            if(sample.length()>520) sample=sample.substring(0,520);
+        }
+        return sample.replaceAll("\\s+"," ").trim();
+    }
+
     private void showForeign(){
         selectedRadioId=null;
         currentPage="foreign"; base("해외라디오");
@@ -485,6 +590,7 @@ public class MainActivity extends AppCompatActivity {
     private void addSchedulePanel(){
         scheduleView=new TextView(this); scheduleView.setText("편성정보"); scheduleView.setTextSize(17);
         scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(12,24,12,20);
+        scheduleView.setOnLongClickListener(v->{ probeOfficialSchedules(); return true; });
         body.addView(scheduleView,new LinearLayout.LayoutParams(-1,-2));
         if(selectedRadioId!=null) refreshSchedule(selectedRadioId);
     }
