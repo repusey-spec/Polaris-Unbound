@@ -60,6 +60,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private static final String PREF_MP3_RECENT="recent_ids";
     private static final String PREF_MP3_FAVORITES="favorite_ids";
     private final List<Long> currentMp3Queue=new ArrayList<>();
+    private final android.util.LruCache<Long,Bitmap> mp3AlbumArtCache=new android.util.LruCache<>(48);
     private int currentMp3Index=-1;
     private long lastAutoResumeAt=0L;
     private AudioManager audioManager;
@@ -457,16 +458,81 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return out;
     }
 
+    private Bitmap mp3AlbumArt(long albumId){
+        if(albumId<=0) return null;
+        Bitmap cached=mp3AlbumArtCache.get(albumId);
+        if(cached!=null && !cached.isRecycled()) return cached;
+
+        Uri artUri=ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"),albumId);
+        try(InputStream in=getContentResolver().openInputStream(artUri)){
+            if(in==null) return null;
+            Bitmap raw=BitmapFactory.decodeStream(in);
+            if(raw==null) return null;
+            int target=160;
+            Bitmap out=raw;
+            if(raw.getWidth()>target || raw.getHeight()>target){
+                float scale=Math.min((float)target/raw.getWidth(),(float)target/raw.getHeight());
+                out=Bitmap.createScaledBitmap(raw,
+                    Math.max(1,(int)(raw.getWidth()*scale)),
+                    Math.max(1,(int)(raw.getHeight()*scale)),true);
+                if(out!=raw) raw.recycle();
+            }
+            mp3AlbumArtCache.put(albumId,out);
+            return out;
+        }catch(Exception ignored){
+            return null;
+        }
+    }
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem folderWithArt(
+        String id,String title,String sub,Bitmap art,boolean preferGrid){
+        MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
+            .setMediaId(id)
+            .setTitle(title);
+        if(sub!=null&&!sub.isEmpty()) b.setSubtitle(sub);
+        if(art!=null) b.setIconBitmap(art);
+
+        Bundle e=new Bundle();
+        if(preferGrid) e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
+        b.setExtras(e);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            b.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
+    }
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem itemWithAlbumArt(
+        String id,String title,String sub,long albumId){
+        MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
+            .setMediaId(id)
+            .setTitle(title)
+            .setSubtitle(sub);
+        Bitmap art=mp3AlbumArt(albumId);
+        if(art!=null) b.setIconBitmap(art);
+
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
+        b.setExtras(e);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            b.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
+    }
+
     private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadAudioByIds(List<Long> ids){
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
         for(Long mediaId:ids){
             Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
-            String[] p={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+            String[] p={
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.ALBUM_ID
+            };
             try(Cursor c=getContentResolver().query(uri,p,null,null,null)){
                 if(c!=null&&c.moveToFirst()){
-                    String title=safe(c.getString(0)), artist=safe(c.getString(1)), album=safe(c.getString(2));
+                    String title=safe(c.getString(0));
+                    String artist=safe(c.getString(1));
+                    String album=safe(c.getString(2));
+                    long albumId=c.getLong(3);
                     String sub=artist+(album.isEmpty()?"":" · "+album);
-                    out.add(item("mp3:"+mediaId,title,sub));
+                    out.add(itemWithAlbumArt("mp3:"+mediaId,title,sub,albumId));
                 }
             }catch(SecurityException ignored){}
         }
@@ -475,25 +541,105 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadLocalAudio(String extraSelection,String[] args,String sort){
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
-        String[] projection={MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+        String[] projection={
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID
+        };
         String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
         if(extraSelection!=null&&!extraSelection.isEmpty()) selection+=" AND ("+extraSelection+")";
-        try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,projection,selection,args,sort==null?MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC":sort)){
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection,selection,args,
+            sort==null?MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC":sort)){
             if(c!=null){
                 int idCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
                 int titleCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
                 int artistCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST);
                 int albumCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM);
+                int albumIdCol=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID);
                 while(c.moveToNext()){
                     long mid=c.getLong(idCol);
                     String title=safe(c.getString(titleCol));
                     String artist=safe(c.getString(artistCol));
                     String album=safe(c.getString(albumCol));
+                    long albumId=c.getLong(albumIdCol);
                     String sub=artist+(album.isEmpty()?"":" · "+album);
-                    out.add(item("mp3:"+mid,title,sub));
+                    out.add(itemWithAlbumArt("mp3:"+mid,title,sub,albumId));
                 }
             }
         }catch(SecurityException ignored){}
+        return out;
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadMp3Albums(){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        String[] projection={
+            MediaStore.Audio.Albums._ID,
+            MediaStore.Audio.Albums.ALBUM,
+            MediaStore.Audio.Albums.ARTIST,
+            MediaStore.Audio.Albums.NUMBER_OF_SONGS
+        };
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
+            projection,null,null,
+            MediaStore.Audio.Albums.ALBUM+" COLLATE NOCASE ASC")){
+            if(c!=null){
+                while(c.moveToNext()){
+                    long albumId=c.getLong(0);
+                    String album=safe(c.getString(1)).trim();
+                    String artist=safe(c.getString(2)).trim();
+                    int songs=c.getInt(3);
+                    if(album.isEmpty()) album="(앨범 없음)";
+                    String sub=artist+(songs>0?(artist.isEmpty()?"":" · ")+songs+"곡":"");
+                    out.add(folderWithArt(
+                        "mp3_album:"+Uri.encode(album),
+                        album,sub,mp3AlbumArt(albumId),true));
+                }
+            }
+        }catch(Exception ignored){}
+        return out;
+    }
+
+    private long representativeAlbumIdForArtist(long artistId){
+        Uri uri=MediaStore.Audio.Artists.Albums.getContentUri("external",artistId);
+        try(Cursor c=getContentResolver().query(
+            uri,new String[]{MediaStore.Audio.Albums._ID},
+            null,null,MediaStore.Audio.Albums.ALBUM+" COLLATE NOCASE ASC")){
+            if(c!=null&&c.moveToFirst()) return c.getLong(0);
+        }catch(Exception ignored){}
+        return -1L;
+    }
+
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadMp3Artists(){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        String[] projection={
+            MediaStore.Audio.Artists._ID,
+            MediaStore.Audio.Artists.ARTIST,
+            MediaStore.Audio.Artists.NUMBER_OF_ALBUMS,
+            MediaStore.Audio.Artists.NUMBER_OF_TRACKS
+        };
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,
+            projection,null,null,
+            MediaStore.Audio.Artists.ARTIST+" COLLATE NOCASE ASC")){
+            if(c!=null){
+                while(c.moveToNext()){
+                    long artistId=c.getLong(0);
+                    String artist=safe(c.getString(1)).trim();
+                    int albums=c.getInt(2);
+                    int tracks=c.getInt(3);
+                    if(artist.isEmpty()) artist="(아티스트 없음)";
+                    long albumId=representativeAlbumIdForArtist(artistId);
+                    String sub=albums+"앨범 · "+tracks+"곡";
+                    out.add(folderWithArt(
+                        "mp3_artist:"+Uri.encode(artist),
+                        artist,sub,mp3AlbumArt(albumId),true));
+                }
+            }
+        }catch(Exception ignored){}
         return out;
     }
 
@@ -502,7 +648,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         LinkedHashSet<String> seen=new LinkedHashSet<>();
         String[] projection={column};
         String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
-        try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,projection,selection,null,column+" COLLATE NOCASE ASC")){
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection,selection,null,column+" COLLATE NOCASE ASC")){
             if(c!=null){
                 int col=c.getColumnIndexOrThrow(column);
                 while(c.moveToNext()){
@@ -819,9 +967,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         } else if(parent.equals("mp3_folders")){
             x.addAll(loadMp3Folders());
         } else if(parent.equals("mp3_albums")){
-            x.addAll(loadGroupItems(MediaStore.Audio.Media.ALBUM,"mp3_album:"));
+            x.addAll(loadMp3Albums());
         } else if(parent.equals("mp3_artists")){
-            x.addAll(loadGroupItems(MediaStore.Audio.Media.ARTIST,"mp3_artist:"));
+            x.addAll(loadMp3Artists());
         } else if(parent.equals("mp3_all")){
             x.addAll(loadLocalAudio(null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
         } else if(parent.equals("mp3_favorites")){
@@ -840,6 +988,22 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 x.addAll(loadLocalAudio(MediaStore.Audio.Media.DATA+" LIKE ?",new String[]{value.endsWith("/")?value+"%":value+"/%"},MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
         }
         result.sendResult(x);
+    }
+
+    @Override public void onSearch(String query,Bundle extras,Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
+        String q=query==null?"":query.trim();
+        if(q.isEmpty()){
+            result.sendResult(Collections.emptyList());
+            return;
+        }
+        String like="%"+q+"%";
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> matches=loadLocalAudio(
+            "("+MediaStore.Audio.Media.TITLE+" LIKE ? OR "+
+                MediaStore.Audio.Media.ARTIST+" LIKE ? OR "+
+                MediaStore.Audio.Media.ALBUM+" LIKE ?)",
+            new String[]{like,like,like},
+            MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
+        result.sendResult(matches);
     }
 
     @Override public void onDestroy(){
