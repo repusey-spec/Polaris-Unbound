@@ -186,14 +186,18 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         ViewCompat.setOnApplyWindowInsetsListener(root,(v,insets)->{
             int top=insets.getInsets(WindowInsetsCompat.Type.statusBars()).top;
-            v.setPadding(0,top,0,0); return insets;
+            int bottom=insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom;
+            v.setPadding(0,top,0,bottom+dp(8));
+            return insets;
         });
         tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
         root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
         pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
         miniPlayer=buildMiniPlayer();
         miniPlayer.setVisibility(View.GONE);
-        root.addView(miniPlayer,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout.LayoutParams miniLp=new LinearLayout.LayoutParams(-1,-2);
+        miniLp.setMargins(dp(12),dp(4),dp(12),dp(8));
+        root.addView(miniPlayer,miniLp);
         shell.addView(root,new FrameLayout.LayoutParams(-1,-1));
         setContentView(shell);
     }
@@ -713,8 +717,9 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout bar=new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(14),dp(9),dp(12),dp(9));
-        bar.setBackground(roundedBg(0xF2222228,0));
+        bar.setPadding(dp(14),dp(10),dp(12),dp(10));
+        bar.setBackground(roundedBg(0xF2222228,18));
+        if(android.os.Build.VERSION.SDK_INT>=21) bar.setElevation(dp(8));
 
         miniPlayerArt=new ImageView(this);
         miniPlayerArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
