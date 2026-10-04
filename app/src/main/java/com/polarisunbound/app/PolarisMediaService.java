@@ -142,6 +142,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     startRadio(id);
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
+            @Override public void onPlayFromSearch(String query,Bundle extras){
+                trace("SERVICE onPlayFromSearch: query="+query+" extras="+String.valueOf(extras));
+                handleVoicePlaySearch(query,extras);
+            }
             @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
             @Override public void onSkipToNext(){ skipCurrent(1); }
             @Override public void onSkipToPrevious(){ skipCurrent(-1); }
@@ -265,6 +269,178 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setMetadata(mb.build());
     }
 
+
+    private String normalizeVoiceQuery(String raw){
+        String q=raw==null?"":raw.toLowerCase(Locale.KOREA).trim();
+        q=q.replace("엠피쓰리","mp3")
+           .replace("엠피3","mp3")
+           .replace("에프엠","fm")
+           .replace("에이엠","am")
+           .replace("점",".")
+           .replaceAll("\\s+"," ");
+        q=q.replaceAll("(?i)\\b(틀어줘|재생해줘|재생|플레이|play|please)\\b"," ");
+        q=q.replaceAll("\\s+"," ").trim();
+        return q;
+    }
+
+    private String radioIdFromVoice(String raw){
+        String q=normalizeVoiceQuery(raw);
+        String tight=q.replace(" ","");
+
+        // Overseas names first because AFN and KIIS both use 102.7.
+        if(tight.contains("kiis")||tight.contains("키스fm")||tight.contains("키스에프엠")||
+           tight.contains("키이스")||tight.contains("키스라디오")) return "kiis";
+        if(tight.contains("gallery41")||tight.contains("갤러리41")||
+           tight.contains("갤러리포티원")||tight.contains("gallery")||
+           tight.contains("갤러리")) return "gallery";
+
+        if(tight.contains("89.1")||tight.contains("891")||
+           tight.contains("kbs")||tight.contains("케이비에스")||
+           tight.contains("coolfm")||tight.contains("쿨fm")||tight.contains("쿨에프엠")) return "kr1";
+
+        if(tight.contains("91.9")||tight.contains("919")||
+           tight.contains("fm4u")||tight.contains("fm포유")||tight.contains("에프엠포유")) return "kr2";
+
+        if(tight.contains("93.9")||tight.contains("939")||
+           tight.contains("cbs")||tight.contains("씨비에스")||
+           tight.contains("musicfm")||tight.contains("뮤직fm")||tight.contains("음악fm")) return "kr3";
+
+        if(tight.contains("95.9")||tight.contains("959")||
+           tight.contains("표준fm")||tight.contains("표준에프엠")||tight.contains("standardfm")) return "kr4";
+
+        if(tight.contains("102.7")||tight.contains("1027")||
+           tight.contains("afn")||tight.contains("에이에프엔")||
+           tight.contains("eaglefm")||tight.contains("이글fm")) return "kr5";
+
+        if(tight.contains("107.7")||tight.contains("1077")||
+           tight.contains("sbs")||tight.contains("에스비에스")||
+           tight.contains("powerfm")||tight.contains("파워fm")||tight.contains("파워에프엠")) return "kr6";
+
+        // Bare MBC is ambiguous; prefer FM4U. "표준" above already resolves standard FM.
+        if(tight.contains("mbc")||tight.contains("엠비씨")) return "kr2";
+        return null;
+    }
+
+    private String stripVoiceMp3Prefix(String raw){
+        String q=normalizeVoiceQuery(raw);
+        q=q.replaceFirst("(?i)^\\s*(mp3|음악|노래)\\s*","").trim();
+        q=q.replaceAll("(?i)\\s*(틀어줘|재생해줘|재생|플레이|play)\\s*$","").trim();
+        return q;
+    }
+
+    private long findMp3Title(String wanted){
+        if(wanted==null||wanted.trim().isEmpty()) return -1L;
+        String q=wanted.trim();
+        String[] projection={
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.DISPLAY_NAME
+        };
+        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
+        long contains=-1L;
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection,selection,null,
+            MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")){
+            if(c!=null){
+                while(c.moveToNext()){
+                    long id=c.getLong(0);
+                    String title=safe(c.getString(1)).trim();
+                    String file=safe(c.getString(2)).trim();
+                    String fileStem=file.replaceFirst("(?i)\\.[a-z0-9]{1,6}$","");
+                    if(title.equalsIgnoreCase(q)||fileStem.equalsIgnoreCase(q)) return id;
+                    if(contains<0 &&
+                       (title.toLowerCase(Locale.KOREA).contains(q.toLowerCase(Locale.KOREA)) ||
+                        fileStem.toLowerCase(Locale.KOREA).contains(q.toLowerCase(Locale.KOREA))))
+                        contains=id;
+                }
+            }
+        }catch(Exception e){
+            trace("VOICE MP3 search error: "+e);
+        }
+        return contains;
+    }
+
+    private void startVoiceRandomMp3(){
+        currentMp3Queue.clear();
+        currentMp3Queue.addAll(loadAllMp3Ids());
+        if(currentMp3Queue.isEmpty()){
+            publishError("MP3 파일이 없습니다");
+            return;
+        }
+        mp3Shuffle=true;
+        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+            .putBoolean(PREF_MP3_SHUFFLE,true).apply();
+        session.setShuffleMode(PlaybackStateCompat.SHUFFLE_MODE_ALL);
+        currentMp3Index=mp3Random.nextInt(currentMp3Queue.size());
+        trace("VOICE MP3 random index="+currentMp3Index);
+        playLocalAudioId(currentMp3Queue.get(currentMp3Index));
+    }
+
+    private void playVoiceRadio(String id){
+        if(id==null||!STREAMS.containsKey(id)){
+            publishError("라디오 채널을 찾지 못했습니다");
+            return;
+        }
+        currentRadioId=id;
+        currentMp3Id=-1L;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
+        enterPlaybackForeground(TITLES.get(id));
+        retryCount=0;
+        userStopped=false;
+        retryHandler.removeCallbacksAndMessages(null);
+        trace("VOICE radio -> "+id+" "+TITLES.get(id));
+        startRadio(id);
+    }
+
+    private void handleVoicePlaySearch(String query,Bundle extras){
+        String raw=query==null?"":query.trim();
+        String normalized=normalizeVoiceQuery(raw);
+
+        boolean asksRadio=normalized.contains("라디오")||normalized.contains("radio");
+        boolean asksMp3=normalized.contains("mp3")||normalized.contains("음악")||normalized.contains("노래");
+
+        String radioId=radioIdFromVoice(raw);
+        if(asksRadio || radioId!=null){
+            if(radioId!=null){
+                playVoiceRadio(radioId);
+                return;
+            }
+            publishError("라디오 채널을 말씀해 주세요");
+            return;
+        }
+
+        if(asksMp3){
+            String wanted=stripVoiceMp3Prefix(raw);
+            if(wanted.isEmpty()){
+                startVoiceRandomMp3();
+                return;
+            }
+            long id=findMp3Title(wanted);
+            if(id>=0){
+                trace("VOICE MP3 title -> "+wanted+" / "+id);
+                ensureMp3Queue(id);
+                playLocalAudioId(id);
+            }else{
+                publishError("MP3에서 "+wanted+"을 찾지 못했습니다");
+            }
+            return;
+        }
+
+        // If Assistant routes a plain title to this app, treat it as an MP3 title.
+        if(!normalized.isEmpty()){
+            long id=findMp3Title(normalized);
+            if(id>=0){
+                trace("VOICE plain title -> "+normalized+" / "+id);
+                ensureMp3Queue(id);
+                playLocalAudioId(id);
+                return;
+            }
+        }
+
+        // Empty media play query: random MP3 is the requested default.
+        startVoiceRandomMp3();
+    }
 
     private void skipCurrent(int delta){
         if(currentRadioId!=null) skipRadio(delta);
@@ -945,7 +1121,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         .putString(MediaMetadataCompat.METADATA_KEY_TITLE,TITLES.get(id))
                         .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,"Stream resolver error").build());
                     session.setPlaybackState(new PlaybackStateCompat.Builder()
-                        .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID)
+                        .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH)
                         .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
                         .setErrorMessage(e.getMessage()).build());
                     trace("resolver error: "+id+" / "+e);
@@ -1022,7 +1198,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         float speed=state==PlaybackStateCompat.STATE_PLAYING?1f:0f;
 
         session.setPlaybackState(new PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND|PlaybackStateCompat.ACTION_SEEK_TO|PlaybackStateCompat.ACTION_SET_REPEAT_MODE|PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE)
+            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND|PlaybackStateCompat.ACTION_SEEK_TO|PlaybackStateCompat.ACTION_SET_REPEAT_MODE|PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE)
             .setState(state,position,speed,android.os.SystemClock.elapsedRealtime()).build());
     }
 
