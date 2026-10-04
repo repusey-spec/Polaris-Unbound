@@ -185,12 +185,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(id==null||"kr5".equals(id)) return;
         programExecutor.execute(() -> {
             try{
+                CurrentProgramResolver.Result old=CurrentProgramResolver.cached(this,id);
+                String oldTitle=old==null ? null : old.aaTitle();
                 CurrentProgramResolver.Result r=CurrentProgramResolver.resolve(id);
                 CurrentProgramResolver.save(this,id,r);
+                boolean changed=oldTitle==null || !oldTitle.equals(r.aaTitle());
                 programHandler.post(() -> {
-                    trace("PROGRAM "+id+" -> "+r.aaTitle());
-                    notifyChildrenChanged("radio");
-                    if(id.equals(currentRadioId)) applyCurrentRadioMetadata(id);
+                    trace("PROGRAM "+id+" -> "+r.aaTitle()+(changed?" [changed]":""));
+                    if(changed) notifyChildrenChanged("radio");
+                    if(changed && id.equals(currentRadioId)) applyCurrentRadioMetadata(id);
                     long delay=CurrentProgramResolver.nextRefreshDelay(id,r);
                     programHandler.postDelayed(() -> refreshProgramAsync(id),delay);
                 });
