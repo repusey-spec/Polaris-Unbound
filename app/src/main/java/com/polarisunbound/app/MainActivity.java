@@ -172,7 +172,6 @@ public class MainActivity extends AppCompatActivity {
             selectedRadioId=id;
             scheduleHandler.removeCallbacksAndMessages(null);
             refreshSchedule(id);
-            if("gallery".equals(id)) scheduleGalleryRefresh();
         }
         try{ controller.getTransportControls().playFromMediaId(id,null); }
         catch(Throwable e){ status.setText("재생 요청 오류"); }
@@ -486,17 +485,6 @@ public class MainActivity extends AppCompatActivity {
         p.edit().putStringSet("favorite_ids",set).apply();
     }
 
-    private void scheduleGalleryRefresh(){
-        galleryHandler.removeCallbacksAndMessages(null);
-        if(!"gallery".equals(selectedRadioId)) return;
-        galleryHandler.postDelayed(()->{
-            if("gallery".equals(selectedRadioId)){
-                refreshSchedule("gallery");
-                scheduleGalleryRefresh();
-            }
-        },30000L);
-    }
-
     private void addSchedulePanel(){
         scheduleView=new TextView(this); scheduleView.setText("편성정보"); scheduleView.setTextSize(17);
         scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(12,24,12,20);
@@ -532,7 +520,7 @@ public class MainActivity extends AppCompatActivity {
             final String finalOut=out;
             runOnUiThread(()->{
                 if(scheduleView==target && id.equals(selectedRadioId)) target.setText(finalOut);
-                if(!"gallery".equals(id) && id.equals(selectedRadioId)){
+                if(id.equals(selectedRadioId)){
                     scheduleHandler.removeCallbacksAndMessages(null);
                     long delay=CurrentProgramResolver.nextRefreshDelay(id,finalResult);
                     scheduleHandler.postDelayed(()->{
