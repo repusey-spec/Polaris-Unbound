@@ -25,7 +25,49 @@ jobs:
         run: |
           python - <<'PY'
           import datetime, json, re, urllib.parse, urllib.request
+          from html.parser import HTMLParser
           from zoneinfo import ZoneInfo
+
+          class NaverScheduleHTMLParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.in_list = False
+                  self.li_depth = 0
+                  self.active_divs = []
+                  self.cells = []
+                  self.rows = []
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if tag == "li":
+                      classes = attrs.get("class", "").split()
+                      if self.in_list:
+                          self.li_depth += 1
+                      elif "list" in classes:
+                          self.in_list = True
+                          self.li_depth = 1
+                          self.active_divs = []
+                          self.cells = []
+                  if self.in_list and tag == "div":
+                      buf = []
+                      self.active_divs.append(buf)
+                      self.cells.append(buf)
+
+              def handle_data(self, data):
+                  if self.in_list:
+                      for buf in self.active_divs:
+                          buf.append(data)
+
+              def handle_endtag(self, tag):
+                  if self.in_list and tag == "div" and self.active_divs:
+                      self.active_divs.pop()
+                  if self.in_list and tag == "li":
+                      self.li_depth -= 1
+                      if self.li_depth == 0:
+                          self.rows.append([" ".join(x).strip() for x in self.cells])
+                          self.in_list = False
+                          self.active_divs = []
+                          self.cells = []
 
           endpoint = "https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
           referer = "https://m.search.naver.com/search.naver?where=m&query=%ED%8E%B8%EC%84%B1%ED%91%9C"
@@ -60,19 +102,19 @@ jobs:
               html = "".join(data.get("dataHtml") or [])
               assert html, f"{name}: empty dataHtml"
 
+              parser = NaverScheduleHTMLParser()
+              parser.feed(html)
               entries = []
-              for row in re.findall(r"(?is)<li\\b[^>]*>(.*?)</li>", html):
-                  cells = []
-                  for raw_cell in re.findall(r"(?is)<div\\b[^>]*>(.*?)</div>", row):
-                      txt = re.sub(r"(?is)<[^>]+>", " ", raw_cell)
-                      txt = re.sub(r"\\s+", " ", txt).strip()
-                      cells.append(txt)
-                  time_idx = next((i for i, x in enumerate(cells) if re.fullmatch(r"\\d{1,2}:\\d{2}", x)), -1)
+              for cells in parser.rows:
+                  if len(cells) <= 4:
+                      continue
+                  time_idx = next((i for i, x in enumerate(cells) if re.fullmatch(r"\\d{1,2}:\\d{2}", re.sub(r"\\s+", " ", x).strip())), -1)
                   if time_idx < 0:
                       continue
-                  title = cells[4].strip() if len(cells) > 4 else ""
+                  hhmm = re.sub(r"\\s+", " ", cells[time_idx]).strip()
+                  title = re.sub(r"\\s+", " ", cells[4]).strip()
                   if title and re.search(r"[A-Za-z가-힣]", title):
-                      entries.append((cells[time_idx], title))
+                      entries.append((hhmm, title))
 
               assert entries, f"{name}: Java-compatible parser found zero entries"
               now = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
