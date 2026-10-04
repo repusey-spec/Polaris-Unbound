@@ -25,7 +25,6 @@ jobs:
         run: |
           python - <<'PY'
           import datetime, json, re, urllib.parse, urllib.request
-          from html.parser import HTMLParser
           from zoneinfo import ZoneInfo
 
           endpoint = "https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
@@ -37,7 +36,11 @@ jobs:
               "MBC StandardFM": "815464",
               "SBS PowerFM": "815467",
           }
+
           day = datetime.datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d")
+          now = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
+          now_min = now.hour * 60 + now.minute
+
           for name, sid in service_ids.items():
               params = urllib.parse.urlencode({
                   "key": "SingleChannelDailySchedule",
@@ -57,12 +60,14 @@ jobs:
               )
               with urllib.request.urlopen(req, timeout=15) as res:
                   data = json.loads(res.read().decode("utf-8"))
+
               assert str(data.get("statusCode", "")).lower() == "success", (name, data.get("statusCode"))
               html = "".join(data.get("dataHtml") or [])
               assert html, f"{name}: empty dataHtml"
 
               entries = []
-              for row in re.findall(r'(?is)<li[^>]*class=["\\'][^"\\']*\\blist\\b[^"\\']*["\\'][^>]*>(.*?)</li>', html):
+              rows = re.findall(r'(?is)<li[^>]*class=["\\'][^"\\']*\\blist\\b[^"\\']*["\\'][^>]*>(.*?)</li>', html)
+              for row in rows:
                   tm = re.search(r'(?is)<div[^>]*class=["\\'][^"\\']*\\btime\\b[^"\\']*["\\'][^>]*>\\s*(\\d{1,2}:\\d{2})\\s*</div>', row)
                   tt = re.search(r'(?is)<div[^>]*class=["\\'][^"\\']*\\bpr_title\\b[^"\\']*["\\'][^>]*>(.*?)</div>', row)
                   if not tm or not tt:
@@ -72,91 +77,8 @@ jobs:
                   if title and re.search(r"[A-Za-z가-힣]", title):
                       entries.append((tm.group(1), title))
 
-              if not entries:
-                  print("RAW_HTML_SAMPLE", name, repr(html[:6000]))
               assert entries, f"{name}: semantic Naver parser found zero entries"
-name: Android APK
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-      - name: Restore stable debug signing key
-        run: |
-          base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
-          keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
-      - name: Verify Naver radio schedule contract
-        run: |
-          python - <<'PY'
-          import datetime, json, re, urllib.parse, urllib.request
-          from html.parser import HTMLParser
-          from zoneinfo import ZoneInfo
 
-          endpoint = "https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
-          referer = "https://m.search.naver.com/search.naver?where=m&query=%ED%8E%B8%EC%84%B1%ED%91%9C"
-          service_ids = {
-              "KBS CoolFM": "815457",
-              "MBC FM4U": "815463",
-              "CBS MusicFM": "815449",
-              "MBC StandardFM": "815464",
-              "SBS PowerFM": "815467",
-          }
-          day = datetime.datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d")
-          for name, sid in service_ids.items():
-              params = urllib.parse.urlencode({
-                  "key": "SingleChannelDailySchedule",
-                  "where": "m",
-                  "pkid": "66",
-                  "u1": sid,
-                  "u2": day,
-              })
-              req = urllib.request.Request(
-                  endpoint + "?" + params,
-                  headers={
-                      "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36",
-                      "Referer": referer,
-                      "Accept": "application/json,text/plain,*/*",
-                      "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.7",
-                  },
-              )
-              with urllib.request.urlopen(req, timeout=15) as res:
-                  data = json.loads(res.read().decode("utf-8"))
-              assert str(data.get("statusCode", "")).lower() == "success", (name, data.get("statusCode"))
-              html = "".join(data.get("dataHtml") or [])
-              assert html, f"{name}: empty dataHtml"
-
-              parser = NaverScheduleHTMLParser()
-              parser.feed(html)
-              entries = []
-              for cells in parser.rows:
-                  if len(cells) <= 4:
-                      continue
-                  time_idx = next((i for i, x in enumerate(cells) if re.fullmatch(r"\\d{1,2}:\\d{2}", re.sub(r"\\s+", " ", x).strip())), -1)
-                  if time_idx < 0:
-                      continue
-                  hhmm = re.sub(r"\\s+", " ", cells[time_idx]).strip()
-                  title = re.sub(r"\\s+", " ", cells[4]).strip()
-                  if title and re.search(r"[A-Za-z가-힣]", title):
-                      entries.append((hhmm, title))
-
-              if not entries:
-                  print("RAW_HTML_SAMPLE", name, repr(html[:6000]))
-              assert entries, f"{name}: Java-compatible parser found zero entries"
-              now = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
-              now_min = now.hour * 60 + now.minute
               current = None
               for hhmm, title in entries:
                   h, m = map(int, hhmm.split(":"))
@@ -164,6 +86,7 @@ jobs:
                       current = (hhmm, title)
               if current is None:
                   current = entries[-1]
+
               print(name, "OK", sid, "rows", len(entries), "current", current[0], current[1])
           PY
       - run: gradle assembleDebug
