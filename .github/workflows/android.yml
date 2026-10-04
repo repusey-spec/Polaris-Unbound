@@ -17,6 +17,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Restore stable debug signing key
+        run: |
+          base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
+          keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
       - run: gradle assembleDebug
       - name: Verify APK exists
         run: |
