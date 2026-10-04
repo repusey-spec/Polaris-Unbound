@@ -8,13 +8,12 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.text.TextUtils;
+import android.text.InputType;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -24,18 +23,10 @@ public class MainActivity extends Activity {
     private static final String KEY_SAVER = "note3_power_saver_limit";
     private static final String KEY_CHARGE = "note3_power_charge_limit";
 
-    private SeekBar apBar;
-    private SeekBar saverBar;
-    private SeekBar chargeBar;
-
-    private TextView apValue;
-    private TextView saverValue;
-    private TextView chargeValue;
+    private EditText apInput;
+    private EditText saverInput;
+    private EditText chargeInput;
     private TextView status;
-
-    private int apMin = 1;
-    private int saverMin = 1;
-    private int chargeMin = 3;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,82 +39,59 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(24), dp(20), dp(28));
         root.setBackgroundColor(Color.rgb(244, 246, 248));
-        scroll.addView(root, new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT));
+        scroll.addView(root);
 
-        TextView title = new TextView(this);
-        title.setText("Note3 Power");
-        title.setTextSize(28);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(Color.rgb(28, 32, 36));
+        TextView title = text("Note3 Power", 28, true, Color.rgb(28,32,36));
         root.addView(title);
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Galaxy Note 3 전원 관리 설정");
-        subtitle.setTextSize(15);
-        subtitle.setTextColor(Color.rgb(90, 98, 108));
-        subtitle.setPadding(0, dp(4), 0, dp(18));
+        TextView subtitle = text("Galaxy Note 3 전원 관리 설정", 15, false, Color.rgb(90,98,108));
+        subtitle.setPadding(0, dp(4), 0, dp(16));
         root.addView(subtitle);
 
-        status = new TextView(this);
-        status.setTextSize(14);
-        status.setTextColor(Color.rgb(60, 66, 74));
-        status.setTextIsSelectable(true);
+        status = text("", 14, false, Color.rgb(60,66,74));
         status.setPadding(dp(14), dp(12), dp(14), dp(12));
-        status.setBackground(cardBackground(Color.rgb(232, 238, 245), 12));
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        statusParams.bottomMargin = dp(16);
-        root.addView(status, statusParams);
+        status.setBackground(bg(Color.rgb(232,238,245), 12));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
+        sp.bottomMargin = dp(16);
+        root.addView(status, sp);
 
-        Control ap = addControl(
-                root,
+        apInput = addField(root,
                 "AP 깨어있음 기준",
-                "SOC가 이 값보다 높으면 Application Processor(AP) suspend를 막습니다. 100%는 사실상 해제입니다.",
-                1,
-                100);
-        apBar = ap.bar;
-        apValue = ap.value;
+                "SOC가 이 값보다 높으면 Application Processor(AP) suspend를 막습니다. 100%는 사실상 해제입니다.");
 
-        Control saver = addControl(
-                root,
+        saverInput = addField(root,
                 "절전모드 기준",
-                "외부전원이 없고 SOC가 이 값 미만이면 Android 절전모드를 켭니다.",
-                1,
-                100);
-        saverBar = saver.bar;
-        saverValue = saver.value;
+                "외부전원이 없고 SOC가 이 값 미만이면 Android 절전모드를 켭니다.");
 
-        Control charge = addControl(
-                root,
+        chargeInput = addField(root,
                 "충전 상한",
-                "SOC가 이 값 이상이면 충전을 끊고, 2% 낮아지면 다시 충전합니다.",
-                3,
-                100);
-        chargeBar = charge.bar;
-        chargeValue = charge.value;
+                "SOC가 이 값 이상이면 충전을 끊고, 2% 낮아지면 다시 충전합니다.");
 
-        Button apply = new Button(this);
-        apply.setText("설정 적용");
-        apply.setTextSize(17);
-        apply.setAllCaps(false);
-        apply.setTextColor(Color.WHITE);
-        apply.setBackground(cardBackground(Color.rgb(31, 111, 235), 12));
-        apply.setPadding(dp(12), dp(14), dp(12), dp(14));
-        LinearLayout.LayoutParams applyParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(58));
-        applyParams.topMargin = dp(4);
-        root.addView(apply, applyParams);
+        Button save = new Button(this);
+        save.setText("설정 적용");
+        save.setTextSize(17);
+        save.setAllCaps(false);
+        save.setTextColor(Color.WHITE);
+        save.setBackground(bg(Color.rgb(31,111,235), 12));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, dp(58));
+        bp.topMargin = dp(2);
+        root.addView(save, bp);
 
-        apply.setOnClickListener(v -> saveSettings());
+        save.setOnClickListener(v -> saveValues());
 
-        TextView note = new TextView(this);
-        note.setText("daemon이 약 10초 간격으로 값을 읽어 자동 반영합니다.");
-        note.setTextSize(13);
-        note.setTextColor(Color.rgb(100, 106, 114));
+        Button reload = new Button(this);
+        reload.setText("현재값 다시 읽기");
+        reload.setTextSize(15);
+        reload.setAllCaps(false);
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, dp(52));
+        rp.topMargin = dp(10);
+        root.addView(reload, rp);
+        reload.setOnClickListener(v -> {
+            loadValues();
+            updateStatus("현재 Global Settings 값을 다시 읽었습니다.");
+        });
+
+        TextView note = text("daemon은 약 10초 간격으로 값을 읽어 자동 반영합니다.", 13, false, Color.rgb(100,106,114));
         note.setGravity(Gravity.CENTER);
         note.setPadding(0, dp(12), 0, 0);
         root.addView(note);
@@ -133,184 +101,121 @@ public class MainActivity extends Activity {
         updateStatus(null);
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (apBar != null) {
-            loadValues();
-            updateStatus(null);
-        }
-    }
-
-    private Control addControl(LinearLayout root, String titleText, String desc, int min, int max) {
+    private EditText addField(LinearLayout root, String label, String desc) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.setBackground(cardBackground(Color.WHITE, 14));
+        card.setBackground(bg(Color.WHITE, 14));
 
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = dp(14);
-        root.addView(card, cardParams);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
+        cp.bottomMargin = dp(14);
+        root.addView(card, cp);
 
-        TextView title = new TextView(this);
-        title.setText(titleText);
-        title.setTextSize(18);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(Color.rgb(32, 36, 40));
-        card.addView(title);
+        card.addView(text(label, 18, true, Color.rgb(32,36,40)));
 
-        TextView description = new TextView(this);
-        description.setText(desc);
-        description.setTextSize(13);
-        description.setTextColor(Color.rgb(92, 99, 108));
-        description.setPadding(0, dp(6), 0, dp(12));
-        card.addView(description);
+        TextView d = text(desc, 13, false, Color.rgb(92,99,108));
+        d.setPadding(0, dp(6), 0, dp(10));
+        card.addView(d);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        card.addView(row, new LinearLayout.LayoutParams(-1, -2));
 
-        Button minus = smallButton("−");
-        row.addView(minus, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setGravity(Gravity.CENTER);
+        input.setTextSize(22);
+        input.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setSelectAllOnFocus(true);
 
-        SeekBar bar = new SeekBar(this);
-        bar.setMax(max - min);
-        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        barParams.leftMargin = dp(6);
-        barParams.rightMargin = dp(6);
-        row.addView(bar, barParams);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0, dp(58), 1f);
+        row.addView(input, ip);
 
-        Button plus = smallButton("+");
-        row.addView(plus, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView pct = text("%", 22, true, Color.rgb(31,111,235));
+        pct.setGravity(Gravity.CENTER);
+        row.addView(pct, new LinearLayout.LayoutParams(dp(48), dp(58)));
 
-        TextView value = new TextView(this);
-        value.setTextSize(18);
-        value.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        value.setGravity(Gravity.CENTER);
-        value.setTextColor(Color.rgb(31, 111, 235));
-        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(dp(68), dp(48));
-        valueParams.leftMargin = dp(6);
-        row.addView(value, valueParams);
-
-        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                value.setText((progress + min) + "%");
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
-            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
-        });
-
-        minus.setOnClickListener(v -> {
-            if (bar.getProgress() > 0) {
-                bar.setProgress(bar.getProgress() - 1);
-            }
-        });
-
-        plus.setOnClickListener(v -> {
-            if (bar.getProgress() < bar.getMax()) {
-                bar.setProgress(bar.getProgress() + 1);
-            }
-        });
-
-        return new Control(bar, value);
-    }
-
-    private Button smallButton(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(20);
-        b.setAllCaps(false);
-        b.setPadding(0, 0, 0, 0);
-        return b;
+        return input;
     }
 
     private void loadValues() {
-        int ap = clamp(Settings.Global.getInt(getContentResolver(), KEY_AP, 50), 1, 100);
-        int saver = clamp(Settings.Global.getInt(getContentResolver(), KEY_SAVER, 40), 1, 100);
-        int charge = clamp(Settings.Global.getInt(getContentResolver(), KEY_CHARGE, 90), 3, 100);
-
-        setBar(apBar, apValue, ap, apMin);
-        setBar(saverBar, saverValue, saver, saverMin);
-        setBar(chargeBar, chargeValue, charge, chargeMin);
+        apInput.setText(String.valueOf(Settings.Global.getInt(getContentResolver(), KEY_AP, 50)));
+        saverInput.setText(String.valueOf(Settings.Global.getInt(getContentResolver(), KEY_SAVER, 40)));
+        chargeInput.setText(String.valueOf(Settings.Global.getInt(getContentResolver(), KEY_CHARGE, 90)));
     }
 
-    private void setBar(SeekBar bar, TextView value, int actual, int min) {
-        bar.setProgress(actual - min);
-        value.setText(actual + "%");
-    }
+    private void saveValues() {
+        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) {
+            updateStatus("WRITE_SECURE_SETTINGS 권한이 필요합니다.");
+            Toast.makeText(this, "권한이 필요합니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
 
-    private int barValue(SeekBar bar, int min) {
-        return bar.getProgress() + min;
-    }
+        Integer ap = parse(apInput, 1, 100);
+        Integer saver = parse(saverInput, 1, 100);
+        Integer charge = parse(chargeInput, 3, 100);
 
-    private void saveSettings() {
-        int ap = barValue(apBar, apMin);
-        int saver = barValue(saverBar, saverMin);
-        int charge = barValue(chargeBar, chargeMin);
-
-        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS)
-                != PackageManager.PERMISSION_GRANTED) {
-            updateStatus("권한이 없습니다. 아래 ADB 명령을 한 번 실행하세요.");
-            Toast.makeText(this, "WRITE_SECURE_SETTINGS 권한이 필요합니다.", Toast.LENGTH_LONG).show();
+        if (ap == null || saver == null || charge == null) {
+            updateStatus("입력값을 확인하세요. AP 1~100, 절전 1~100, 충전 3~100");
             return;
         }
 
         try {
-            boolean a = Settings.Global.putInt(getContentResolver(), KEY_AP, ap);
-            boolean s = Settings.Global.putInt(getContentResolver(), KEY_SAVER, saver);
-            boolean c = Settings.Global.putInt(getContentResolver(), KEY_CHARGE, charge);
+            boolean ok1 = Settings.Global.putInt(getContentResolver(), KEY_AP, ap);
+            boolean ok2 = Settings.Global.putInt(getContentResolver(), KEY_SAVER, saver);
+            boolean ok3 = Settings.Global.putInt(getContentResolver(), KEY_CHARGE, charge);
 
-            if (a && s && c) {
-                updateStatus("저장 완료: AP " + ap + "% / 절전 " + saver + "% / 충전 " + charge + "%");
-                Toast.makeText(this, "설정이 저장되었습니다.", Toast.LENGTH_SHORT).show();
+            int readAp = Settings.Global.getInt(getContentResolver(), KEY_AP, -1);
+            int readSaver = Settings.Global.getInt(getContentResolver(), KEY_SAVER, -1);
+            int readCharge = Settings.Global.getInt(getContentResolver(), KEY_CHARGE, -1);
+
+            if (ok1 && ok2 && ok3 && readAp == ap && readSaver == saver && readCharge == charge) {
+                updateStatus("저장 확인 완료: AP " + readAp + "% / 절전 " + readSaver + "% / 충전 " + readCharge + "%");
+                Toast.makeText(this, "설정 저장 완료", Toast.LENGTH_SHORT).show();
             } else {
-                updateStatus("설정 저장에 실패했습니다.");
+                updateStatus("저장 검증 실패: 실제값 " + readAp + " / " + readSaver + " / " + readCharge);
             }
-        } catch (SecurityException e) {
-            updateStatus("권한 오류: WRITE_SECURE_SETTINGS 권한을 다시 확인하세요.");
+        } catch (Exception e) {
+            updateStatus("저장 오류: " + e.getClass().getSimpleName());
         }
     }
 
-    private void updateStatus(String message) {
-        boolean granted = checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS)
-                == PackageManager.PERMISSION_GRANTED;
-
-        String permission = granted ? "설정 권한: 허용됨" :
-                "설정 권한: 필요\nadb shell pm grant com.note3.powermanager android.permission.WRITE_SECURE_SETTINGS";
-
-        if (TextUtils.isEmpty(message)) {
-            status.setText(permission);
-        } else {
-            status.setText(message + "\n\n" + permission);
+    private Integer parse(EditText input, int min, int max) {
+        try {
+            int v = Integer.parseInt(input.getText().toString().trim());
+            return (v >= min && v <= max) ? v : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
-    private GradientDrawable cardBackground(int color, int radiusDp) {
+    private void updateStatus(String msg) {
+        boolean granted = checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+        String p = granted
+                ? "설정 권한: 허용됨"
+                : "설정 권한: 필요\nadb shell pm grant com.note3.powermanager android.permission.WRITE_SECURE_SETTINGS";
+        status.setText(msg == null ? p : msg + "\n\n" + p);
+    }
+
+    private TextView text(String s, int size, boolean bold, int color) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(size);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return t;
+    }
+
+    private GradientDrawable bg(int color, int radiusDp) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
         d.setCornerRadius(dp(radiusDp));
         return d;
     }
 
-    private int clamp(int v, int min, int max) {
-        return Math.max(min, Math.min(max, v));
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private static class Control {
-        final SeekBar bar;
-        final TextView value;
-        Control(SeekBar bar, TextView value) {
-            this.bar = bar;
-            this.value = value;
-        }
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }
