@@ -366,6 +366,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             runOnPlayerThread(() -> {
                 try{
                     MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+                        .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,"mp3:"+mediaId)
                         .putString(MediaMetadataCompat.METADATA_KEY_TITLE,t)
                         .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,a)
                         .putString(MediaMetadataCompat.METADATA_KEY_ALBUM,al);
