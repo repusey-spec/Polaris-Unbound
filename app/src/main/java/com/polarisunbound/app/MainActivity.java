@@ -41,7 +41,6 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout pageHost;
     private TextView scheduleView;
     private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
-    private final Handler galleryHandler=new Handler(Looper.getMainLooper());
     private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
     private String currentPage="home";
@@ -164,7 +163,6 @@ public class MainActivity extends AppCompatActivity {
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         status.setText(label+" 연결 중…");
-        galleryHandler.removeCallbacksAndMessages(null);
         if(id!=null && id.startsWith("mp3:")){
             selectedRadioId=null;
             scheduleHandler.removeCallbacksAndMessages(null);
@@ -532,7 +530,7 @@ public class MainActivity extends AppCompatActivity {
     }
     @Override public void onBackPressed(){ super.onBackPressed(); }
     @Override protected void onDestroy(){
-        scheduleHandler.removeCallbacksAndMessages(null); galleryHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
+        scheduleHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
         if(browser!=null && browser.isConnected()) browser.disconnect(); super.onDestroy();
     }
 }
