@@ -276,8 +276,6 @@ public final class CurrentProgramResolver {
     }
 
     public static long nextRefreshDelay(String id,Result r){
-        if("gallery".equals(id)) return 30000L;
-
         Calendar c=Calendar.getInstance(timeZoneFor(id));
         int minute=c.get(Calendar.MINUTE);
         int second=c.get(Calendar.SECOND);
