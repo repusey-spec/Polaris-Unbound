@@ -86,6 +86,24 @@ public class MainActivity extends AppCompatActivity {
         return v;
     }
 
+    private TextView stopButton(){
+        TextView v=new TextView(this);
+        v.setText("■  정지");
+        v.setTextSize(16);
+        v.setGravity(17);
+        v.setPadding(24,18,24,18);
+        v.setTextColor(Color.WHITE);
+
+        GradientDrawable bg=new GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[]{0xE62A2A2F,0xE64A2027});
+        bg.setCornerRadius(48f);
+        bg.setStroke(2,0x66FFFFFF);
+        v.setBackground(bg);
+        if(android.os.Build.VERSION.SDK_INT>=21) v.setElevation(7f);
+        return v;
+    }
+
     private ImageButton stationButton(String id,String description){
         ImageButton v=new ImageButton(this);
         v.setImageBitmap(StationArt.bitmap(this,id,512));
@@ -146,8 +164,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshTabs(){
         tabsBar.removeAllViews();
-        TextView t1=tab("1 라디오","radio".equals(currentPage));
-        TextView t2=tab("2 MP3","mp3".equals(currentPage));
+        TextView t1=tab("라디오","radio".equals(currentPage));
+        TextView t2=tab("MP3","mp3".equals(currentPage));
         addTab(t1); addTab(t2);
         t1.setOnClickListener(v->showDomestic()); t2.setOnClickListener(v->showMp3());
     }
@@ -157,7 +175,11 @@ public class MainActivity extends AppCompatActivity {
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setTextColor(Color.WHITE); status.setPadding(0,0,0,12); body.addView(status);
-        TextView stop=button("■ 정지"); stop.setTextSize(16); stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); }); body.addView(stop);
+        TextView stop=stopButton();
+        stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); });
+        LinearLayout.LayoutParams stopLp=new LinearLayout.LayoutParams(-1,-2);
+        stopLp.setMargins(0,2,0,16);
+        body.addView(stop,stopLp);
         sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
     private void playId(String id,String label){
@@ -590,7 +612,6 @@ public class MainActivity extends AppCompatActivity {
     private void addSchedulePanel(){
         scheduleView=new TextView(this); scheduleView.setText("편성정보"); scheduleView.setTextSize(17);
         scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(12,24,12,20);
-        scheduleView.setOnLongClickListener(v->{ probeOfficialSchedules(); return true; });
         body.addView(scheduleView,new LinearLayout.LayoutParams(-1,-2));
         if(selectedRadioId!=null) refreshSchedule(selectedRadioId);
     }

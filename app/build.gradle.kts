@@ -7,8 +7,8 @@ android {
         applicationId = "com.polarisunbound.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 28
-        versionName = "0.28"
+        versionCode = 29
+        versionName = "0.29"
     }
 
     signingConfigs {
@@ -31,6 +31,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.media:media:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
 }

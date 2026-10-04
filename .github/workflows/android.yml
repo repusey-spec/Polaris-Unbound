@@ -21,6 +21,76 @@ jobs:
         run: |
           base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
           keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
+      - name: Verify Naver radio schedule contract
+        run: |
+          python - <<'PY'
+          import datetime, json, re, urllib.parse, urllib.request
+          from zoneinfo import ZoneInfo
+
+          endpoint = "https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
+          referer = "https://m.search.naver.com/search.naver?where=m&query=%ED%8E%B8%EC%84%B1%ED%91%9C"
+          service_ids = {
+              "KBS CoolFM": "815457",
+              "MBC FM4U": "815463",
+              "CBS MusicFM": "815449",
+              "MBC StandardFM": "815464",
+              "SBS PowerFM": "815467",
+          }
+
+          day = datetime.datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d")
+          now = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
+          now_min = now.hour * 60 + now.minute
+
+          for name, sid in service_ids.items():
+              params = urllib.parse.urlencode({
+                  "key": "SingleChannelDailySchedule",
+                  "where": "m",
+                  "pkid": "66",
+                  "u1": sid,
+                  "u2": day,
+              })
+              req = urllib.request.Request(
+                  endpoint + "?" + params,
+                  headers={
+                      "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36",
+                      "Referer": referer,
+                      "Accept": "application/json,text/plain,*/*",
+                      "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.7",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=15) as res:
+                  data = json.loads(res.read().decode("utf-8"))
+
+              assert str(data.get("statusCode", "")).lower() == "success", (name, data.get("statusCode"))
+              html = "".join(data.get("dataHtml") or [])
+              assert html, f"{name}: empty dataHtml"
+
+              times = re.findall(r'(?is)<div[^>]*class="time"[^>]*>\s*(\d{1,2}:\d{2})\s*</div>', html)
+              raw_titles = re.findall(r'(?is)<div[^>]*class="pr_title"[^>]*>(.*?)</div>', html)
+              titles = []
+              for raw_title in raw_titles:
+                  title = re.sub(r"(?is)<[^>]+>", " ", raw_title)
+                  title = re.sub(r"\s+", " ", title).strip()
+                  titles.append(title)
+
+              assert times, f"{name}: no Naver time fields"
+              assert titles, f"{name}: no Naver title fields"
+              assert len(times) == len(titles), f"{name}: time/title mismatch {len(times)}/{len(titles)}"
+
+              entries = [(hhmm, title) for hhmm, title in zip(times, titles)
+                         if title and re.search(r"[A-Za-z가-힣]", title)]
+              assert entries, f"{name}: Naver semantic fields produced zero entries"
+
+              current = None
+              for hhmm, title in entries:
+                  h, m = map(int, hhmm.split(":"))
+                  if h * 60 + m <= now_min:
+                      current = (hhmm, title)
+              if current is None:
+                  current = entries[-1]
+
+              print(name, "OK", sid, "rows", len(entries), "current", current[0], current[1])
+          PY
       - run: gradle assembleDebug
       - name: Verify APK signature
         run: |
