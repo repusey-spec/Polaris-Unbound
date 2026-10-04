@@ -610,7 +610,7 @@ public final class CurrentProgramResolver {
         int minute=c.get(Calendar.MINUTE);
         int second=c.get(Calendar.SECOND);
         int milli=c.get(Calendar.MILLISECOND);
-        int[] marks={5,10,30,35};
+        int[] marks={0,5,10,30,35};
 
         int nextHourOffset=0;
         int target=-1;
