@@ -55,7 +55,8 @@ public final class CurrentProgramResolver {
                 return station+"  |  SF "+f.format(new Date())+"\n"+program;
             }
             if(program==null||program.trim().isEmpty()||program.equals(station)) return station;
-            return station+"\n"+aaTitle();
+            String prefix=(startLabel==null||startLabel.isEmpty())?"":startLabel+" ";
+            return station+"\n"+prefix+program;
         }
     }
 
@@ -138,7 +139,7 @@ public final class CurrentProgramResolver {
         String now=(a>=0&&b>a)?text.substring(a+"now playing".length(),b).trim():"";
         now=now.replaceAll("\\s+"," ").trim();
         if(now.length()>96) now=now.substring(0,96).trim();
-        if(now.isEmpty()) now=station;
+        if(now.isEmpty()) throw new IllegalStateException("No Gallery Now Playing");
         return new Result(station,now,"",-1,-1,System.currentTimeMillis());
     }
 
@@ -164,6 +165,7 @@ public final class CurrentProgramResolver {
             int start=hh*60+mm;
             if(!byStart.containsKey(start)) byStart.put(start,raw);
         }
+        if(byStart.isEmpty()) throw new IllegalStateException("No schedule entries for "+id);
         return selectCurrent(id,station,byStart);
     }
 
@@ -185,6 +187,7 @@ public final class CurrentProgramResolver {
             if(title.length()>80) title=title.substring(Math.max(0,title.length()-80)).trim();
             if(!byStart.containsKey(start)) byStart.put(start,title);
         }
+        if(byStart.isEmpty()) throw new IllegalStateException("No KIIS schedule entries");
         return selectCurrent(id,station,byStart);
     }
 
