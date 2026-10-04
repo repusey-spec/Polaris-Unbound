@@ -116,6 +116,8 @@ jobs:
                   if title and re.search(r"[A-Za-z가-힣]", title):
                       entries.append((hhmm, title))
 
+              if not entries:
+                  print("RAW_HTML_SAMPLE", name, repr(html[:6000]))
               assert entries, f"{name}: Java-compatible parser found zero entries"
               now = datetime.datetime.now(ZoneInfo("Asia/Seoul"))
               now_min = now.hour * 60 + now.minute
