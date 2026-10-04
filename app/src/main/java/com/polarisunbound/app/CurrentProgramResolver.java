@@ -45,8 +45,7 @@ public final class CurrentProgramResolver {
 
         public String aaTitle(){
             if(program==null||program.trim().isEmpty()) return station;
-            if(startLabel==null||startLabel.isEmpty()) return program;
-            return startLabel+" "+program;
+            return program;
         }
 
         public String phoneText(String id){
@@ -278,12 +277,28 @@ public final class CurrentProgramResolver {
 
     public static long nextRefreshDelay(String id,Result r){
         if("gallery".equals(id)) return 30000L;
-        if(r==null||r.nextStartMinutes<0) return 10L*60L*1000L;
+
         Calendar c=Calendar.getInstance(timeZoneFor(id));
-        int now=c.get(Calendar.HOUR_OF_DAY)*60+c.get(Calendar.MINUTE);
-        int diff=r.nextStartMinutes-now;
-        if(diff<=0) diff+=24*60;
-        long ms=diff*60L*1000L+15000L;
-        return Math.max(60000L,Math.min(ms,6L*60L*60L*1000L));
+        int minute=c.get(Calendar.MINUTE);
+        int second=c.get(Calendar.SECOND);
+        int milli=c.get(Calendar.MILLISECOND);
+        int[] marks={5,10,30,35};
+
+        int nextHourOffset=0;
+        int target=-1;
+        for(int mark:marks){
+            if(mark>minute || (mark==minute && (second<1 || (second==1 && milli==0)))){
+                target=mark;
+                break;
+            }
+        }
+        if(target<0){
+            target=marks[0];
+            nextHourOffset=1;
+        }
+
+        int deltaMinutes=(nextHourOffset*60)+target-minute;
+        long delay=deltaMinutes*60L*1000L-second*1000L-milli+1500L;
+        return Math.max(1000L,delay);
     }
 }
