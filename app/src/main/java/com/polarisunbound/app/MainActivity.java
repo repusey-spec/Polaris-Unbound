@@ -8,12 +8,14 @@ import android.database.Cursor;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.support.v4.media.MediaBrowserCompat;
+import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.widget.*;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Typeface;
 import android.util.Base64;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
@@ -23,6 +25,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
 import android.os.Handler;
 import android.os.Looper;
 import java.net.*;
@@ -40,6 +43,13 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
     private TextView scheduleView;
+    private LinearLayout miniPlayer;
+    private ImageView miniPlayerArt;
+    private TextView miniPlayerTitle;
+    private TextView miniPlayerSubtitle;
+    private TextView miniPlayerToggle;
+    private MediaMetadataCompat lastMetadata;
+    private PlaybackStateCompat lastPlaybackState;
     private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
     private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
@@ -58,8 +68,20 @@ public class MainActivity extends AppCompatActivity {
                         controller=new MediaControllerCompat(MainActivity.this,browser.getSessionToken());
                         MediaControllerCompat.setMediaController(MainActivity.this,controller);
                         controller.registerCallback(new MediaControllerCompat.Callback(){
-                            @Override public void onPlaybackStateChanged(PlaybackStateCompat s){ updateStatus(s); }
+                            @Override public void onPlaybackStateChanged(PlaybackStateCompat s){
+                                lastPlaybackState=s;
+                                updateStatus(s);
+                                updateMiniPlayerState();
+                            }
+                            @Override public void onMetadataChanged(MediaMetadataCompat metadata){
+                                lastMetadata=metadata;
+                                updateMiniPlayerMetadata();
+                            }
                         });
+                        lastMetadata=controller.getMetadata();
+                        lastPlaybackState=controller.getPlaybackState();
+                        updateMiniPlayerMetadata();
+                        updateMiniPlayerState();
                         if(status!=null) status.setText("재생 서비스 연결됨");
                     }catch(Exception e){ if(status!=null) status.setText("서비스 연결 오류"); }
                 }
@@ -153,6 +175,9 @@ public class MainActivity extends AppCompatActivity {
         tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
         root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
         pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
+        miniPlayer=buildMiniPlayer();
+        miniPlayer.setVisibility(View.GONE);
+        root.addView(miniPlayer,new LinearLayout.LayoutParams(-1,-2));
         shell.addView(root,new FrameLayout.LayoutParams(-1,-1));
         setContentView(shell);
     }
@@ -174,17 +199,20 @@ public class MainActivity extends AppCompatActivity {
         ensureShell(); refreshTabs(); pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
-        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize(16); status.setTextColor(Color.WHITE); status.setPadding(0,0,0,12); body.addView(status);
-        TextView stop=stopButton();
-        stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); });
-        LinearLayout.LayoutParams stopLp=new LinearLayout.LayoutParams(-1,-2);
-        stopLp.setMargins(0,2,0,16);
-        body.addView(stop,stopLp);
+        status=new TextView(this); status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비"); status.setTextSize("mp3".equals(currentPage)?13:16); status.setTextColor(0xDDFFFFFF); status.setPadding(0,0,0,"mp3".equals(currentPage)?8:12); body.addView(status);
+        if(!"mp3".equals(currentPage)){
+            TextView stop=stopButton();
+            stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); });
+            LinearLayout.LayoutParams stopLp=new LinearLayout.LayoutParams(-1,-2);
+            stopLp.setMargins(0,2,0,16);
+            body.addView(stop,stopLp);
+        }
+        updateMiniPlayerVisibility();
         sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
-        status.setText(label+" 연결 중…");
+        if(status!=null) status.setText(label+" 연결 중…");
         if(id!=null && id.startsWith("mp3:")){
             selectedRadioId=null;
             scheduleHandler.removeCallbacksAndMessages(null);
@@ -194,17 +222,21 @@ public class MainActivity extends AppCompatActivity {
             refreshSchedule(id);
         }
         try{ controller.getTransportControls().playFromMediaId(id,null); }
-        catch(Throwable e){ status.setText("재생 요청 오류"); }
+        catch(Throwable e){ if(status!=null) status.setText("재생 요청 오류"); }
     }
 
     private void updateStatus(PlaybackStateCompat s){
-        if(status==null||s==null) return;
+        if(s==null) return;
         int st=s.getState();
-        if(st==PlaybackStateCompat.STATE_PLAYING) status.setText("▶ 재생 중");
-        else if(st==PlaybackStateCompat.STATE_BUFFERING) status.setText("연결 중…");
-        else if(st==PlaybackStateCompat.STATE_PAUSED) status.setText("일시정지");
-        else if(st==PlaybackStateCompat.STATE_ERROR) status.setText("재생 오류: "+s.getErrorMessage());
-        else if(st==PlaybackStateCompat.STATE_STOPPED) status.setText("정지");
+        if(status!=null){
+            if(st==PlaybackStateCompat.STATE_PLAYING) status.setText("▶ 재생 중");
+            else if(st==PlaybackStateCompat.STATE_BUFFERING) status.setText("연결 중…");
+            else if(st==PlaybackStateCompat.STATE_PAUSED) status.setText("일시정지");
+            else if(st==PlaybackStateCompat.STATE_ERROR) status.setText("재생 오류: "+s.getErrorMessage());
+            else if(st==PlaybackStateCompat.STATE_STOPPED) status.setText("정지");
+        }
+        lastPlaybackState=s;
+        updateMiniPlayerState();
     }
 
     private void showHome(){
@@ -485,46 +517,486 @@ public class MainActivity extends AppCompatActivity {
         addSchedulePanel();
     }
 
-    private void showMp3(){
-        selectedRadioId=null;
-        scheduleHandler.removeCallbacksAndMessages(null);
-        currentPage="mp3"; base("MP3");
-        if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
-            TextView t=new TextView(this); t.setText("음악 권한을 허용한 뒤 MP3 메뉴를 다시 열어주세요."); t.setTextSize(18); t.setTextColor(Color.WHITE); body.addView(t); requestAudioPermission(); return;
+    private int dp(int value){
+        return Math.round(value*getResources().getDisplayMetrics().density);
+    }
+
+    private GradientDrawable roundedBg(int color,float radiusDp){
+        GradientDrawable bg=new GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp((int)radiusDp));
+        return bg;
+    }
+
+    private TextView mp3SectionTitle(String text){
+        TextView v=new TextView(this);
+        v.setText(text);
+        v.setTextSize(21);
+        v.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        v.setTextColor(Color.WHITE);
+        v.setPadding(2,dp(18),2,dp(10));
+        return v;
+    }
+
+    private TextView mp3Shortcut(String icon,String label){
+        TextView v=new TextView(this);
+        v.setText(icon+"\n"+label);
+        v.setTextSize(16);
+        v.setGravity(17);
+        v.setTextColor(Color.WHITE);
+        v.setPadding(dp(8),dp(18),dp(8),dp(18));
+        v.setBackground(roundedBg(0xAA24242A,18));
+        if(android.os.Build.VERSION.SDK_INT>=21) v.setElevation(dp(2));
+        return v;
+    }
+
+    private View artworkView(long albumId,int sizeDp){
+        int size=dp(sizeDp);
+        FrameLayout frame=new FrameLayout(this);
+        frame.setBackground(roundedBg(0xFF303038,16));
+        frame.setClipToOutline(true);
+
+        Bitmap art=loadAlbumArt(albumId,size);
+        if(art!=null){
+            ImageView img=new ImageView(this);
+            img.setImageBitmap(art);
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            frame.addView(img,new FrameLayout.LayoutParams(-1,-1));
+        }else{
+            TextView note=new TextView(this);
+            note.setText("♫");
+            note.setTextSize(Math.max(28,sizeDp/3));
+            note.setGravity(17);
+            note.setTextColor(0xCCFFFFFF);
+            frame.addView(note,new FrameLayout.LayoutParams(-1,-1));
         }
-        String[] names={"최근 재생","폴더","앨범","아티스트","전체 곡","즐겨찾기"};
-        for(int r=0;r<2;r++){
-            LinearLayout row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
-            body.addView(row,new LinearLayout.LayoutParams(-1,-2));
-            for(int c=0;c<3;c++){
-                final int at=r*3+c;
-                TextView v=button(names[at]); v.setTextSize(16);
-                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1); lp.setMargins(8,8,8,8); row.addView(v,lp);
-                v.setOnClickListener(x->{
-                    if(at==0) showMp3Ids("최근 재생",mp3RecentIds());
-                    else if(at==1) showMp3Groups("폴더",true);
-                    else if(at==2) showMp3NamedGroups("앨범",MediaStore.Audio.Media.ALBUM);
-                    else if(at==3) showMp3NamedGroups("아티스트",MediaStore.Audio.Media.ARTIST);
-                    else if(at==4) showMp3Tracks("전체 곡",null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
-                    else showMp3Ids("즐겨찾기",mp3FavoriteIds());
-                });
-            }
+        frame.setLayoutParams(new LinearLayout.LayoutParams(size,size));
+        return frame;
+    }
+
+    private Bitmap loadAlbumArt(long albumId,int targetPx){
+        if(albumId<=0) return null;
+        android.net.Uri uri=ContentUris.withAppendedId(android.net.Uri.parse("content://media/external/audio/albumart"),albumId);
+        try(InputStream in=getContentResolver().openInputStream(uri)){
+            if(in==null) return null;
+            Bitmap b=BitmapFactory.decodeStream(in);
+            if(b==null) return null;
+            if(b.getWidth()<=targetPx && b.getHeight()<=targetPx) return b;
+            float scale=Math.min((float)targetPx/b.getWidth(),(float)targetPx/b.getHeight());
+            Bitmap out=Bitmap.createScaledBitmap(b,Math.max(1,(int)(b.getWidth()*scale)),Math.max(1,(int)(b.getHeight()*scale)),true);
+            if(out!=b) b.recycle();
+            return out;
+        }catch(Exception ignored){ return null; }
+    }
+
+    private LinearLayout buildMiniPlayer(){
+        LinearLayout bar=new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(14),dp(9),dp(12),dp(9));
+        bar.setBackground(roundedBg(0xF2222228,0));
+
+        miniPlayerArt=new ImageView(this);
+        miniPlayerArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        miniPlayerArt.setBackground(roundedBg(0xFF3A3A42,10));
+        LinearLayout.LayoutParams artLp=new LinearLayout.LayoutParams(dp(52),dp(52));
+        bar.addView(miniPlayerArt,artLp);
+
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(12),0,dp(8),0);
+        miniPlayerTitle=new TextView(this);
+        miniPlayerTitle.setText("재생 중인 곡 없음");
+        miniPlayerTitle.setTextSize(15);
+        miniPlayerTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        miniPlayerTitle.setTextColor(Color.WHITE);
+        miniPlayerTitle.setSingleLine(true);
+        miniPlayerSubtitle=new TextView(this);
+        miniPlayerSubtitle.setText("");
+        miniPlayerSubtitle.setTextSize(12);
+        miniPlayerSubtitle.setTextColor(0xBFFFFFFF);
+        miniPlayerSubtitle.setSingleLine(true);
+        labels.addView(miniPlayerTitle,new LinearLayout.LayoutParams(-1,-2));
+        labels.addView(miniPlayerSubtitle,new LinearLayout.LayoutParams(-1,-2));
+        bar.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+
+        miniPlayerToggle=new TextView(this);
+        miniPlayerToggle.setText("▶");
+        miniPlayerToggle.setTextSize(24);
+        miniPlayerToggle.setGravity(17);
+        miniPlayerToggle.setTextColor(Color.WHITE);
+        miniPlayerToggle.setPadding(dp(12),dp(8),dp(12),dp(8));
+        miniPlayerToggle.setOnClickListener(v->{
+            if(controller==null) return;
+            PlaybackStateCompat st=controller.getPlaybackState();
+            if(st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING)
+                controller.getTransportControls().pause();
+            else
+                controller.getTransportControls().play();
+        });
+        bar.addView(miniPlayerToggle,new LinearLayout.LayoutParams(dp(58),-1));
+        return bar;
+    }
+
+    private boolean isMp3Metadata(MediaMetadataCompat m){
+        if(m==null) return false;
+        String mediaId=m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        return mediaId!=null && mediaId.startsWith("mp3:");
+    }
+
+    private void updateMiniPlayerVisibility(){
+        if(miniPlayer==null) return;
+        miniPlayer.setVisibility("mp3".equals(currentPage) && isMp3Metadata(lastMetadata) ? View.VISIBLE : View.GONE);
+    }
+
+    private void updateMiniPlayerMetadata(){
+        if(lastMetadata==null && controller!=null) lastMetadata=controller.getMetadata();
+        if(miniPlayer==null) return;
+        updateMiniPlayerVisibility();
+        if(!isMp3Metadata(lastMetadata)) return;
+
+        String title=lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+        String artist=lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+        if(miniPlayerTitle!=null) miniPlayerTitle.setText(title==null||title.isEmpty()?"(제목 없음)":title);
+        if(miniPlayerSubtitle!=null) miniPlayerSubtitle.setText(artist==null?"":artist);
+        Bitmap art=lastMetadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
+        if(miniPlayerArt!=null){
+            miniPlayerArt.setImageBitmap(art);
+            miniPlayerArt.setBackground(roundedBg(art==null?0xFF3A3A42:0x00000000,10));
         }
     }
 
+    private void updateMiniPlayerState(){
+        if(miniPlayerToggle==null) return;
+        PlaybackStateCompat st=lastPlaybackState;
+        if(st==null && controller!=null) st=controller.getPlaybackState();
+        boolean playing=st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING;
+        miniPlayerToggle.setText(playing?"Ⅱ":"▶");
+    }
+
+    private void showMp3(){
+        selectedRadioId=null;
+        scheduleHandler.removeCallbacksAndMessages(null);
+        currentPage="mp3"; base("내 음악");
+
+        if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+            TextView t=new TextView(this);
+            t.setText("음악 권한을 허용한 뒤 MP3 메뉴를 다시 열어주세요.");
+            t.setTextSize(18); t.setTextColor(Color.WHITE); t.setPadding(4,dp(18),4,dp(18));
+            body.addView(t);
+            requestAudioPermission();
+            return;
+        }
+
+        addMp3Search();
+        addRecentStrip();
+
+        body.addView(mp3SectionTitle("내 라이브러리"));
+        addLibraryShortcuts();
+
+        body.addView(mp3SectionTitle("앨범"));
+        addAlbumGridPreview(6);
+        updateMiniPlayerMetadata();
+        updateMiniPlayerState();
+    }
+
+    private void addMp3Search(){
+        EditText search=new EditText(this);
+        search.setHint("곡, 아티스트, 앨범 검색");
+        search.setHintTextColor(0x99FFFFFF);
+        search.setTextColor(Color.WHITE);
+        search.setTextSize(16);
+        search.setSingleLine(true);
+        search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        search.setPadding(dp(18),0,dp(18),0);
+        search.setBackground(roundedBg(0xAA2B2B31,24));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(50));
+        lp.setMargins(0,dp(4),0,dp(10));
+        body.addView(search,lp);
+        search.setOnEditorActionListener((v,action,event)->{
+            if(action==EditorInfo.IME_ACTION_SEARCH || (event!=null && event.getAction()==android.view.KeyEvent.ACTION_DOWN)){
+                String q=v.getText().toString().trim();
+                if(!q.isEmpty()) showMp3Search(q);
+                return true;
+            }
+            return false;
+        });
+    }
+
+    private void showMp3Search(String query){
+        String like="%"+query+"%";
+        showMp3Tracks("검색 · "+query,
+            MediaStore.Audio.Media.TITLE+" LIKE ? OR "+MediaStore.Audio.Media.ARTIST+" LIKE ? OR "+MediaStore.Audio.Media.ALBUM+" LIKE ?",
+            new String[]{like,like,like},
+            MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
+    }
+
+    private void addRecentStrip(){
+        body.addView(mp3SectionTitle("최근 재생"));
+        List<Long> ids=mp3RecentIds();
+        if(ids.isEmpty()){
+            TextView empty=new TextView(this);
+            empty.setText("아직 재생한 곡이 없습니다.");
+            empty.setTextSize(14); empty.setTextColor(0xAAFFFFFF); empty.setPadding(2,dp(4),2,dp(12));
+            body.addView(empty);
+            return;
+        }
+
+        HorizontalScrollView sc=new HorizontalScrollView(this);
+        sc.setHorizontalScrollBarEnabled(false);
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        int shown=0;
+        for(Long id:ids){
+            if(shown++>=10) break;
+            addRecentCard(row,id);
+        }
+        sc.addView(row,new HorizontalScrollView.LayoutParams(-2,-2));
+        body.addView(sc,new LinearLayout.LayoutParams(-1,-2));
+    }
+
+    private void addRecentCard(LinearLayout row,long mediaId){
+        android.net.Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
+        String[] p={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM_ID};
+        try(Cursor c=getContentResolver().query(uri,p,null,null,null)){
+            if(c==null||!c.moveToFirst()) return;
+            String title=c.getString(0)==null?"(제목 없음)":c.getString(0);
+            String artist=c.getString(1)==null?"":c.getString(1);
+            long albumId=c.getLong(2);
+
+            LinearLayout card=new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(0,0,0,dp(6));
+            card.addView(artworkView(albumId,128));
+
+            TextView t=new TextView(this);
+            t.setText(title);
+            t.setTextSize(14);
+            t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+            t.setTextColor(Color.WHITE);
+            t.setMaxLines(1);
+            t.setPadding(0,dp(7),0,0);
+            card.addView(t,new LinearLayout.LayoutParams(dp(128),-2));
+
+            TextView a=new TextView(this);
+            a.setText(artist);
+            a.setTextSize(12);
+            a.setTextColor(0xAAFFFFFF);
+            a.setMaxLines(1);
+            card.addView(a,new LinearLayout.LayoutParams(dp(128),-2));
+
+            card.setOnClickListener(v->playId("mp3:"+mediaId,title));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(128),-2);
+            lp.setMargins(0,0,dp(12),0);
+            row.addView(card,lp);
+        }catch(Exception ignored){}
+    }
+
+    private void addLibraryShortcuts(){
+        String[][] items={
+            {"★","즐겨찾기"},{"♫","전체 곡"},
+            {"▣","앨범"},{"♬","아티스트"},
+            {"▤","폴더"},{"↻","최근 추가"}
+        };
+        for(int r=0;r<3;r++){
+            LinearLayout row=new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for(int c=0;c<2;c++){
+                final int at=r*2+c;
+                TextView v=mp3Shortcut(items[at][0],items[at][1]);
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
+                lp.setMargins(c==0?0:dp(6),dp(5),c==0?dp(6):0,dp(5));
+                row.addView(v,lp);
+                v.setOnClickListener(x->{
+                    if(at==0) showMp3Ids("즐겨찾기",mp3FavoriteIds());
+                    else if(at==1) showMp3Tracks("전체 곡",null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
+                    else if(at==2) showMp3Albums();
+                    else if(at==3) showMp3Artists();
+                    else if(at==4) showMp3Groups("폴더",true);
+                    else showMp3Tracks("최근 추가",null,null,MediaStore.Audio.Media.DATE_ADDED+" DESC");
+                });
+            }
+            body.addView(row,new LinearLayout.LayoutParams(-1,-2));
+        }
+    }
+
+    private void addAlbumGridPreview(int limit){
+        String[] p={MediaStore.Audio.Albums._ID,MediaStore.Audio.Albums.ALBUM,MediaStore.Audio.Albums.ARTIST,MediaStore.Audio.Albums.NUMBER_OF_SONGS};
+        try(Cursor c=getContentResolver().query(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,p,null,null,MediaStore.Audio.Albums.ALBUM+" COLLATE NOCASE ASC")){
+            if(c==null||!c.moveToFirst()){
+                addMp3Empty();
+                return;
+            }
+            LinearLayout row=null;
+            int count=0;
+            do{
+                if(count>=limit) break;
+                if(count%2==0){
+                    row=new LinearLayout(this);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    body.addView(row,new LinearLayout.LayoutParams(-1,-2));
+                }
+                long albumId=c.getLong(0);
+                String album=c.getString(1)==null?"(앨범 없음)":c.getString(1);
+                String artist=c.getString(2)==null?"":c.getString(2);
+                int songs=c.getInt(3);
+                addAlbumCard(row,albumId,album,artist,songs);
+                count++;
+            }while(c.moveToNext());
+
+            TextView all=new TextView(this);
+            all.setText("모든 앨범 보기  →");
+            all.setTextSize(15);
+            all.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+            all.setTextColor(Color.WHITE);
+            all.setGravity(android.view.Gravity.CENTER);
+            all.setPadding(dp(12),dp(14),dp(12),dp(14));
+            all.setBackground(roundedBg(0x88303038,18));
+            all.setOnClickListener(v->showMp3Albums());
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+            lp.setMargins(0,dp(8),0,dp(8));
+            body.addView(all,lp);
+        }catch(Exception e){ addMp3Empty(); }
+    }
+
+    private void addAlbumCard(LinearLayout row,long albumId,String album,String artist,int songs){
+        LinearLayout card=new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(4),dp(4),dp(4),dp(12));
+
+        View art=artworkView(albumId,158);
+        LinearLayout.LayoutParams artLp=new LinearLayout.LayoutParams(-1,dp(158));
+        card.addView(art,artLp);
+
+        TextView title=new TextView(this);
+        title.setText(album);
+        title.setTextSize(15);
+        title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        title.setTextColor(Color.WHITE);
+        title.setMaxLines(1);
+        title.setPadding(0,dp(8),0,0);
+        card.addView(title);
+
+        TextView sub=new TextView(this);
+        sub.setText(artist+(songs>0?" · "+songs+"곡":""));
+        sub.setTextSize(12);
+        sub.setTextColor(0xAAFFFFFF);
+        sub.setMaxLines(1);
+        card.addView(sub);
+
+        card.setOnClickListener(v->showMp3Album(albumId,album,artist));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
+        lp.setMargins(row.getChildCount()==0?0:dp(6),dp(4),row.getChildCount()==0?dp(6):0,dp(4));
+        row.addView(card,lp);
+    }
+
+    private void showMp3Albums(){
+        currentPage="mp3"; base("앨범"); addMp3Back();
+        String[] p={MediaStore.Audio.Albums._ID,MediaStore.Audio.Albums.ALBUM,MediaStore.Audio.Albums.ARTIST,MediaStore.Audio.Albums.NUMBER_OF_SONGS};
+        try(Cursor c=getContentResolver().query(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,p,null,null,MediaStore.Audio.Albums.ALBUM+" COLLATE NOCASE ASC")){
+            if(c==null||!c.moveToFirst()){ addMp3Empty(); return; }
+            LinearLayout row=null;
+            int count=0;
+            do{
+                if(count%2==0){
+                    row=new LinearLayout(this);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    body.addView(row,new LinearLayout.LayoutParams(-1,-2));
+                }
+                addAlbumCard(row,c.getLong(0),c.getString(1)==null?"(앨범 없음)":c.getString(1),c.getString(2)==null?"":c.getString(2),c.getInt(3));
+                count++;
+            }while(c.moveToNext());
+        }catch(Exception e){ addMp3Empty(); }
+    }
+
+    private void showMp3Album(long albumId,String album,String artist){
+        currentPage="mp3"; base(album); addMp3Back();
+
+        LinearLayout hero=new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        View art=artworkView(albumId,230);
+        hero.addView(art,new LinearLayout.LayoutParams(dp(230),dp(230)));
+
+        TextView t=new TextView(this);
+        t.setText(album);
+        t.setTextSize(24); t.setTypeface(Typeface.DEFAULT,Typeface.BOLD); t.setTextColor(Color.WHITE); t.setGravity(17);
+        t.setPadding(0,dp(14),0,dp(2));
+        hero.addView(t,new LinearLayout.LayoutParams(-1,-2));
+
+        TextView a=new TextView(this);
+        a.setText(artist);
+        a.setTextSize(14); a.setTextColor(0xBBFFFFFF); a.setGravity(17);
+        hero.addView(a,new LinearLayout.LayoutParams(-1,-2));
+        body.addView(hero,new LinearLayout.LayoutParams(-1,-2));
+
+        body.addView(mp3SectionTitle("곡"));
+        addMp3TracksToBody(MediaStore.Audio.Media.ALBUM_ID+"=?",new String[]{String.valueOf(albumId)},MediaStore.Audio.Media.TRACK+" ASC");
+    }
+
+    private void showMp3Artists(){
+        currentPage="mp3"; base("아티스트"); addMp3Back();
+        String[] p={MediaStore.Audio.Artists._ID,MediaStore.Audio.Artists.ARTIST,MediaStore.Audio.Artists.NUMBER_OF_TRACKS,MediaStore.Audio.Artists.NUMBER_OF_ALBUMS};
+        try(Cursor c=getContentResolver().query(MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,p,null,null,MediaStore.Audio.Artists.ARTIST+" COLLATE NOCASE ASC")){
+            if(c==null||!c.moveToFirst()){ addMp3Empty(); return; }
+            do{
+                long artistId=c.getLong(0);
+                String artist=c.getString(1)==null?"(아티스트 없음)":c.getString(1);
+                int tracks=c.getInt(2), albums=c.getInt(3);
+
+                TextView v=new TextView(this);
+                v.setText("♬  "+artist+"\n     "+albums+"앨범 · "+tracks+"곡");
+                v.setTextSize(16);
+                v.setTextColor(Color.WHITE);
+                v.setPadding(dp(18),dp(16),dp(18),dp(16));
+                v.setBackground(roundedBg(0xAA292930,18));
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+                lp.setMargins(0,dp(5),0,dp(5));
+                body.addView(v,lp);
+                v.setOnClickListener(x->showMp3Artist(artistId,artist));
+            }while(c.moveToNext());
+        }catch(Exception e){ addMp3Empty(); }
+    }
+
+    private void showMp3Artist(long artistId,String artist){
+        currentPage="mp3"; base(artist); addMp3Back();
+        addMp3TracksToBody(MediaStore.Audio.Media.ARTIST_ID+"=?",new String[]{String.valueOf(artistId)},MediaStore.Audio.Media.ALBUM+" COLLATE NOCASE ASC, "+MediaStore.Audio.Media.TRACK+" ASC");
+    }
+
     private void addMp3Back(){
-        TextView back=button("← MP3"); back.setTextSize(15); back.setOnClickListener(v->showMp3()); body.addView(back);
+        TextView back=new TextView(this);
+        back.setText("←  MP3");
+        back.setTextSize(15);
+        back.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        back.setTextColor(Color.WHITE);
+        back.setPadding(dp(14),dp(11),dp(14),dp(11));
+        back.setBackground(roundedBg(0x88303038,18));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+        lp.setMargins(0,0,0,dp(10));
+        body.addView(back,lp);
+        back.setOnClickListener(v->showMp3());
     }
 
     private void showMp3Tracks(String title,String extraSelection,String[] args,String sort){
         currentPage="mp3"; base(title); addMp3Back();
-        String[] p={MediaStore.Audio.Media._ID,MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+        addMp3TracksToBody(extraSelection,args,sort);
+    }
+
+    private void addMp3TracksToBody(String extraSelection,String[] args,String sort){
+        String[] p={
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID
+        };
         String sel=MediaStore.Audio.Media.IS_MUSIC+" != 0";
         if(extraSelection!=null&&!extraSelection.isEmpty()) sel+=" AND ("+extraSelection+")";
         try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,p,sel,args,sort)){
-            if(c==null||c.getCount()==0){ addMp3Empty(); return; }
-            int idc=c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID), tc=c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE), ac=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST), alc=c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM);
-            while(c.moveToNext()) addMp3Track(c.getLong(idc),c.getString(tc),c.getString(ac),c.getString(alc));
+            if(c==null||!c.moveToFirst()){ addMp3Empty(); return; }
+            do{
+                addMp3Track(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4));
+            }while(c.moveToNext());
         }catch(Exception e){ addMp3Empty(); }
     }
 
@@ -533,23 +1005,10 @@ public class MainActivity extends AppCompatActivity {
         if(ids.isEmpty()){ addMp3Empty(); return; }
         for(Long id:ids){
             android.net.Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,id);
-            String[] p={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM};
+            String[] p={MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST,MediaStore.Audio.Media.ALBUM,MediaStore.Audio.Media.ALBUM_ID};
             try(Cursor c=getContentResolver().query(uri,p,null,null,null)){
-                if(c!=null&&c.moveToFirst()) addMp3Track(id,c.getString(0),c.getString(1),c.getString(2));
+                if(c!=null&&c.moveToFirst()) addMp3Track(id,c.getString(0),c.getString(1),c.getString(2),c.getLong(3));
             }catch(Exception ignored){}
-        }
-    }
-
-    private void showMp3NamedGroups(String title,String column){
-        currentPage="mp3"; base(title); addMp3Back();
-        LinkedHashSet<String> groups=new LinkedHashSet<>();
-        try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,new String[]{column},MediaStore.Audio.Media.IS_MUSIC+" != 0",null,column+" COLLATE NOCASE ASC")){
-            if(c!=null){ int ci=c.getColumnIndexOrThrow(column); while(c.moveToNext()){ String v=c.getString(ci); if(v!=null&&!v.trim().isEmpty()) groups.add(v); } }
-        }catch(Exception ignored){}
-        if(groups.isEmpty()){ addMp3Empty(); return; }
-        for(String g:groups){
-            TextView v=button(g); v.setTextSize(16); body.addView(v);
-            v.setOnClickListener(x->showMp3Tracks(g,column+"=?",new String[]{g},MediaStore.Audio.Media.TRACK+" ASC"));
         }
     }
 
@@ -558,39 +1017,100 @@ public class MainActivity extends AppCompatActivity {
         final String column=android.os.Build.VERSION.SDK_INT>=29 ? MediaStore.Audio.Media.RELATIVE_PATH : MediaStore.Audio.Media.DATA;
         LinkedHashSet<String> groups=new LinkedHashSet<>();
         try(Cursor c=getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,new String[]{column},MediaStore.Audio.Media.IS_MUSIC+" != 0",null,column+" COLLATE NOCASE ASC")){
-            if(c!=null){ int ci=c.getColumnIndexOrThrow(column); while(c.moveToNext()){ String v=c.getString(ci); if(v!=null&&!v.trim().isEmpty()) groups.add(v); } }
+            if(c!=null){
+                int ci=c.getColumnIndexOrThrow(column);
+                while(c.moveToNext()){
+                    String v=c.getString(ci);
+                    if(v!=null&&!v.trim().isEmpty()) groups.add(v);
+                }
+            }
         }catch(Exception ignored){}
+
         if(groups.isEmpty()){ addMp3Empty(); return; }
         for(String g:groups){
             String clean=g.endsWith("/")?g.substring(0,g.length()-1):g;
-            int slash=clean.lastIndexOf('/'); String name=slash>=0?clean.substring(slash+1):clean;
-            TextView v=button(name); v.setTextSize(16); body.addView(v);
+            int slash=clean.lastIndexOf('/');
+            String name=slash>=0?clean.substring(slash+1):clean;
+
+            TextView v=new TextView(this);
+            v.setText("▤  "+name);
+            v.setTextSize(16);
+            v.setTextColor(Color.WHITE);
+            v.setPadding(dp(18),dp(16),dp(18),dp(16));
+            v.setBackground(roundedBg(0xAA292930,18));
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+            lp.setMargins(0,dp(5),0,dp(5));
+            body.addView(v,lp);
             v.setOnClickListener(x->{
-                if(android.os.Build.VERSION.SDK_INT>=29) showMp3Tracks(name,MediaStore.Audio.Media.RELATIVE_PATH+"=?",new String[]{g},MediaStore.Audio.Media.TRACK+" ASC");
-                else showMp3Tracks(name,MediaStore.Audio.Media.DATA+" LIKE ?",new String[]{g.endsWith("/")?g+"%":g+"/%"},MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
+                if(android.os.Build.VERSION.SDK_INT>=29)
+                    showMp3Tracks(name,MediaStore.Audio.Media.RELATIVE_PATH+"=?",new String[]{g},MediaStore.Audio.Media.TRACK+" ASC");
+                else
+                    showMp3Tracks(name,MediaStore.Audio.Media.DATA+" LIKE ?",new String[]{g.endsWith("/")?g+"%":g+"/%"},MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
             });
         }
     }
 
-    private void addMp3Track(long id,String title,String artist,String album){
+    private void addMp3Track(long id,String title,String artist,String album,long albumId){
         String t=title==null||title.isEmpty()?"(제목 없음)":title;
-        String a=artist==null?"":artist, al=album==null?"":album;
-        String sub=a+(al.isEmpty()?"":" · "+al);
+        String a=artist==null?"":artist;
+        String al=album==null?"":album;
         boolean fav=mp3FavoriteIds().contains(id);
-        TextView v=button((fav?"★ ":"")+t+"\n"+sub); v.setTextSize(15);
-        v.setOnClickListener(x->playId("mp3:"+id,t));
-        v.setOnLongClickListener(x->{ toggleMp3Favorite(id); Toast.makeText(this,"즐겨찾기 변경: "+t,Toast.LENGTH_SHORT).show(); return true; });
-        body.addView(v);
+
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8),dp(8),dp(8),dp(8));
+        row.setBackground(roundedBg(0x77232329,16));
+
+        View art=artworkView(albumId,58);
+        row.addView(art,new LinearLayout.LayoutParams(dp(58),dp(58)));
+
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(12),0,dp(8),0);
+        TextView tt=new TextView(this);
+        tt.setText(t); tt.setTextSize(15); tt.setTypeface(Typeface.DEFAULT,Typeface.BOLD); tt.setTextColor(Color.WHITE); tt.setMaxLines(1);
+        TextView sub=new TextView(this);
+        sub.setText(a+(al.isEmpty()?"":" · "+al)); sub.setTextSize(12); sub.setTextColor(0xAAFFFFFF); sub.setMaxLines(1);
+        labels.addView(tt);
+        labels.addView(sub);
+        row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+
+        TextView star=new TextView(this);
+        star.setText(fav?"★":"☆");
+        star.setTextSize(25);
+        star.setTextColor(fav?0xFFFFD54F:0xCCFFFFFF);
+        star.setGravity(17);
+        star.setPadding(dp(8),dp(8),dp(8),dp(8));
+        star.setOnClickListener(v->{
+            toggleMp3Favorite(id);
+            boolean now=mp3FavoriteIds().contains(id);
+            star.setText(now?"★":"☆");
+            star.setTextColor(now?0xFFFFD54F:0xCCFFFFFF);
+        });
+        row.addView(star,new LinearLayout.LayoutParams(dp(54),-1));
+
+        row.setOnClickListener(v->playId("mp3:"+id,t));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+        lp.setMargins(0,dp(4),0,dp(4));
+        body.addView(row,lp);
     }
 
     private void addMp3Empty(){
-        TextView t=new TextView(this); t.setText("표시할 음악 파일이 없습니다."); t.setTextSize(18); t.setTextColor(Color.WHITE); t.setPadding(8,24,8,24); body.addView(t);
+        TextView t=new TextView(this);
+        t.setText("표시할 음악 파일이 없습니다.");
+        t.setTextSize(16);
+        t.setTextColor(0xAAFFFFFF);
+        t.setGravity(17);
+        t.setPadding(dp(8),dp(28),dp(8),dp(28));
+        body.addView(t);
     }
 
     private List<Long> mp3RecentIds(){
         List<Long> out=new ArrayList<>();
         String raw=getSharedPreferences("polaris_mp3",MODE_PRIVATE).getString("recent_ids","");
-        if(raw!=null&&!raw.isEmpty()) for(String x:raw.split(",")) try{ out.add(Long.parseLong(x)); }catch(Exception ignored){}
+        if(raw!=null&&!raw.isEmpty())
+            for(String x:raw.split(",")) try{ out.add(Long.parseLong(x)); }catch(Exception ignored){}
         return out;
     }
 
