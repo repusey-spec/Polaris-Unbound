@@ -49,10 +49,14 @@ public final class CurrentProgramResolver {
         }
 
         public String phoneText(String id){
-            if("gallery".equals(id)){
+            if("kiis".equals(id)||"gallery".equals(id)){
                 SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US);
                 f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles"));
-                return station+"  |  SF "+f.format(new Date())+"\n"+program;
+                String city="kiis".equals(id)?"LA":"SF";
+                String now=f.format(new Date());
+                if(program==null||program.trim().isEmpty()||program.equals(station))
+                    return station+"  |  "+city+" "+now;
+                return station+"  |  "+city+" "+now+"\n"+program;
             }
             if(program==null||program.trim().isEmpty()||program.equals(station)) return station;
             String prefix=(startLabel==null||startLabel.isEmpty())?"":startLabel+" ";
