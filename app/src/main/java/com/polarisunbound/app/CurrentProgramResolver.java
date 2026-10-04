@@ -285,7 +285,7 @@ public final class CurrentProgramResolver {
         int nextHourOffset=0;
         int target=-1;
         for(int mark:marks){
-            if(mark>minute || (mark==minute && (second<1 || (second==1 && milli==0)))){
+            if(mark>minute){
                 target=mark;
                 break;
             }
