@@ -3,6 +3,10 @@ package com.polarisunbound.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.Html;
+import android.util.Log;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -23,7 +27,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class CurrentProgramResolver {
-    private static final String PREFS="polaris_current_program_v2";
+    private static final String PREFS="polaris_current_program_v3";
     private static final long CACHE_MAX_AGE_MS=20L*60L*1000L;
 
     public static final class Result {
@@ -104,6 +108,152 @@ public final class CurrentProgramResolver {
         if("kr5".equals(id)){
             return new Result(station,station,"",-1,-1,System.currentTimeMillis());
         }
+
+        if(isNaverDomestic(id)){
+            try{
+                return resolveNaver(id);
+            }catch(Exception e){
+                Log.w("PolarisUnbound","Naver schedule failed for "+id+": "+e.getMessage());
+                // Keep the previous parser only as a fallback. Naver is the primary source.
+                return resolveLegacy(id);
+            }
+        }
+        return resolveLegacy(id);
+    }
+
+    private static boolean isNaverDomestic(String id){
+        return "kr1".equals(id)||"kr2".equals(id)||"kr3".equals(id)||
+               "kr4".equals(id)||"kr6".equals(id);
+    }
+
+    private static String naverServiceId(String id){
+        if("kr1".equals(id)) return "815457"; // KBS CoolFM
+        if("kr2".equals(id)) return "815463"; // MBC FM4U
+        if("kr3".equals(id)) return "815449"; // CBS MusicFM
+        if("kr4".equals(id)) return "815464"; // MBC Standard FM
+        if("kr6".equals(id)) return "815467"; // SBS PowerFM
+        return null;
+    }
+
+    private static Result resolveNaver(String id) throws Exception {
+        String serviceId=naverServiceId(id);
+        if(serviceId==null) throw new IllegalArgumentException("No Naver service id for "+id);
+
+        SimpleDateFormat dayFormat=new SimpleDateFormat("yyyyMMdd",Locale.US);
+        dayFormat.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
+        String day=dayFormat.format(new Date());
+
+        String endpoint="https://m.search.naver.com/p/csearch/content/nqapirender.nhn"
+            +"?key=SingleChannelDailySchedule"
+            +"&where=m"
+            +"&pkid=66"
+            +"&u1="+serviceId
+            +"&u2="+day;
+
+        HttpURLConnection con=(HttpURLConnection)new URL(endpoint).openConnection();
+        con.setConnectTimeout(9000);
+        con.setReadTimeout(12000);
+        con.setInstanceFollowRedirects(true);
+        con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+        con.setRequestProperty("Referer","https://m.search.naver.com/search.naver?where=m&query=%ED%8E%B8%EC%84%B1%ED%91%9C");
+        con.setRequestProperty("Accept","application/json,text/plain,*/*");
+        con.setRequestProperty("Accept-Language","ko-KR,ko;q=0.9,en-US;q=0.7");
+
+        int code=con.getResponseCode();
+        if(code<200||code>=300){
+            con.disconnect();
+            throw new IllegalStateException("Naver HTTP "+code);
+        }
+
+        StringBuilder body=new StringBuilder();
+        try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){
+            String line;
+            while((line=r.readLine())!=null) body.append(line);
+        } finally {
+            con.disconnect();
+        }
+
+        JSONObject root=new JSONObject(body.toString());
+        if(!"success".equalsIgnoreCase(root.optString("statusCode"))){
+            throw new IllegalStateException("Naver status "+root.optString("statusCode"));
+        }
+
+        Object dataHtml=root.opt("dataHtml");
+        StringBuilder html=new StringBuilder();
+        if(dataHtml instanceof JSONArray){
+            JSONArray arr=(JSONArray)dataHtml;
+            for(int i=0;i<arr.length();i++) html.append(arr.optString(i));
+        }else if(dataHtml!=null){
+            html.append(String.valueOf(dataHtml));
+        }
+
+        if(html.length()==0) throw new IllegalStateException("Naver dataHtml empty");
+        return parseNaverSchedule(id,html.toString());
+    }
+
+    private static Result parseNaverSchedule(String id,String html){
+        String station=stationName(id);
+        LinkedHashMap<Integer,String> byStart=new LinkedHashMap<>();
+
+        Pattern rowPattern=Pattern.compile("(?is)<li\\b[^>]*>(.*?)</li>");
+        Pattern divPattern=Pattern.compile("(?is)<div\\b[^>]*>(.*?)</div>");
+        Pattern timePattern=Pattern.compile("^(\\d{1,2}):(\\d{2})$");
+
+        Matcher rowMatcher=rowPattern.matcher(html);
+        while(rowMatcher.find()){
+            String row=rowMatcher.group(1);
+            List<String> cells=new ArrayList<>();
+            Matcher divMatcher=divPattern.matcher(row);
+            while(divMatcher.find()){
+                String value=htmlText(divMatcher.group(1)).replaceAll("\\s+"," ").trim();
+                cells.add(value);
+            }
+
+            if(cells.isEmpty()) continue;
+
+            int timeIndex=-1;
+            int hh=-1, mm=-1;
+            for(int i=0;i<cells.size();i++){
+                Matcher tm=timePattern.matcher(cells.get(i));
+                if(tm.matches()){
+                    hh=parseInt(tm.group(1),-1);
+                    mm=parseInt(tm.group(2),-1);
+                    timeIndex=i;
+                    break;
+                }
+            }
+            if(timeIndex<0||hh<0||hh>23||mm<0||mm>59) continue;
+
+            String title="";
+            // Naver SingleChannelDailySchedule: time = div[1], title = div[4].
+            if(cells.size()>4) title=cells.get(4).trim();
+
+            // Defensive fallback if Naver changes wrapper count but keeps the row text.
+            if(title.isEmpty()||!containsProgramText(title)||timePattern.matcher(title).matches()){
+                for(int i=timeIndex+1;i<cells.size();i++){
+                    String candidate=cells.get(i).trim();
+                    if(candidate.isEmpty()) continue;
+                    if(timePattern.matcher(candidate).matches()) continue;
+                    if(candidate.matches("(?i)^(재|재방송|본|본방송|[0-9]+세|전체)$")) continue;
+                    if(!containsProgramText(candidate)) continue;
+                    if(candidate.length()>title.length()) title=candidate;
+                }
+            }
+
+            title=cleanTitle(title);
+            if(title.isEmpty()||!containsProgramText(title)) continue;
+            if(title.length()>90) title=title.substring(0,90).trim();
+
+            int start=hh*60+mm;
+            if(!byStart.containsKey(start)) byStart.put(start,title);
+        }
+
+        if(byStart.isEmpty()) throw new IllegalStateException("No Naver schedule entries for "+id);
+        return selectCurrent(id,station,byStart);
+    }
+
+    private static Result resolveLegacy(String id) throws Exception {
+        String station=stationName(id);
         String url=scheduleUrl(id);
         if(url==null) return new Result(station,station,"",-1,-1,System.currentTimeMillis());
 
