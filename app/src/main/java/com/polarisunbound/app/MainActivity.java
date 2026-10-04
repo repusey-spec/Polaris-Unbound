@@ -16,6 +16,7 @@ import android.widget.*;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import android.graphics.Typeface;
 import android.util.Base64;
 import java.io.InputStream;
@@ -57,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean mp3UserSeeking=false;
     private EditText voiceSearchTarget;
     private static final int REQ_VOICE_SEARCH=881;
+    private final android.util.LruCache<Long,Bitmap> albumArtCache=new android.util.LruCache<>(32);
     private final Handler progressHandler=new Handler(Looper.getMainLooper());
     private final Runnable progressTick=new Runnable(){
         @Override public void run(){
@@ -762,17 +764,55 @@ public class MainActivity extends AppCompatActivity {
 
     private Bitmap loadAlbumArt(long albumId,int targetPx){
         if(albumId<=0) return null;
-        android.net.Uri uri=ContentUris.withAppendedId(android.net.Uri.parse("content://media/external/audio/albumart"),albumId);
-        try(InputStream in=getContentResolver().openInputStream(uri)){
-            if(in==null) return null;
-            Bitmap b=BitmapFactory.decodeStream(in);
-            if(b==null) return null;
-            if(b.getWidth()<=targetPx && b.getHeight()<=targetPx) return b;
-            float scale=Math.min((float)targetPx/b.getWidth(),(float)targetPx/b.getHeight());
-            Bitmap out=Bitmap.createScaledBitmap(b,Math.max(1,(int)(b.getWidth()*scale)),Math.max(1,(int)(b.getHeight()*scale)),true);
-            if(out!=b) b.recycle();
-            return out;
-        }catch(Exception ignored){ return null; }
+        Bitmap cached=albumArtCache.get(albumId);
+        if(cached!=null && !cached.isRecycled()) return cached;
+
+        Bitmap raw=null;
+
+        // Prefer embedded cover art from a real track. The legacy albumart provider is flaky
+        // on newer Android versions and can return missing/corrupted covers.
+        String[] projection={MediaStore.Audio.Media._ID};
+        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0 AND "+
+            MediaStore.Audio.Media.ALBUM_ID+"=?";
+        try(Cursor c=getContentResolver().query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection,selection,new String[]{String.valueOf(albumId)},null)){
+            if(c!=null && c.moveToFirst()){
+                long mediaId=c.getLong(0);
+                android.net.Uri track=ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
+                MediaMetadataRetriever mmr=new MediaMetadataRetriever();
+                try{
+                    mmr.setDataSource(this,track);
+                    byte[] data=mmr.getEmbeddedPicture();
+                    if(data!=null && data.length>0)
+                        raw=BitmapFactory.decodeByteArray(data,0,data.length);
+                }finally{
+                    try{ mmr.release(); }catch(Exception ignored){}
+                }
+            }
+        }catch(Exception ignored){}
+
+        // Fallback to MediaStore album-art cache for files without embedded artwork.
+        if(raw==null){
+            android.net.Uri uri=ContentUris.withAppendedId(
+                android.net.Uri.parse("content://media/external/audio/albumart"),albumId);
+            try(InputStream in=getContentResolver().openInputStream(uri)){
+                if(in!=null) raw=BitmapFactory.decodeStream(in);
+            }catch(Exception ignored){}
+        }
+
+        if(raw==null) return null;
+        Bitmap out=raw;
+        if(raw.getWidth()>targetPx || raw.getHeight()>targetPx){
+            float scale=Math.min((float)targetPx/raw.getWidth(),(float)targetPx/raw.getHeight());
+            out=Bitmap.createScaledBitmap(raw,
+                Math.max(1,(int)(raw.getWidth()*scale)),
+                Math.max(1,(int)(raw.getHeight()*scale)),true);
+            if(out!=raw) raw.recycle();
+        }
+        albumArtCache.put(albumId,out);
+        return out;
     }
 
     private LinearLayout buildMiniPlayer(){
