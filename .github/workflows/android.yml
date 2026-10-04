@@ -65,19 +65,21 @@ jobs:
               html = "".join(data.get("dataHtml") or [])
               assert html, f"{name}: empty dataHtml"
 
-              entries = []
-              rows = re.findall(r'(?is)<li[^>]*class="list[^"]*"[^>]*>(.*?)</li>', html)
-              for row in rows:
-                  tm = re.search(r'(?is)<div[^>]*class="time"[^>]*>\\s*(\\d{1,2}:\\d{2})\\s*</div>', row)
-                  tt = re.search(r'(?is)<div[^>]*class="pr_title"[^>]*>(.*?)</div>', row)
-                  if not tm or not tt:
-                      continue
-                  title = re.sub(r"(?is)<[^>]+>", " ", tt.group(1))
-                  title = re.sub(r"\\s+", " ", title).strip()
-                  if title and re.search(r"[A-Za-z가-힣]", title):
-                      entries.append((tm.group(1), title))
+              times = re.findall(r'(?is)<div[^>]*class="time"[^>]*>\s*(\d{1,2}:\d{2})\s*</div>', html)
+              raw_titles = re.findall(r'(?is)<div[^>]*class="pr_title"[^>]*>(.*?)</div>', html)
+              titles = []
+              for raw_title in raw_titles:
+                  title = re.sub(r"(?is)<[^>]+>", " ", raw_title)
+                  title = re.sub(r"\s+", " ", title).strip()
+                  titles.append(title)
 
-              assert entries, f"{name}: semantic Naver parser found zero entries"
+              assert times, f"{name}: no Naver time fields"
+              assert titles, f"{name}: no Naver title fields"
+              assert len(times) == len(titles), f"{name}: time/title mismatch {len(times)}/{len(titles)}"
+
+              entries = [(hhmm, title) for hhmm, title in zip(times, titles)
+                         if title and re.search(r"[A-Za-z가-힣]", title)]
+              assert entries, f"{name}: Naver semantic fields produced zero entries"
 
               current = None
               for hhmm, title in entries:
