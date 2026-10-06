@@ -1948,16 +1948,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     out.add(folder(
                         "ftppage:"+next+":"+Uri.encode(rel),
                         "다음 200개 →"));
-                }
-
-                if(out.isEmpty()){
-                    out.add(folder("mp3_ftp","음악 파일 없음"));
-                }
+                } 
             }catch(Exception e){
                 String msg=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
                 trace("FTP browse error: "+parent+" / "+e);
                 out.clear();
-                out.add(folder("mp3_ftp","FTP 오류 · "+msg));
             }
             result.sendResult(out);
         });
