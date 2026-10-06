@@ -49,6 +49,14 @@ public class MainActivity extends AppCompatActivity {
     private TextView miniPlayerTitle;
     private TextView miniPlayerSubtitle;
     private TextView miniPlayerToggle;
+    private ImageView nowPlayerArt;
+    private TextView nowPlayerTitle;
+    private TextView nowPlayerArtist;
+    private TextView nowPlayerLike;
+    private TextView nowPlayerDislike;
+    private TextView nowPlayerShuffle;
+    private TextView nowPlayerRepeat;
+    private TextView nowPlayerPlayPause;
     private MediaMetadataCompat lastMetadata;
     private PlaybackStateCompat lastPlaybackState;
     private SeekBar mp3Progress;
@@ -86,11 +94,15 @@ public class MainActivity extends AppCompatActivity {
                                 lastPlaybackState=s;
                                 updateStatus(s);
                                 updateMiniPlayerState();
+                                updateNowPlayingState();
+                                updateNowPlayingModes();
                                 updateMp3Progress();
                             }
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
                                 updateMiniPlayerMetadata();
+                                updateNowPlayingMetadata();
+                                updateNowPlayingModes();
                                 updateMp3Progress();
                             }
                         });
@@ -216,12 +228,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void base(String title){
-        ensureShell(); refreshTabs(); pageHost.removeAllViews();
+        ensureShell();
+        tabsBar.setVisibility(View.VISIBLE);
+        refreshTabs();
+        pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         if("mp3".equals(currentPage)){
             status=null;
-            addMp3ProgressLine();
+            progressHandler.removeCallbacks(progressTick);
+            mp3Progress=null;
+            mp3Elapsed=null;
+            mp3Duration=null;
         }else{
             progressHandler.removeCallbacks(progressTick);
             mp3Progress=null;
@@ -406,7 +424,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateMp3Progress(){
-        if(!"mp3".equals(currentPage) || mp3Progress==null) return;
+        if(!"mp3_now".equals(currentPage) || mp3Progress==null) return;
         long duration=mp3DurationMs();
         long position=mp3PositionMs();
         if(!mp3UserSeeking){
@@ -822,6 +840,11 @@ public class MainActivity extends AppCompatActivity {
                 controller.getTransportControls().play();
         });
         bar.addView(miniPlayerToggle,new LinearLayout.LayoutParams(dp(58),-1));
+
+        bar.setClickable(true);
+        bar.setFocusable(true);
+        bar.setContentDescription("현재 재생 화면 열기");
+        bar.setOnClickListener(v->showNowPlaying());
         return bar;
     }
 
@@ -858,7 +881,291 @@ public class MainActivity extends AppCompatActivity {
         PlaybackStateCompat st=lastPlaybackState;
         if(st==null && controller!=null) st=controller.getPlaybackState();
         boolean playing=st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING;
-        miniPlayerToggle.setText(playing?"Ⅱ":"▶");
+        miniPlayerToggle.setText(playing?"❚❚":"▶");
+        miniPlayerToggle.setContentDescription(playing?"일시정지":"재생");
+    }
+
+
+    private static final String PHONE_ACTION_MP3_LIKE="com.polarisunbound.app.action.MP3_LIKE";
+    private static final String PHONE_ACTION_MP3_DISLIKE="com.polarisunbound.app.action.MP3_DISLIKE";
+
+    private long currentMp3MediaId(){
+        MediaMetadataCompat m=lastMetadata;
+        if(m==null && controller!=null) m=controller.getMetadata();
+        if(!isMp3Metadata(m)) return -1L;
+        String mediaId=m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        try{ return Long.parseLong(mediaId.substring(4)); }
+        catch(Exception ignored){ return -1L; }
+    }
+
+    private boolean currentMp3Liked(){
+        long id=currentMp3MediaId();
+        if(id<0) return false;
+        Set<String> set=getSharedPreferences("polaris_mp3",MODE_PRIVATE)
+            .getStringSet("favorite_ids",Collections.emptySet());
+        return set.contains(String.valueOf(id));
+    }
+
+    private TextView playerIconButton(String text,int textSize){
+        TextView v=new TextView(this);
+        v.setText(text);
+        v.setTextSize(textSize);
+        v.setGravity(android.view.Gravity.CENTER);
+        v.setTextColor(Color.WHITE);
+        v.setPadding(dp(8),dp(8),dp(8),dp(8));
+        return v;
+    }
+
+    private void showNowPlaying(){
+        if(lastMetadata==null && controller!=null) lastMetadata=controller.getMetadata();
+        if(!isMp3Metadata(lastMetadata)){
+            Toast.makeText(this,"재생 중인 MP3가 없습니다.",Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        ensureShell();
+        currentPage="mp3_now";
+        tabsBar.setVisibility(View.GONE);
+        miniPlayer.setVisibility(View.GONE);
+        pageHost.removeAllViews();
+
+        ScrollView scroll=new ScrollView(this);
+        LinearLayout root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(22),dp(8),dp(22),dp(24));
+
+        TextView collapse=playerIconButton("⌄",34);
+        collapse.setGravity(android.view.Gravity.LEFT|android.view.Gravity.CENTER_VERTICAL);
+        collapse.setContentDescription("재생 화면 닫기");
+        collapse.setOnClickListener(v->showMp3());
+        root.addView(collapse,new LinearLayout.LayoutParams(dp(64),dp(54)));
+
+        FrameLayout artFrame=new FrameLayout(this);
+        artFrame.setBackground(roundedBg(0xFF26262C,22));
+        artFrame.setClipToOutline(true);
+        nowPlayerArt=new ImageView(this);
+        nowPlayerArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        artFrame.addView(nowPlayerArt,new FrameLayout.LayoutParams(-1,-1));
+        int artSize=Math.min(
+            getResources().getDisplayMetrics().widthPixels-dp(44),
+            dp(420));
+        LinearLayout.LayoutParams artLp=new LinearLayout.LayoutParams(artSize,artSize);
+        artLp.gravity=android.view.Gravity.CENTER_HORIZONTAL;
+        artLp.setMargins(0,dp(6),0,dp(22));
+        root.addView(artFrame,artLp);
+
+        nowPlayerTitle=new TextView(this);
+        nowPlayerTitle.setTextSize(27);
+        nowPlayerTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        nowPlayerTitle.setTextColor(Color.WHITE);
+        nowPlayerTitle.setMaxLines(2);
+        root.addView(nowPlayerTitle,new LinearLayout.LayoutParams(-1,-2));
+
+        nowPlayerArtist=new TextView(this);
+        nowPlayerArtist.setTextSize(18);
+        nowPlayerArtist.setTextColor(0xBFFFFFFF);
+        nowPlayerArtist.setPadding(0,dp(6),0,dp(18));
+        root.addView(nowPlayerArtist,new LinearLayout.LayoutParams(-1,-2));
+
+        // Like / Dislike only. Lyrics and comments are intentionally omitted.
+        LinearLayout reactionRow=new LinearLayout(this);
+        reactionRow.setOrientation(LinearLayout.HORIZONTAL);
+        reactionRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        nowPlayerLike=playerIconButton("♡  좋아요",17);
+        nowPlayerLike.setBackground(roundedBg(0x6637373F,28));
+        nowPlayerLike.setOnClickListener(v->{
+            if(controller!=null)
+                controller.getTransportControls().sendCustomAction(PHONE_ACTION_MP3_LIKE,null);
+            new Handler(Looper.getMainLooper()).postDelayed(()->{
+                updateNowPlayingMetadata();
+                updateNowPlayingModes();
+            },180L);
+        });
+
+        nowPlayerDislike=playerIconButton("👎  싫어요",17);
+        nowPlayerDislike.setBackground(roundedBg(0x6637373F,28));
+        nowPlayerDislike.setOnClickListener(v->{
+            if(controller!=null)
+                controller.getTransportControls().sendCustomAction(PHONE_ACTION_MP3_DISLIKE,null);
+        });
+
+        LinearLayout.LayoutParams reactionLp=new LinearLayout.LayoutParams(0,dp(52),1);
+        reactionLp.setMargins(0,0,dp(6),0);
+        reactionRow.addView(nowPlayerLike,reactionLp);
+        LinearLayout.LayoutParams dislikeLp=new LinearLayout.LayoutParams(0,dp(52),1);
+        dislikeLp.setMargins(dp(6),0,0,0);
+        reactionRow.addView(nowPlayerDislike,dislikeLp);
+        root.addView(reactionRow,new LinearLayout.LayoutParams(-1,-2));
+
+        LinearLayout progressWrap=new LinearLayout(this);
+        progressWrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams progressWrapLp=new LinearLayout.LayoutParams(-1,-2);
+        progressWrapLp.setMargins(0,dp(22),0,0);
+
+        mp3Progress=new SeekBar(this);
+        mp3Progress.setMax(1000);
+        mp3Progress.setProgress(0);
+        mp3Progress.setPadding(0,0,0,0);
+        mp3Progress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar seekBar,int progress,boolean fromUser){
+                if(fromUser && mp3UserSeeking){
+                    long duration=mp3DurationMs();
+                    if(duration>0 && mp3Elapsed!=null)
+                        mp3Elapsed.setText(formatTime((duration*progress)/1000L));
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar){ mp3UserSeeking=true; }
+            @Override public void onStopTrackingTouch(SeekBar seekBar){
+                long duration=mp3DurationMs();
+                if(controller!=null && duration>0)
+                    controller.getTransportControls().seekTo((duration*seekBar.getProgress())/1000L);
+                mp3UserSeeking=false;
+                updateMp3Progress();
+            }
+        });
+        progressWrap.addView(mp3Progress,new LinearLayout.LayoutParams(-1,dp(34)));
+
+        LinearLayout times=new LinearLayout(this);
+        times.setOrientation(LinearLayout.HORIZONTAL);
+        mp3Elapsed=new TextView(this);
+        mp3Elapsed.setText("0:00");
+        mp3Elapsed.setTextSize(12);
+        mp3Elapsed.setTextColor(0xBFFFFFFF);
+        mp3Duration=new TextView(this);
+        mp3Duration.setText("0:00");
+        mp3Duration.setTextSize(12);
+        mp3Duration.setTextColor(0xBFFFFFFF);
+        mp3Duration.setGravity(android.view.Gravity.RIGHT);
+        times.addView(mp3Elapsed,new LinearLayout.LayoutParams(0,-2,1));
+        times.addView(mp3Duration,new LinearLayout.LayoutParams(0,-2,1));
+        progressWrap.addView(times,new LinearLayout.LayoutParams(-1,-2));
+        root.addView(progressWrap,progressWrapLp);
+
+        LinearLayout controls=new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(android.view.Gravity.CENTER);
+        controls.setPadding(0,dp(14),0,0);
+
+        nowPlayerShuffle=playerIconButton("🔀",24);
+        TextView previous=playerIconButton("◀|",28);
+        nowPlayerPlayPause=playerIconButton("▶",34);
+        TextView next=playerIconButton("|▶",28);
+        nowPlayerRepeat=playerIconButton("↻",28);
+
+        nowPlayerPlayPause.setBackground(roundedBg(0xFFF7F7F7,40));
+        nowPlayerPlayPause.setTextColor(Color.BLACK);
+
+        nowPlayerShuffle.setOnClickListener(v->{
+            android.content.SharedPreferences prefs=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+            boolean enabled=!prefs.getBoolean("shuffle",false);
+            if(controller!=null) controller.getTransportControls().setShuffleMode(
+                enabled ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
+            prefs.edit().putBoolean("shuffle",enabled).apply();
+            updateNowPlayingModes();
+        });
+        previous.setOnClickListener(v->{
+            if(controller!=null) controller.getTransportControls().skipToPrevious();
+        });
+        nowPlayerPlayPause.setOnClickListener(v->{
+            if(controller==null) return;
+            PlaybackStateCompat st=controller.getPlaybackState();
+            if(st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING)
+                controller.getTransportControls().pause();
+            else
+                controller.getTransportControls().play();
+        });
+        next.setOnClickListener(v->{
+            if(controller!=null) controller.getTransportControls().skipToNext();
+        });
+        nowPlayerRepeat.setOnClickListener(v->{
+            android.content.SharedPreferences prefs=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+            int mode=prefs.getInt("repeat_mode",PlaybackStateCompat.REPEAT_MODE_NONE);
+            int nextMode=mode==PlaybackStateCompat.REPEAT_MODE_NONE
+                ? PlaybackStateCompat.REPEAT_MODE_ALL
+                : mode==PlaybackStateCompat.REPEAT_MODE_ALL
+                    ? PlaybackStateCompat.REPEAT_MODE_ONE
+                    : PlaybackStateCompat.REPEAT_MODE_NONE;
+            if(controller!=null) controller.getTransportControls().setRepeatMode(nextMode);
+            prefs.edit().putInt("repeat_mode",nextMode).apply();
+            updateNowPlayingModes();
+        });
+
+        controls.addView(nowPlayerShuffle,new LinearLayout.LayoutParams(0,dp(68),1));
+        controls.addView(previous,new LinearLayout.LayoutParams(0,dp(68),1));
+        LinearLayout.LayoutParams centerLp=new LinearLayout.LayoutParams(dp(78),dp(78));
+        centerLp.setMargins(dp(5),0,dp(5),0);
+        controls.addView(nowPlayerPlayPause,centerLp);
+        controls.addView(next,new LinearLayout.LayoutParams(0,dp(68),1));
+        controls.addView(nowPlayerRepeat,new LinearLayout.LayoutParams(0,dp(68),1));
+        root.addView(controls,new LinearLayout.LayoutParams(-1,-2));
+
+        scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
+        pageHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+
+        updateNowPlayingMetadata();
+        updateNowPlayingState();
+        updateNowPlayingModes();
+        progressHandler.removeCallbacks(progressTick);
+        progressHandler.post(progressTick);
+        updateMp3Progress();
+    }
+
+    private void updateNowPlayingMetadata(){
+        if(!"mp3_now".equals(currentPage)) return;
+        MediaMetadataCompat m=lastMetadata;
+        if(m==null && controller!=null) m=controller.getMetadata();
+        if(!isMp3Metadata(m)) return;
+
+        if(nowPlayerTitle!=null){
+            String title=m.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+            nowPlayerTitle.setText(title==null||title.isEmpty()?"(제목 없음)":title);
+        }
+        if(nowPlayerArtist!=null){
+            String artist=m.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+            nowPlayerArtist.setText(artist==null?"":artist);
+        }
+        if(nowPlayerArt!=null){
+            Bitmap art=m.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
+            nowPlayerArt.setImageBitmap(art);
+            nowPlayerArt.setBackground(roundedBg(art==null?0xFF303038:0x00000000,22));
+        }
+        if(nowPlayerLike!=null){
+            boolean liked=currentMp3Liked();
+            nowPlayerLike.setText(liked?"♥  좋아요":"♡  좋아요");
+            nowPlayerLike.setAlpha(liked?1f:0.72f);
+            nowPlayerLike.setBackground(roundedBg(
+                liked?0xAA57575F:0x6637373F,28));
+        }
+    }
+
+    private void updateNowPlayingState(){
+        if(!"mp3_now".equals(currentPage) || nowPlayerPlayPause==null) return;
+        PlaybackStateCompat st=lastPlaybackState;
+        if(st==null && controller!=null) st=controller.getPlaybackState();
+        boolean playing=st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING;
+        nowPlayerPlayPause.setText(playing?"❚❚":"▶");
+        nowPlayerPlayPause.setContentDescription(playing?"일시정지":"재생");
+    }
+
+    private void updateNowPlayingModes(){
+        if(!"mp3_now".equals(currentPage)) return;
+        android.content.SharedPreferences prefs=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+        boolean shuffled=prefs.getBoolean("shuffle",false);
+        int repeat=prefs.getInt("repeat_mode",PlaybackStateCompat.REPEAT_MODE_NONE);
+
+        if(nowPlayerShuffle!=null){
+            nowPlayerShuffle.setText("🔀");
+            nowPlayerShuffle.setAlpha(shuffled?1f:0.45f);
+            nowPlayerShuffle.setContentDescription(shuffled?"랜덤 켜짐":"랜덤 꺼짐");
+        }
+        if(nowPlayerRepeat!=null){
+            nowPlayerRepeat.setText(repeat==PlaybackStateCompat.REPEAT_MODE_ONE?"↻¹":"↻");
+            nowPlayerRepeat.setAlpha(repeat==PlaybackStateCompat.REPEAT_MODE_NONE?0.45f:1f);
+            nowPlayerRepeat.setContentDescription(
+                repeat==PlaybackStateCompat.REPEAT_MODE_ONE?"한 곡 반복":
+                repeat==PlaybackStateCompat.REPEAT_MODE_ALL?"전체 반복":"반복 꺼짐");
+        }
     }
 
     private void showMp3(){
@@ -1026,7 +1333,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void addLibraryShortcuts(){
         String[][] items={
-            {"★","즐겨찾기"},{"♫","전체 곡"},
+            {"★","좋아요"},{"♫","전체 곡"},
             {"▣","앨범"},{"♬","아티스트"},
             {"▤","폴더"},{"↻","최근 추가"}
         };
@@ -1040,7 +1347,7 @@ public class MainActivity extends AppCompatActivity {
                 lp.setMargins(c==0?0:dp(6),dp(5),c==0?dp(6):0,dp(5));
                 row.addView(v,lp);
                 v.setOnClickListener(x->{
-                    if(at==0) showMp3Ids("즐겨찾기",mp3FavoriteIds());
+                    if(at==0) showMp3Ids("좋아요",mp3FavoriteIds());
                     else if(at==1) showMp3Tracks("전체 곡",null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
                     else if(at==2) showMp3Albums();
                     else if(at==3) showMp3Artists();
@@ -1406,7 +1713,13 @@ public class MainActivity extends AppCompatActivity {
             });
         });
     }
-    @Override public void onBackPressed(){ super.onBackPressed(); }
+    @Override public void onBackPressed(){
+        if("mp3_now".equals(currentPage)){
+            showMp3();
+            return;
+        }
+        super.onBackPressed();
+    }
     @Override protected void onDestroy(){
         progressHandler.removeCallbacksAndMessages(null);
         scheduleHandler.removeCallbacksAndMessages(null); scheduleExecutor.shutdownNow();
