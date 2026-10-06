@@ -85,10 +85,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final android.util.LruCache<Long,Bitmap> mp3AlbumArtCache=new android.util.LruCache<>(48);
     private int currentMp3Index=-1;
     private long currentMp3Id=-1L;
-    private String currentFtpMp3Path=null;
-    private String currentFtpMp3Directory=null;
+    private volatile String currentFtpMp3Path=null;
+    private volatile String currentFtpMp3Directory=null;
     private final List<String> currentFtpMp3Queue=new ArrayList<>();
-    private int currentFtpMp3Index=-1;
+    private volatile int currentFtpMp3Index=-1;
     private volatile boolean ftpMp3Preparing=false;
     private int mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
     private boolean mp3Shuffle=false;
