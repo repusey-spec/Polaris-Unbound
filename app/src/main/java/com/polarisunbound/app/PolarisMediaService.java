@@ -54,7 +54,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
     private final ExecutorService programExecutor=Executors.newSingleThreadExecutor();
-    private final ExecutorService ftpExecutor=Executors.newSingleThreadExecutor();
+    private final ExecutorService ftpExecutor=Executors.newFixedThreadPool(2);
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -1905,7 +1905,78 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             b.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
     }
 
+    private boolean isFtpMp3BrowserParent(String parent){
+        return "mp3_ftp".equals(parent) ||
+            (parent!=null && parent.startsWith("ftpdir:")) ||
+            (parent!=null && parent.startsWith("ftppage:"));
+    }
+
+    private void loadFtpMp3ChildrenAsync(
+        String parent,
+        Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
+        result.detach();
+        ftpExecutor.execute(() -> {
+            List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+            try{
+                String rel="";
+                int offset=0;
+
+                if(parent.startsWith("ftpdir:")){
+                    rel=Uri.decode(parent.substring("ftpdir:".length()));
+                }else if(parent.startsWith("ftppage:")){
+                    String rest=parent.substring("ftppage:".length());
+                    int colon=rest.indexOf(':');
+                    if(colon<=0) throw new IllegalArgumentException("FTP 페이지 ID 오류");
+                    offset=Integer.parseInt(rest.substring(0,colon));
+                    rel=Uri.decode(rest.substring(colon+1));
+                }
+
+                PolarisFtp.DirectoryPage page=PolarisFtp.listMp3(this,rel,offset,200);
+                for(PolarisFtp.Entry entry:page.entries){
+                    if(entry.directory){
+                        out.add(folder("ftpdir:"+Uri.encode(entry.relativePath),entry.name));
+                    }else{
+                        out.add(item(
+                            "ftpmp3:"+Uri.encode(entry.relativePath),
+                            PolarisFtp.displayTitle(entry.name),
+                            "FTP · "+formatFtpBytes(entry.size)));
+                    }
+                }
+
+                if(page.hasMore()){
+                    int next=page.offset+page.entries.size();
+                    out.add(folder(
+                        "ftppage:"+next+":"+Uri.encode(rel),
+                        "다음 200개 →"));
+                }
+
+                if(out.isEmpty()){
+                    out.add(folder("mp3_ftp","음악 파일 없음"));
+                }
+            }catch(Exception e){
+                String msg=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+                trace("FTP browse error: "+parent+" / "+e);
+                out.clear();
+                out.add(folder("mp3_ftp","FTP 오류 · "+msg));
+            }
+            result.sendResult(out);
+        });
+    }
+
+    private String formatFtpBytes(long bytes){
+        if(bytes<1024L) return bytes+" B";
+        double value=bytes/1024.0;
+        if(value<1024.0) return String.format(Locale.US,"%.1f KB",value);
+        value/=1024.0;
+        if(value<1024.0) return String.format(Locale.US,"%.1f MB",value);
+        return String.format(Locale.US,"%.2f GB",value/1024.0);
+    }
+
     @Override public void onLoadChildren(String parent,Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
+        if(isFtpMp3BrowserParent(parent)){
+            loadFtpMp3ChildrenAsync(parent,result);
+            return;
+        }
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> x=new ArrayList<>();
         if(parent.equals("root")){
             // v0.41 order: Radio | MP3 | CAN. CAN may become the first index later.
