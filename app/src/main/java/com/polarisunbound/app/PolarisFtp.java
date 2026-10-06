@@ -30,6 +30,8 @@ public final class PolarisFtp {
     private static final String K_IV="password_iv";
     private static final String K_MP3_ROOT="mp3_root";
     private static final String K_CAN_ROOT="can_root";
+    private static final String DEFAULT_MP3_ROOT="/repusy/MP3";
+    private static final String DEFAULT_CAN_ROOT="/repusy/CAN";
 
     public static final class Config {
         public final String host;
@@ -44,8 +46,8 @@ public final class PolarisFtp {
             this.port=port<=0?21:port;
             this.user=user==null?"":user.trim();
             this.password=password==null?"":password;
-            this.mp3Root=normalizeRoot(mp3Root,"/Polaris/MP3");
-            this.canRoot=normalizeRoot(canRoot,"/Polaris/CAN");
+            this.mp3Root=normalizeRoot(mp3Root,DEFAULT_MP3_ROOT);
+            this.canRoot=normalizeRoot(canRoot,DEFAULT_CAN_ROOT);
         }
 
         public boolean isConfigured(){
@@ -61,13 +63,34 @@ public final class PolarisFtp {
 
     public static Config load(Context context){
         SharedPreferences p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+        String mp3Root=p.getString(K_MP3_ROOT,DEFAULT_MP3_ROOT);
+        String canRoot=p.getString(K_CAN_ROOT,DEFAULT_CAN_ROOT);
+
+        // v0.41 shipped with /Polaris/... defaults. Migrate only those exact
+        // old defaults; preserve any path the user entered manually.
+        boolean migrate=false;
+        if("/Polaris/MP3".equals(mp3Root)){
+            mp3Root=DEFAULT_MP3_ROOT;
+            migrate=true;
+        }
+        if("/Polaris/CAN".equals(canRoot)){
+            canRoot=DEFAULT_CAN_ROOT;
+            migrate=true;
+        }
+        if(migrate){
+            p.edit()
+                .putString(K_MP3_ROOT,mp3Root)
+                .putString(K_CAN_ROOT,canRoot)
+                .apply();
+        }
+
         return new Config(
             p.getString(K_HOST,""),
             p.getInt(K_PORT,21),
             p.getString(K_USER,""),
             decryptPassword(p),
-            p.getString(K_MP3_ROOT,"/Polaris/MP3"),
-            p.getString(K_CAN_ROOT,"/Polaris/CAN")
+            mp3Root,
+            canRoot
         );
     }
 
@@ -77,8 +100,8 @@ public final class PolarisFtp {
             .putString(K_HOST,host==null?"":host.trim())
             .putInt(K_PORT,port<=0?21:port)
             .putString(K_USER,user==null?"":user.trim())
-            .putString(K_MP3_ROOT,normalizeRoot(mp3Root,"/Polaris/MP3"))
-            .putString(K_CAN_ROOT,normalizeRoot(canRoot,"/Polaris/CAN"));
+            .putString(K_MP3_ROOT,normalizeRoot(mp3Root,DEFAULT_MP3_ROOT))
+            .putString(K_CAN_ROOT,normalizeRoot(canRoot,DEFAULT_CAN_ROOT));
 
         if(password!=null){
             Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
