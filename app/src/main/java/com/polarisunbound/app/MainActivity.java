@@ -84,6 +84,121 @@ public class MainActivity extends AppCompatActivity {
     private void choosePreset(int slot){ new androidx.appcompat.app.AlertDialog.Builder(this).setTitle((slot+1)+"번 프리셋에 저장").setItems(RADIO_NAMES,(d,which)->{ getSharedPreferences("radio_presets",MODE_PRIVATE).edit().putInt("slot"+slot,which).apply(); showDomestic(); Toast.makeText(this,(slot+1)+"번 → "+RADIO_NAMES[which],Toast.LENGTH_SHORT).show(); }).show(); }
 
 
+    private final class PlayerSwipeScrollView extends ScrollView {
+        private float downX;
+        private float downY;
+        private boolean gestureBlocked;
+
+        PlayerSwipeScrollView(Context context){
+            super(context);
+            setFillViewport(false);
+            setOverScrollMode(View.OVER_SCROLL_NEVER);
+        }
+
+        @Override public boolean dispatchTouchEvent(android.view.MotionEvent event){
+            final int action=event.getActionMasked();
+
+            if(action==android.view.MotionEvent.ACTION_DOWN){
+                downX=event.getRawX();
+                downY=event.getRawY();
+                gestureBlocked=isRawPointInsideView(downX,downY,mp3Progress);
+            }
+
+            boolean handled=super.dispatchTouchEvent(event);
+
+            if(!"mp3_now".equals(currentPage)) return handled;
+
+            if(action==android.view.MotionEvent.ACTION_MOVE && !gestureBlocked){
+                float dx=event.getRawX()-downX;
+                float dy=event.getRawY()-downY;
+                float ax=Math.abs(dx);
+                float ay=Math.abs(dy);
+
+                if(ax>dp(14) && ax>ay*1.25f){
+                    setTranslationX(Math.max(-dp(110),Math.min(dp(110),dx*0.30f)));
+                    setTranslationY(0f);
+                }else if(dy>dp(14) && ay>ax*1.25f && getScrollY()<=dp(2)){
+                    setTranslationY(Math.min(dp(100),dy*0.24f));
+                    setTranslationX(0f);
+                }
+            }
+
+            if(action==android.view.MotionEvent.ACTION_UP ||
+               action==android.view.MotionEvent.ACTION_CANCEL){
+                float dx=event.getRawX()-downX;
+                float dy=event.getRawY()-downY;
+                float ax=Math.abs(dx);
+                float ay=Math.abs(dy);
+
+                if(action==android.view.MotionEvent.ACTION_UP && !gestureBlocked){
+                    if(ax>=dp(88) && ax>ay*1.25f){
+                        if(dx<0) finishHorizontalPlayerSwipe(this,1);
+                        else finishHorizontalPlayerSwipe(this,-1);
+                        return handled;
+                    }
+                    if(dy>=dp(110) && ay>ax*1.25f && getScrollY()<=dp(2)){
+                        finishDownPlayerSwipe(this);
+                        return handled;
+                    }
+                }
+
+                animate().translationX(0f).translationY(0f).alpha(1f)
+                    .setDuration(120L).start();
+            }
+
+            return handled;
+        }
+    }
+
+    private boolean isRawPointInsideView(float rawX,float rawY,View view){
+        if(view==null||view.getVisibility()!=View.VISIBLE) return false;
+        int[] location=new int[2];
+        view.getLocationOnScreen(location);
+        return rawX>=location[0] && rawX<=location[0]+view.getWidth() &&
+            rawY>=location[1] && rawY<=location[1]+view.getHeight();
+    }
+
+    private void finishHorizontalPlayerSwipe(View playerView,int direction){
+        float target=direction>0 ? -dp(120) : dp(120);
+        playerView.animate()
+            .translationX(target)
+            .alpha(0.62f)
+            .setDuration(105L)
+            .withEndAction(()->{
+                if(controller!=null){
+                    if(direction>0) controller.getTransportControls().skipToNext();
+                    else controller.getTransportControls().skipToPrevious();
+                }
+                playerView.setTranslationX(-target*0.35f);
+                playerView.setAlpha(0.72f);
+                playerView.animate()
+                    .translationX(0f)
+                    .alpha(1f)
+                    .setDuration(150L)
+                    .start();
+            })
+            .start();
+    }
+
+    private void finishDownPlayerSwipe(View playerView){
+        playerView.animate()
+            .translationY(Math.max(dp(150),playerView.getHeight()*0.22f))
+            .alpha(0.55f)
+            .setDuration(130L)
+            .withEndAction(this::returnFromNowPlaying)
+            .start();
+    }
+
+    private void returnFromNowPlaying(){
+        MediaMetadataCompat m=lastMetadata;
+        if(m==null&&controller!=null) m=controller.getMetadata();
+        String mediaId=m==null?null:m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if(mediaId!=null&&mediaId.startsWith("ftpmp3:"))
+            showMp3FtpDirectory(currentFtpMp3Path,currentFtpMp3Offset);
+        else
+            showMp3();
+    }
+
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         browser=new MediaBrowserCompat(this,new ComponentName(this,PolarisMediaService.class),
@@ -840,7 +955,9 @@ public class MainActivity extends AppCompatActivity {
         miniPlayerToggle.setOnClickListener(v->{
             if(controller==null) return;
             PlaybackStateCompat st=controller.getPlaybackState();
-            if(st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING)
+            int state=st==null?PlaybackStateCompat.STATE_NONE:st.getState();
+            if(state==PlaybackStateCompat.STATE_PLAYING ||
+               state==PlaybackStateCompat.STATE_BUFFERING)
                 controller.getTransportControls().pause();
             else
                 controller.getTransportControls().play();
@@ -886,9 +1003,13 @@ public class MainActivity extends AppCompatActivity {
         if(miniPlayerToggle==null) return;
         PlaybackStateCompat st=lastPlaybackState;
         if(st==null && controller!=null) st=controller.getPlaybackState();
-        boolean playing=st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING;
-        miniPlayerToggle.setText(playing?"❚❚":"▶");
-        miniPlayerToggle.setContentDescription(playing?"일시정지":"재생");
+        int state=st==null?PlaybackStateCompat.STATE_NONE:st.getState();
+        boolean active=state==PlaybackStateCompat.STATE_PLAYING ||
+            state==PlaybackStateCompat.STATE_BUFFERING;
+        miniPlayerToggle.setText(active?"❚❚":"▶");
+        miniPlayerToggle.setContentDescription(
+            state==PlaybackStateCompat.STATE_BUFFERING?"음악 준비 중 · 누르면 일시정지":
+            active?"일시정지":"재생");
     }
 
 
@@ -936,15 +1057,15 @@ public class MainActivity extends AppCompatActivity {
         miniPlayer.setVisibility(View.GONE);
         pageHost.removeAllViews();
 
-        ScrollView scroll=new ScrollView(this);
+        PlayerSwipeScrollView scroll=new PlayerSwipeScrollView(this);
         LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(22),dp(8),dp(22),dp(24));
 
         TextView collapse=playerIconButton("⌄",34);
         collapse.setGravity(android.view.Gravity.LEFT|android.view.Gravity.CENTER_VERTICAL);
-        collapse.setContentDescription("재생 화면 닫기");
-        collapse.setOnClickListener(v->showMp3());
+        collapse.setContentDescription("현재 목록으로 돌아가기");
+        collapse.setOnClickListener(v->returnFromNowPlaying());
         root.addView(collapse,new LinearLayout.LayoutParams(dp(64),dp(54)));
 
         FrameLayout artFrame=new FrameLayout(this);
@@ -1097,7 +1218,9 @@ public class MainActivity extends AppCompatActivity {
         nowPlayerPlayPause.setOnClickListener(v->{
             if(controller==null) return;
             PlaybackStateCompat st=controller.getPlaybackState();
-            if(st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING)
+            int state=st==null?PlaybackStateCompat.STATE_NONE:st.getState();
+            if(state==PlaybackStateCompat.STATE_PLAYING ||
+               state==PlaybackStateCompat.STATE_BUFFERING)
                 controller.getTransportControls().pause();
             else
                 controller.getTransportControls().play();
@@ -1191,9 +1314,15 @@ public class MainActivity extends AppCompatActivity {
         if(!"mp3_now".equals(currentPage) || nowPlayerPlayPause==null) return;
         PlaybackStateCompat st=lastPlaybackState;
         if(st==null && controller!=null) st=controller.getPlaybackState();
-        boolean playing=st!=null && st.getState()==PlaybackStateCompat.STATE_PLAYING;
-        nowPlayerPlayPause.setText(playing?"❚❚":"▶");
-        nowPlayerPlayPause.setContentDescription(playing?"일시정지":"재생");
+        int state=st==null?PlaybackStateCompat.STATE_NONE:st.getState();
+        boolean active=state==PlaybackStateCompat.STATE_PLAYING ||
+            state==PlaybackStateCompat.STATE_BUFFERING;
+        nowPlayerPlayPause.setEnabled(isMp3Metadata(lastMetadata));
+        nowPlayerPlayPause.setAlpha(nowPlayerPlayPause.isEnabled()?1f:0.45f);
+        nowPlayerPlayPause.setText(active?"❚❚":"▶");
+        nowPlayerPlayPause.setContentDescription(
+            state==PlaybackStateCompat.STATE_BUFFERING?"FTP 음악 준비 중 · 누르면 일시정지":
+            active?"일시정지":"재생");
     }
 
     private void updateNowPlayingModes(){

@@ -227,6 +227,35 @@ public final class PolarisFtp {
         }
     }
 
+    public static List<String> listMp3AudioPaths(Context context,String relativeDirectory) throws Exception {
+        Config cfg=load(context);
+        if(!cfg.isConfigured()) throw new IllegalStateException("FTP 설정이 필요합니다");
+
+        String rel=normalizeRelative(relativeDirectory);
+        FTPClient ftp=open(cfg);
+        try{
+            if(!changeToExistingRoot(ftp,cfg.mp3Root))
+                throw new IllegalStateException("MP3 FTP Root가 없습니다: "+cfg.mp3Root);
+            if(!rel.isEmpty() && !changeRelativeDirectory(ftp,rel))
+                throw new IllegalStateException("FTP 폴더를 찾을 수 없습니다: "+rel);
+
+            FTPFile[] raw=ftp.listFiles();
+            List<String> out=new ArrayList<>();
+            if(raw!=null){
+                for(FTPFile file:raw){
+                    if(file==null||!file.isFile()) continue;
+                    String name=file.getName()==null?"":file.getName().trim();
+                    if(name.isEmpty()||name.startsWith(".")||!isAudioFile(name)) continue;
+                    out.add(joinRelative(rel,name));
+                }
+            }
+            Collections.sort(out,String.CASE_INSENSITIVE_ORDER);
+            return out;
+        } finally {
+            close(ftp);
+        }
+    }
+
     public static File downloadMp3ToCache(Context context,String relativePath) throws Exception {
         Config cfg=load(context);
         if(!cfg.isConfigured()) throw new IllegalStateException("FTP 설정이 필요합니다");
@@ -312,7 +341,8 @@ public final class PolarisFtp {
         ftp.setConnectTimeout(10000);
         ftp.setDefaultTimeout(10000);
         ftp.setDataTimeout(30000);
-        ftp.setControlEncoding("UTF-8");
+        ftp.setAutodetectUTF8(true);
+        ftp.setControlEncoding(StandardCharsets.UTF_8.name());
         ftp.setBufferSize(64*1024);
 
         ftp.connect(cfg.host,cfg.port);
@@ -325,6 +355,10 @@ public final class PolarisFtp {
             close(ftp);
             throw new IllegalStateException("FTP 로그인 실패");
         }
+
+        // Synology advertises UTF-8 on modern FTP servers. Explicitly request it so
+        // the exact name returned by LIST/MLSD is also usable by RETR for Korean names.
+        try{ ftp.sendCommand("OPTS","UTF8 ON"); }catch(Exception ignored){}
 
         ftp.enterLocalPassiveMode();
         if(!ftp.setFileType(FTP.BINARY_FILE_TYPE)){
