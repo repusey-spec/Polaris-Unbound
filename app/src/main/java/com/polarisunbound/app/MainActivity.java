@@ -983,7 +983,7 @@ public class MainActivity extends AppCompatActivity {
             },180L);
         });
 
-        nowPlayerDislike=playerIconButton("♧  싫어요",17);
+        nowPlayerDislike=playerIconButton("👎  싫어요",17);
         nowPlayerDislike.setBackground(roundedBg(0x6637373F,28));
         nowPlayerDislike.setOnClickListener(v->{
             if(controller!=null)
