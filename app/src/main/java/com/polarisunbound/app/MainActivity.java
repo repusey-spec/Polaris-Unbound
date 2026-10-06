@@ -77,6 +77,8 @@ public class MainActivity extends AppCompatActivity {
     private final ExecutorService ftpExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
     private String currentPage="home";
+    private String currentFtpMp3Path="";
+    private int currentFtpMp3Offset=0;
     private static final String[] RADIO_NAMES={"89.1 KBS CoolFM","91.9 MBC FM4U","93.9 CBS MusicFM","95.9 MBC 표준FM","102.7 AFN EagleFM","107.7 SBS PowerFM"};
     private int presetStation(int slot){ return getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot); }
     private void choosePreset(int slot){ new androidx.appcompat.app.AlertDialog.Builder(this).setTitle((slot+1)+"번 프리셋에 저장").setItems(RADIO_NAMES,(d,which)->{ getSharedPreferences("radio_presets",MODE_PRIVATE).edit().putInt("slot"+slot,which).apply(); showDomestic(); Toast.makeText(this,(slot+1)+"번 → "+RADIO_NAMES[which],Toast.LENGTH_SHORT).show(); }).show(); }
@@ -267,7 +269,7 @@ public class MainActivity extends AppCompatActivity {
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
-        if(id!=null && id.startsWith("mp3:")){
+        if(id!=null && (id.startsWith("mp3:")||id.startsWith("ftpmp3:"))){
             selectedRadioId=null;
             scheduleHandler.removeCallbacksAndMessages(null);
         }else{
@@ -855,7 +857,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean isMp3Metadata(MediaMetadataCompat m){
         if(m==null) return false;
         String mediaId=m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
-        return mediaId!=null && mediaId.startsWith("mp3:");
+        return mediaId!=null && (mediaId.startsWith("mp3:")||mediaId.startsWith("ftpmp3:"));
     }
 
     private void updateMiniPlayerVisibility(){
@@ -898,6 +900,7 @@ public class MainActivity extends AppCompatActivity {
         if(m==null && controller!=null) m=controller.getMetadata();
         if(!isMp3Metadata(m)) return -1L;
         String mediaId=m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if(mediaId==null||!mediaId.startsWith("mp3:")) return -1L;
         try{ return Long.parseLong(mediaId.substring(4)); }
         catch(Exception ignored){ return -1L; }
     }
@@ -1253,31 +1256,181 @@ public class MainActivity extends AppCompatActivity {
         body.addView(hint,new LinearLayout.LayoutParams(-1,-2));
     }
 
+
     private void showMp3Ftp(){
+        showMp3FtpDirectory("",0);
+    }
+
+    private void showMp3FtpDirectory(String relativePath,int offset){
+        final String rel=relativePath==null?"":relativePath;
+        final int pageOffset=Math.max(0,offset);
+        currentFtpMp3Path=rel;
+        currentFtpMp3Offset=pageOffset;
         currentPage="mp3";
-        base("MP3 FTP");
-        addMp3Back();
+        base(rel.isEmpty()?"MP3 FTP":("FTP · "+PolarisFtp.displayTitle(rel)));
+
+        TextView back=new TextView(this);
+        String parent=PolarisFtp.parentRelative(rel);
+        back.setText(rel.isEmpty()?"←  MP3":"←  상위 폴더");
+        back.setTextSize(15);
+        back.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        back.setTextColor(Color.WHITE);
+        back.setPadding(dp(14),dp(11),dp(14),dp(11));
+        back.setBackground(roundedBg(0x88303038,18));
+        LinearLayout.LayoutParams backLp=new LinearLayout.LayoutParams(-1,-2);
+        backLp.setMargins(0,0,0,dp(10));
+        body.addView(back,backLp);
+        back.setOnClickListener(v->{
+            if(rel.isEmpty()) showMp3();
+            else showMp3FtpDirectory(parent,0);
+        });
 
         PolarisFtp.Config cfg=PolarisFtp.load(this);
-        TextView info=new TextView(this);
-        info.setText("MP3 FTP Root\n"+cfg.mp3Root);
-        info.setTextSize(16);
-        info.setTextColor(0xDDFFFFFF);
-        info.setPadding(dp(4),dp(10),dp(4),dp(18));
-        body.addView(info,new LinearLayout.LayoutParams(-1,-2));
+        TextView location=new TextView(this);
+        String remote=cfg.mp3Root+(rel.isEmpty()?"":"/"+rel);
+        location.setText(remote);
+        location.setSingleLine(true);
+        location.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        location.setTextSize(13);
+        location.setTextColor(0xAAFFFFFF);
+        location.setPadding(dp(4),dp(4),dp(4),dp(10));
+        location.setOnLongClickListener(v->{ showFtpSettings(); return true; });
+        body.addView(location,new LinearLayout.LayoutParams(-1,-2));
 
-        TextView upload=ftpActionButton("⇧  FTP 테스트 업로드");
-        upload.setContentDescription("MP3 FTP 테스트 업로드");
-        upload.setOnClickListener(v->uploadFtpTest("MP3",upload));
-        upload.setOnLongClickListener(v->{ showFtpSettings(); return true; });
-        body.addView(upload,new LinearLayout.LayoutParams(-1,dp(86)));
+        TextView loading=new TextView(this);
+        loading.setText("FTP 목록 불러오는 중…");
+        loading.setTextSize(16);
+        loading.setTextColor(Color.WHITE);
+        loading.setPadding(dp(8),dp(18),dp(8),dp(18));
+        body.addView(loading,new LinearLayout.LayoutParams(-1,-2));
 
-        TextView hint=new TextView(this);
-        hint.setText("길게 누르면 FTP 설정");
-        hint.setTextSize(12);
-        hint.setTextColor(0xAAFFFFFF);
-        hint.setPadding(dp(4),dp(10),dp(4),0);
-        body.addView(hint,new LinearLayout.LayoutParams(-1,-2));
+        ftpExecutor.execute(()->{
+            try{
+                PolarisFtp.DirectoryPage page=PolarisFtp.listMp3(
+                    MainActivity.this,rel,pageOffset,200);
+                runOnUiThread(()->{
+                    if(!"mp3".equals(currentPage) ||
+                       !rel.equals(currentFtpMp3Path) ||
+                       pageOffset!=currentFtpMp3Offset) return;
+                    body.removeView(loading);
+                    renderFtpMp3Page(rel,page);
+                });
+            }catch(Exception e){
+                final String msg=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+                runOnUiThread(()->{
+                    if(!"mp3".equals(currentPage) ||
+                       !rel.equals(currentFtpMp3Path) ||
+                       pageOffset!=currentFtpMp3Offset) return;
+                    loading.setText("FTP 목록 오류\n"+msg+"\n\n경로를 길게 눌러 FTP 설정");
+                    loading.setOnLongClickListener(v->{ showFtpSettings(); return true; });
+                });
+            }
+        });
+    }
+
+    private void renderFtpMp3Page(String rel,PolarisFtp.DirectoryPage page){
+        if(page.entries.isEmpty()){
+            TextView empty=new TextView(this);
+            empty.setText("이 폴더에 음악 파일이 없습니다.");
+            empty.setTextSize(16);
+            empty.setTextColor(0xCCFFFFFF);
+            empty.setPadding(dp(8),dp(20),dp(8),dp(20));
+            body.addView(empty,new LinearLayout.LayoutParams(-1,-2));
+            return;
+        }
+
+        TextView count=new TextView(this);
+        int from=page.offset+1;
+        int to=page.offset+page.entries.size();
+        count.setText(from+"–"+to+" / "+page.total);
+        count.setTextSize(12);
+        count.setTextColor(0x99FFFFFF);
+        count.setPadding(dp(4),0,dp(4),dp(8));
+        body.addView(count,new LinearLayout.LayoutParams(-1,-2));
+
+        for(PolarisFtp.Entry entry:page.entries){
+            LinearLayout row=new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14),dp(11),dp(14),dp(11));
+            row.setBackground(roundedBg(0x77232329,16));
+
+            TextView icon=new TextView(this);
+            icon.setText(entry.directory?"▤":"♫");
+            icon.setTextSize(entry.directory?24:22);
+            icon.setGravity(android.view.Gravity.CENTER);
+            icon.setTextColor(Color.WHITE);
+            row.addView(icon,new LinearLayout.LayoutParams(dp(46),dp(52)));
+
+            LinearLayout labels=new LinearLayout(this);
+            labels.setOrientation(LinearLayout.VERTICAL);
+            labels.setPadding(dp(8),0,0,0);
+
+            TextView title=new TextView(this);
+            title.setText(entry.directory?entry.name:PolarisFtp.displayTitle(entry.name));
+            title.setTextSize(15);
+            title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+            title.setTextColor(Color.WHITE);
+            title.setSingleLine(true);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            labels.addView(title,new LinearLayout.LayoutParams(-1,-2));
+
+            TextView sub=new TextView(this);
+            sub.setText(entry.directory?"폴더":formatBytes(entry.size));
+            sub.setTextSize(12);
+            sub.setTextColor(0xAAFFFFFF);
+            sub.setSingleLine(true);
+            labels.addView(sub,new LinearLayout.LayoutParams(-1,-2));
+            row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+            lp.setMargins(0,dp(4),0,dp(4));
+            body.addView(row,lp);
+
+            row.setOnClickListener(v->{
+                if(entry.directory){
+                    showMp3FtpDirectory(entry.relativePath,0);
+                }else{
+                    Toast.makeText(MainActivity.this,"FTP 음악 준비 중…",Toast.LENGTH_SHORT).show();
+                    playId("ftpmp3:"+android.net.Uri.encode(entry.relativePath),
+                        PolarisFtp.displayTitle(entry.name));
+                }
+            });
+        }
+
+        if(page.offset>0 || page.hasMore()){
+            LinearLayout nav=new LinearLayout(this);
+            nav.setOrientation(LinearLayout.HORIZONTAL);
+            nav.setGravity(android.view.Gravity.CENTER);
+
+            if(page.offset>0){
+                TextView prev=ftpActionButton("← 이전");
+                prev.setOnClickListener(v->
+                    showMp3FtpDirectory(rel,Math.max(0,page.offset-page.limit)));
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(58),1);
+                p.setMargins(0,dp(10),dp(5),0);
+                nav.addView(prev,p);
+            }
+
+            if(page.hasMore()){
+                TextView next=ftpActionButton("다음 →");
+                next.setOnClickListener(v->
+                    showMp3FtpDirectory(rel,page.offset+page.entries.size()));
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(58),1);
+                p.setMargins(dp(5),dp(10),0,0);
+                nav.addView(next,p);
+            }
+            body.addView(nav,new LinearLayout.LayoutParams(-1,-2));
+        }
+    }
+
+    private String formatBytes(long bytes){
+        if(bytes<1024L) return bytes+" B";
+        double value=bytes/1024.0;
+        if(value<1024.0) return String.format(Locale.US,"%.1f KB",value);
+        value/=1024.0;
+        if(value<1024.0) return String.format(Locale.US,"%.1f MB",value);
+        return String.format(Locale.US,"%.2f GB",value/1024.0);
     }
 
     private EditText ftpField(String hint,String value){
