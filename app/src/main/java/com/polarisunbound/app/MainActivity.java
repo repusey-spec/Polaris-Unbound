@@ -962,22 +962,32 @@ public class MainActivity extends AppCompatActivity {
         nowPlayerTitle.setTextSize(27);
         nowPlayerTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         nowPlayerTitle.setTextColor(Color.WHITE);
-        nowPlayerTitle.setMaxLines(2);
-        root.addView(nowPlayerTitle,new LinearLayout.LayoutParams(-1,-2));
+        nowPlayerTitle.setSingleLine(true);
+        nowPlayerTitle.setHorizontallyScrolling(true);
+        nowPlayerTitle.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
+        nowPlayerTitle.setMarqueeRepeatLimit(-1);
+        nowPlayerTitle.setSelected(true);
+        nowPlayerTitle.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        root.addView(nowPlayerTitle,new LinearLayout.LayoutParams(-1,dp(44)));
 
         nowPlayerArtist=new TextView(this);
         nowPlayerArtist.setTextSize(18);
         nowPlayerArtist.setTextColor(0xBFFFFFFF);
-        nowPlayerArtist.setPadding(0,dp(6),0,dp(18));
-        root.addView(nowPlayerArtist,new LinearLayout.LayoutParams(-1,-2));
+        nowPlayerArtist.setSingleLine(true);
+        nowPlayerArtist.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        nowPlayerArtist.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        nowPlayerArtist.setPadding(0,dp(2),0,dp(10));
+        root.addView(nowPlayerArtist,new LinearLayout.LayoutParams(-1,dp(38)));
 
         // Like / Dislike only. Lyrics and comments are intentionally omitted.
         LinearLayout reactionRow=new LinearLayout(this);
         reactionRow.setOrientation(LinearLayout.HORIZONTAL);
         reactionRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
-        nowPlayerLike=playerIconButton("♡  좋아요",17);
+        nowPlayerLike=playerIconButton("좋아요",17);
+        nowPlayerLike.setCompoundDrawablePadding(dp(8));
         nowPlayerLike.setBackground(roundedBg(0x6637373F,28));
+        setThumbButtonIcon(nowPlayerLike,R.drawable.ic_thumb_up_player,false,false);
         nowPlayerLike.setOnClickListener(v->{
             if(controller!=null)
                 controller.getTransportControls().sendCustomAction(PHONE_ACTION_MP3_LIKE,null);
@@ -987,8 +997,18 @@ public class MainActivity extends AppCompatActivity {
             },180L);
         });
 
-        nowPlayerDislike=playerIconButton("👎  싫어요",17);
+        nowPlayerDislike=playerIconButton("싫어요",17);
+        nowPlayerDislike.setCompoundDrawablePadding(dp(8));
         nowPlayerDislike.setBackground(roundedBg(0x6637373F,28));
+        setThumbButtonIcon(nowPlayerDislike,R.drawable.ic_thumb_down_player,false,true);
+        nowPlayerDislike.setOnTouchListener((v,event)->{
+            if(event.getAction()==android.view.MotionEvent.ACTION_DOWN)
+                setThumbButtonIcon(nowPlayerDislike,R.drawable.ic_thumb_down_player,true,true);
+            else if(event.getAction()==android.view.MotionEvent.ACTION_UP ||
+                    event.getAction()==android.view.MotionEvent.ACTION_CANCEL)
+                setThumbButtonIcon(nowPlayerDislike,R.drawable.ic_thumb_down_player,false,true);
+            return false;
+        });
         nowPlayerDislike.setOnClickListener(v->{
             if(controller!=null)
                 controller.getTransportControls().sendCustomAction(PHONE_ACTION_MP3_DISLIKE,null);
@@ -1115,6 +1135,21 @@ public class MainActivity extends AppCompatActivity {
         updateMp3Progress();
     }
 
+    private void setThumbButtonIcon(TextView button,int drawableRes,boolean active,boolean negative){
+        if(button==null) return;
+        android.graphics.drawable.Drawable d=androidx.core.content.ContextCompat.getDrawable(this,drawableRes);
+        if(d==null) return;
+        d=androidx.core.graphics.drawable.DrawableCompat.wrap(d.mutate());
+        int tint=active
+            ? (negative ? 0xFFFF7043 : 0xFF29D3C2)
+            : 0xFFB8B8BC;
+        androidx.core.graphics.drawable.DrawableCompat.setTint(d,tint);
+        int size=dp(24);
+        d.setBounds(0,0,size,size);
+        button.setCompoundDrawables(d,null,null,null);
+        button.setTextColor(active ? Color.WHITE : 0xFFE0E0E0);
+    }
+
     private void updateNowPlayingMetadata(){
         if(!"mp3_now".equals(currentPage)) return;
         MediaMetadataCompat m=lastMetadata;
@@ -1136,10 +1171,16 @@ public class MainActivity extends AppCompatActivity {
         }
         if(nowPlayerLike!=null){
             boolean liked=currentMp3Liked();
-            nowPlayerLike.setText(liked?"♥  좋아요":"♡  좋아요");
-            nowPlayerLike.setAlpha(liked?1f:0.72f);
+            nowPlayerLike.setText("좋아요");
+            nowPlayerLike.setAlpha(1f);
+            setThumbButtonIcon(nowPlayerLike,R.drawable.ic_thumb_up_player,liked,false);
             nowPlayerLike.setBackground(roundedBg(
-                liked?0xAA57575F:0x6637373F,28));
+                liked?0xAA3A5D5A:0x6637373F,28));
+        }
+        if(nowPlayerDislike!=null){
+            nowPlayerDislike.setText("싫어요");
+            nowPlayerDislike.setAlpha(1f);
+            setThumbButtonIcon(nowPlayerDislike,R.drawable.ic_thumb_down_player,false,true);
         }
     }
 
