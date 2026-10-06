@@ -7,8 +7,8 @@ android {
         applicationId = "com.polarisunbound.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 36
-        versionName = "0.36"
+        versionCode = 38
+        versionName = "0.38"
     }
 
     signingConfigs {
@@ -28,6 +28,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.car.app:app:1.4.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.media:media:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
