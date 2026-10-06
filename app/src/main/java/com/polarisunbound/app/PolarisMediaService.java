@@ -54,6 +54,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
     private final ExecutorService programExecutor=Executors.newSingleThreadExecutor();
+    private final ExecutorService ftpExecutor=Executors.newSingleThreadExecutor();
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -92,6 +93,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private Observer<Integer> carConnectionObserver;
     private boolean aaProjectionConnected=false;
     private boolean sessionRestoreConsumed=false;
+    private volatile String canFtpStatus="Synology FTP";
     private final DefaultLoadErrorHandlingPolicy radioLoadErrorPolicy=
         new DefaultLoadErrorHandlingPolicy(8);
     private AudioManager audioManager;
@@ -159,6 +161,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onPlayFromMediaId(String id,Bundle extras){
                 trace("SERVICE onPlayFromMediaId: "+id);
                 try{
+                    if("can:ftp_upload".equals(id)){ uploadCanFtpFromAa(); return; }
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                     currentRadioId=id;
                     currentMp3Id=-1L;
@@ -316,6 +319,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         session.setActive(true);
         publishState();
         startProgramRefreshLoop();
+        startLocalRadioClockLoop();
         startPositionSaver();
         observeCarConnection();
     }
@@ -528,6 +532,49 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         skipMp3(1);
     }
 
+    private void uploadCanFtpFromAa(){
+        canFtpStatus="업로드 중…";
+        notifyChildrenChanged("can");
+        ftpExecutor.execute(() -> {
+            String status;
+            try{
+                java.text.SimpleDateFormat f=new java.text.SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US);
+                f.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
+                String stamp=f.format(new Date());
+                String fileName="can_test_"+stamp+".txt";
+                String payload="Polaris Unbound CAN FTP test\n"
+                    +"version="+BuildConfig.VERSION_NAME+"\n"
+                    +"time="+stamp+"\n";
+                String remote=PolarisFtp.uploadText(this,"CAN",fileName,payload);
+                status="완료 · "+remote;
+                trace("CAN FTP upload OK: "+remote);
+            }catch(Exception e){
+                String msg=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+                if(msg.length()>70) msg=msg.substring(0,70);
+                status="실패 · "+msg;
+                trace("CAN FTP upload error: "+e);
+            }
+            final String finalStatus=status;
+            programHandler.post(() -> {
+                canFtpStatus=finalStatus;
+                notifyChildrenChanged("can");
+            });
+        });
+    }
+
+    private void startLocalRadioClockLoop(){
+        programHandler.postDelayed(new Runnable(){
+            @Override public void run(){
+                String id=currentRadioId;
+                if("kiis".equals(id)||"gallery".equals(id)){
+                    applyCurrentRadioMetadata(id);
+                    notifyChildrenChanged("radio");
+                }
+                programHandler.postDelayed(this,60L*1000L);
+            }
+        },60L*1000L);
+    }
+
     private void startProgramRefreshLoop(){
         long stagger=0L;
         for(String id:RADIO_ORDER){
@@ -564,7 +611,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private String radioProgramTitle(String id){
         CurrentProgramResolver.Result r=CurrentProgramResolver.cached(this,id);
         if(r==null) return TITLES.get(id);
-        String title=r.aaTitle();
+        String title=r.aaTitle(id);
         return title==null||title.trim().isEmpty()?TITLES.get(id):title;
     }
 
@@ -1727,9 +1774,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(folder("home","홈"));
             x.add(folder("radio","라디오"));
             x.add(folder("mp3","MP3"));
+            x.add(folder("can","CAN"));
         } else if(parent.equals("home")){
             x.add(folder("radio","라디오"));
             x.add(folder("mp3","MP3"));
+            x.add(folder("can","CAN"));
+        } else if(parent.equals("can")){
+            PolarisFtp.Config cfg=PolarisFtp.load(this);
+            String sub=cfg.isConfigured() ? cfg.canRoot+" · "+canFtpStatus : "폰에서 FTP 설정 필요";
+            x.add(item("can:ftp_upload","FTP 업로드",sub));
         } else if(parent.equals("radio")){
             for(int slot=0;slot<6;slot++){
                 String id=presetRadioId(slot);
@@ -1812,6 +1865,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(player!=null) player.release();
         resolver.shutdownNow();
         programExecutor.shutdownNow();
+        ftpExecutor.shutdownNow();
         if(session!=null) session.release();
         super.onDestroy();
     }
