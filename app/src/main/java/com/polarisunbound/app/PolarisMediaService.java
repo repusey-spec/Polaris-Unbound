@@ -86,6 +86,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private int currentMp3Index=-1;
     private long currentMp3Id=-1L;
     private String currentFtpMp3Path=null;
+    private String currentFtpMp3Directory=null;
+    private final List<String> currentFtpMp3Queue=new ArrayList<>();
+    private int currentFtpMp3Index=-1;
+    private volatile boolean ftpMp3Preparing=false;
     private int mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
     private boolean mp3Shuffle=false;
     private boolean mp3EndHandled=false;
@@ -185,7 +189,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onPlay(){
                 userStopped=false;
                 if(currentFtpMp3Path!=null){
-                    if(requestPlaybackFocus()) player.play();
+                    if(!ftpMp3Preparing && requestPlaybackFocus()) player.play();
                     publishState();
                     return;
                 }
@@ -280,6 +284,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 currentRadioId=null;
                 currentMp3Id=-1L;
                 currentFtpMp3Path=null;
+                currentFtpMp3Directory=null;
+                currentFtpMp3Index=-1;
+                ftpMp3Preparing=false;
+                synchronized(currentFtpMp3Queue){ currentFtpMp3Queue.clear(); }
                 retryCount=0;
                 radioSoftRetryCount=0;
                 retryHandler.removeCallbacksAndMessages(null);
@@ -301,9 +309,14 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
             @Override public void onPlaybackStateChanged(int state){
                 publishState();
-                if(state==Player.STATE_ENDED && currentMp3Id>=0 && !mp3EndHandled){
-                    mp3EndHandled=true;
-                    handleMp3Ended();
+                if(state==Player.STATE_ENDED && !mp3EndHandled){
+                    if(currentFtpMp3Path!=null){
+                        mp3EndHandled=true;
+                        skipFtpMp3(1);
+                    }else if(currentMp3Id>=0){
+                        mp3EndHandled=true;
+                        handleMp3Ended();
+                    }
                 }
             }
             @Override public void onPlayerError(PlaybackException error){
@@ -768,6 +781,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             return;
         }
         currentFtpMp3Path=null;
+        ftpMp3Preparing=false;
         currentRadioId=id;
         currentMp3Id=-1L;
         rememberRadioForResume(id);
@@ -830,7 +844,73 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void skipCurrent(int delta){
         if(currentRadioId!=null) skipRadio(delta);
+        else if(currentFtpMp3Path!=null) skipFtpMp3(delta);
         else if(currentMp3Id>=0 || !currentMp3Queue.isEmpty()) skipMp3(delta);
+    }
+
+    private void prepareFtpQueueAsync(String relativePath){
+        final String rel=relativePath;
+        final String directory=PolarisFtp.parentRelative(rel);
+        ftpExecutor.execute(() -> {
+            try{
+                List<String> queue=PolarisFtp.listMp3AudioPaths(this,directory);
+                if(currentFtpMp3Path==null ||
+                   !directory.equals(PolarisFtp.parentRelative(currentFtpMp3Path))) return;
+                synchronized(currentFtpMp3Queue){
+                    currentFtpMp3Queue.clear();
+                    currentFtpMp3Queue.addAll(queue);
+                    currentFtpMp3Directory=directory;
+                    currentFtpMp3Index=currentFtpMp3Queue.indexOf(currentFtpMp3Path);
+                }
+                trace("FTP MP3 queue "+directory+" size="+queue.size()+
+                    " index="+currentFtpMp3Index);
+            }catch(Exception e){
+                trace("FTP MP3 queue error: "+e);
+            }
+        });
+    }
+
+    private void skipFtpMp3(int delta){
+        final String current=currentFtpMp3Path;
+        if(current==null) return;
+        final String directory=PolarisFtp.parentRelative(current);
+
+        ftpExecutor.execute(() -> {
+            try{
+                List<String> queue;
+                synchronized(currentFtpMp3Queue){
+                    if(directory.equals(currentFtpMp3Directory) &&
+                       currentFtpMp3Queue.contains(current)){
+                        queue=new ArrayList<>(currentFtpMp3Queue);
+                    }else{
+                        queue=null;
+                    }
+                }
+                if(queue==null){
+                    queue=PolarisFtp.listMp3AudioPaths(this,directory);
+                    synchronized(currentFtpMp3Queue){
+                        currentFtpMp3Queue.clear();
+                        currentFtpMp3Queue.addAll(queue);
+                        currentFtpMp3Directory=directory;
+                    }
+                }
+
+                if(queue.isEmpty()) return;
+                int at=queue.indexOf(current);
+                if(at<0) return;
+
+                int next=(at+delta+queue.size())%queue.size();
+                final String target=queue.get(next);
+                synchronized(currentFtpMp3Queue){ currentFtpMp3Index=next; }
+
+                programHandler.post(() -> {
+                    if(current.equals(currentFtpMp3Path))
+                        playFtpAudio("ftpmp3:"+Uri.encode(target));
+                });
+            }catch(Exception e){
+                trace("FTP MP3 skip error: "+e);
+            }
+        });
     }
 
     private void skipRadio(int delta){
@@ -1013,6 +1093,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         currentMp3Queue.clear();
         currentMp3Index=-1;
         currentFtpMp3Path=rel;
+        currentFtpMp3Directory=PolarisFtp.parentRelative(rel);
+        ftpMp3Preparing=true;
+        prepareFtpQueueAsync(rel);
         retryCount=0;
         radioSoftRetryCount=0;
         userStopped=false;
@@ -1042,6 +1125,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             try{
                 File cached=PolarisFtp.downloadMp3ToCache(this,rel);
                 if(!rel.equals(currentFtpMp3Path)) return;
+                ftpMp3Preparing=false;
 
                 String title=fallbackTitle;
                 String artist="Synology FTP";
@@ -1107,6 +1191,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 });
             }catch(Exception e){
                 if(rel.equals(currentFtpMp3Path)){
+                    ftpMp3Preparing=false;
                     trace("FTP MP3 download error: "+rel+" / "+e);
                     publishError("FTP 음악 다운로드 오류: "+
                         (e.getMessage()==null?e.getClass().getSimpleName():e.getMessage()));
@@ -1144,6 +1229,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void playLocalAudioId(long mediaId,long startPositionMs,boolean restoring){
         try{
             currentFtpMp3Path=null;
+            ftpMp3Preparing=false;
             currentRadioId=null;
             currentMp3Id=mediaId;
             retryCount=0;
@@ -1806,7 +1892,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void publishState(){
         int state=PlaybackStateCompat.STATE_STOPPED;
-        if(player!=null && player.isPlaying()) state=PlaybackStateCompat.STATE_PLAYING;
+        if(currentFtpMp3Path!=null && ftpMp3Preparing && !userStopped)
+            state=PlaybackStateCompat.STATE_BUFFERING;
+        else if(player!=null && player.isPlaying()) state=PlaybackStateCompat.STATE_PLAYING;
+        else if(currentFtpMp3Path!=null && userStopped)
+            state=PlaybackStateCompat.STATE_PAUSED;
         else if(player!=null && player.getPlaybackState()==Player.STATE_BUFFERING)
             state=PlaybackStateCompat.STATE_BUFFERING;
         else if(player!=null && player.getPlaybackState()==Player.STATE_READY)
@@ -1827,11 +1917,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|
                 PlaybackStateCompat.ACTION_FAST_FORWARD|
                 PlaybackStateCompat.ACTION_REWIND;
-        }else if(currentMp3Id>=0){
-            // Keep the standard previous/next transport slots occupied by their
-            // actual transport actions. Android Auto can then keep the four
-            // MP3 custom actions together in the custom-action area instead of
-            // borrowing the previous/next slots and splitting the group.
+        }else if(currentMp3Id>=0 || currentFtpMp3Path!=null){
+            // Local and FTP MP3 both expose the normal transport row.
             actions|=PlaybackStateCompat.ACTION_SKIP_TO_NEXT|
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS;
         }
