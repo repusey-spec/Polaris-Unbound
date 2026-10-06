@@ -8,11 +8,19 @@ import android.util.Base64;
 
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPFile;
 import org.apache.commons.net.ftp.FTPReply;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 
 import javax.crypto.Cipher;
@@ -59,6 +67,38 @@ public final class PolarisFtp {
         }
     }
 
+    public static final class Entry {
+        public final String name;
+        public final String relativePath;
+        public final boolean directory;
+        public final long size;
+
+        Entry(String name,String relativePath,boolean directory,long size){
+            this.name=name;
+            this.relativePath=relativePath;
+            this.directory=directory;
+            this.size=Math.max(0L,size);
+        }
+    }
+
+    public static final class DirectoryPage {
+        public final List<Entry> entries;
+        public final int total;
+        public final int offset;
+        public final int limit;
+
+        DirectoryPage(List<Entry> entries,int total,int offset,int limit){
+            this.entries=entries;
+            this.total=Math.max(0,total);
+            this.offset=Math.max(0,offset);
+            this.limit=Math.max(1,limit);
+        }
+
+        public boolean hasMore(){
+            return offset+entries.size()<total;
+        }
+    }
+
     private PolarisFtp(){}
 
     public static Config load(Context context){
@@ -66,8 +106,6 @@ public final class PolarisFtp {
         String mp3Root=p.getString(K_MP3_ROOT,DEFAULT_MP3_ROOT);
         String canRoot=p.getString(K_CAN_ROOT,DEFAULT_CAN_ROOT);
 
-        // v0.41 shipped with /Polaris/... defaults. Migrate only those exact
-        // old defaults; preserve any path the user entered manually.
         boolean migrate=false;
         if("/Polaris/MP3".equals(mp3Root)){
             mp3Root=DEFAULT_MP3_ROOT;
@@ -119,25 +157,8 @@ public final class PolarisFtp {
         String root=cfg.rootFor(scope);
         if(fileName==null||fileName.trim().isEmpty()) throw new IllegalArgumentException("파일명이 비었습니다");
 
-        FTPClient ftp=new FTPClient();
-        ftp.setConnectTimeout(10000);
-        ftp.setDefaultTimeout(10000);
-        ftp.setDataTimeout(15000);
-        ftp.setControlEncoding("UTF-8");
-
+        FTPClient ftp=open(cfg);
         try{
-            ftp.connect(cfg.host,cfg.port);
-            int reply=ftp.getReplyCode();
-            if(!FTPReply.isPositiveCompletion(reply))
-                throw new IllegalStateException("FTP 연결 실패: "+reply);
-
-            if(!ftp.login(cfg.user,cfg.password))
-                throw new IllegalStateException("FTP 로그인 실패");
-
-            ftp.enterLocalPassiveMode();
-            if(!ftp.setFileType(FTP.BINARY_FILE_TYPE))
-                throw new IllegalStateException("FTP binary mode 설정 실패");
-
             ensureRemoteRoot(ftp,root);
 
             String safeName=fileName.replace('/','_').replace('\\','_');
@@ -156,10 +177,167 @@ public final class PolarisFtp {
 
             return joinRemote(root,safeName);
         } finally {
-            if(ftp.isConnected()){
-                try{ ftp.logout(); }catch(Exception ignored){}
-                try{ ftp.disconnect(); }catch(Exception ignored){}
+            close(ftp);
+        }
+    }
+
+    public static DirectoryPage listMp3(Context context,String relativePath,int offset,int limit) throws Exception {
+        Config cfg=load(context);
+        if(!cfg.isConfigured()) throw new IllegalStateException("FTP 설정이 필요합니다");
+
+        String rel=normalizeRelative(relativePath);
+        int safeOffset=Math.max(0,offset);
+        int safeLimit=Math.max(1,Math.min(limit,500));
+
+        FTPClient ftp=open(cfg);
+        try{
+            if(!changeToExistingRoot(ftp,cfg.mp3Root))
+                throw new IllegalStateException("MP3 FTP Root가 없습니다: "+cfg.mp3Root);
+            if(!rel.isEmpty() && !changeRelativeDirectory(ftp,rel))
+                throw new IllegalStateException("FTP 폴더를 찾을 수 없습니다: "+rel);
+
+            FTPFile[] raw=ftp.listFiles();
+            List<Entry> all=new ArrayList<>();
+            if(raw!=null){
+                for(FTPFile file:raw){
+                    if(file==null) continue;
+                    String name=file.getName()==null?"":file.getName().trim();
+                    if(name.isEmpty()||".".equals(name)||"..".equals(name)||name.startsWith(".")) continue;
+
+                    if(file.isDirectory()){
+                        all.add(new Entry(name,joinRelative(rel,name),true,0L));
+                    }else if(file.isFile() && isAudioFile(name)){
+                        all.add(new Entry(name,joinRelative(rel,name),false,file.getSize()));
+                    }
+                }
             }
+
+            Collections.sort(all,new Comparator<Entry>(){
+                @Override public int compare(Entry a,Entry b){
+                    if(a.directory!=b.directory) return a.directory?-1:1;
+                    return a.name.compareToIgnoreCase(b.name);
+                }
+            });
+
+            int from=Math.min(safeOffset,all.size());
+            int to=Math.min(from+safeLimit,all.size());
+            return new DirectoryPage(new ArrayList<>(all.subList(from,to)),all.size(),from,safeLimit);
+        } finally {
+            close(ftp);
+        }
+    }
+
+    public static File downloadMp3ToCache(Context context,String relativePath) throws Exception {
+        Config cfg=load(context);
+        if(!cfg.isConfigured()) throw new IllegalStateException("FTP 설정이 필요합니다");
+
+        String rel=normalizeRelative(relativePath);
+        if(rel.isEmpty()||!isAudioFile(rel))
+            throw new IllegalArgumentException("재생할 FTP 음악 파일이 아닙니다");
+
+        File dir=new File(context.getCacheDir(),"ftp_mp3");
+        if(!dir.exists()&&!dir.mkdirs())
+            throw new IllegalStateException("FTP 캐시 폴더를 만들 수 없습니다");
+
+        String extension="";
+        int dot=rel.lastIndexOf('.');
+        if(dot>=0 && dot>rel.lastIndexOf('/')) extension=rel.substring(dot).toLowerCase(Locale.US);
+        String cacheName=sha256(rel)+extension;
+        File target=new File(dir,cacheName);
+        File part=new File(dir,cacheName+".part");
+
+        FTPClient ftp=open(cfg);
+        try{
+            if(!changeToExistingRoot(ftp,cfg.mp3Root))
+                throw new IllegalStateException("MP3 FTP Root가 없습니다: "+cfg.mp3Root);
+
+            long expectedSize=remoteSize(ftp,rel);
+            if(target.isFile() && target.length()>0L &&
+               (expectedSize<=0L || target.length()==expectedSize))
+                return target;
+
+            if(part.exists()) part.delete();
+            try(FileOutputStream out=new FileOutputStream(part)){
+                if(!ftp.retrieveFile(rel,out))
+                    throw new IllegalStateException("FTP 다운로드 실패: "+ftp.getReplyString().trim());
+            }
+
+            if(expectedSize>0L && part.length()!=expectedSize){
+                long got=part.length();
+                part.delete();
+                throw new IllegalStateException("FTP 다운로드 크기 불일치: "+got+"/"+expectedSize);
+            }
+
+            if(target.exists()&&!target.delete()){
+                part.delete();
+                throw new IllegalStateException("기존 FTP 캐시를 교체할 수 없습니다");
+            }
+            if(!part.renameTo(target)){
+                part.delete();
+                throw new IllegalStateException("FTP 캐시 완료 처리 실패");
+            }
+            return target;
+        } finally {
+            close(ftp);
+        }
+    }
+
+    public static String displayTitle(String fileName){
+        if(fileName==null) return "";
+        String name=fileName;
+        int slash=Math.max(name.lastIndexOf('/'),name.lastIndexOf('\\'));
+        if(slash>=0) name=name.substring(slash+1);
+        int dot=name.lastIndexOf('.');
+        if(dot>0) name=name.substring(0,dot);
+        return name;
+    }
+
+    public static String parentRelative(String relativePath){
+        String rel=normalizeRelative(relativePath);
+        int slash=rel.lastIndexOf('/');
+        return slash<0?"":rel.substring(0,slash);
+    }
+
+    public static boolean isAudioFile(String name){
+        if(name==null) return false;
+        String lower=name.toLowerCase(Locale.US);
+        return lower.endsWith(".mp3")||lower.endsWith(".m4a")||
+            lower.endsWith(".flac")||lower.endsWith(".wav")||
+            lower.endsWith(".aac")||lower.endsWith(".ogg")||
+            lower.endsWith(".opus")||lower.endsWith(".wma");
+    }
+
+    private static FTPClient open(Config cfg) throws Exception {
+        FTPClient ftp=new FTPClient();
+        ftp.setConnectTimeout(10000);
+        ftp.setDefaultTimeout(10000);
+        ftp.setDataTimeout(30000);
+        ftp.setControlEncoding("UTF-8");
+        ftp.setBufferSize(64*1024);
+
+        ftp.connect(cfg.host,cfg.port);
+        int reply=ftp.getReplyCode();
+        if(!FTPReply.isPositiveCompletion(reply)){
+            close(ftp);
+            throw new IllegalStateException("FTP 연결 실패: "+reply);
+        }
+        if(!ftp.login(cfg.user,cfg.password)){
+            close(ftp);
+            throw new IllegalStateException("FTP 로그인 실패");
+        }
+
+        ftp.enterLocalPassiveMode();
+        if(!ftp.setFileType(FTP.BINARY_FILE_TYPE)){
+            close(ftp);
+            throw new IllegalStateException("FTP binary mode 설정 실패");
+        }
+        return ftp;
+    }
+
+    private static void close(FTPClient ftp){
+        if(ftp!=null&&ftp.isConnected()){
+            try{ ftp.logout(); }catch(Exception ignored){}
+            try{ ftp.disconnect(); }catch(Exception ignored){}
         }
     }
 
@@ -185,6 +363,58 @@ public final class PolarisFtp {
         }
     }
 
+    private static boolean changeToExistingRoot(FTPClient ftp,String root) throws Exception {
+        String normalized=normalizeRoot(root,"/");
+        if(normalized.startsWith("/")&&!ftp.changeWorkingDirectory("/")) return false;
+        if("/".equals(normalized)) return true;
+        for(String raw:normalized.split("/")){
+            String part=raw.trim();
+            if(part.isEmpty()) continue;
+            if(!ftp.changeWorkingDirectory(part)) return false;
+        }
+        return true;
+    }
+
+    private static boolean changeRelativeDirectory(FTPClient ftp,String relative) throws Exception {
+        String rel=normalizeRelative(relative);
+        if(rel.isEmpty()) return true;
+        for(String part:rel.split("/")){
+            if(!ftp.changeWorkingDirectory(part)) return false;
+        }
+        return true;
+    }
+
+    private static long remoteSize(FTPClient ftp,String rel){
+        try{
+            FTPFile[] files=ftp.listFiles(rel);
+            if(files!=null){
+                for(FTPFile f:files){
+                    if(f!=null&&f.isFile()) return Math.max(0L,f.getSize());
+                }
+            }
+        }catch(Exception ignored){}
+        return -1L;
+    }
+
+    private static String normalizeRelative(String value){
+        String rel=value==null?"":value.trim().replace('\\','/');
+        while(rel.startsWith("/")) rel=rel.substring(1);
+        while(rel.endsWith("/")&&!rel.isEmpty()) rel=rel.substring(0,rel.length()-1);
+        while(rel.contains("//")) rel=rel.replace("//","/");
+        if(rel.isEmpty()) return "";
+        for(String part:rel.split("/")){
+            if(part.isEmpty()||".".equals(part)||"..".equals(part))
+                throw new IllegalArgumentException("허용되지 않는 FTP 경로입니다");
+        }
+        return rel;
+    }
+
+    private static String joinRelative(String base,String name){
+        String b=normalizeRelative(base);
+        String n=normalizeRelative(name);
+        return b.isEmpty()?n:b+"/"+n;
+    }
+
     private static String normalizeRoot(String root,String fallback){
         String value=root==null?"":root.trim().replace('\\','/');
         if(value.isEmpty()) value=fallback;
@@ -197,6 +427,14 @@ public final class PolarisFtp {
         String r=normalizeRoot(root,"/");
         if("/".equals(r)) return "/"+name;
         return r+"/"+name;
+    }
+
+    private static String sha256(String value) throws Exception {
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");
+        byte[] bytes=digest.digest(value.getBytes(StandardCharsets.UTF_8));
+        StringBuilder out=new StringBuilder();
+        for(byte b:bytes) out.append(String.format(Locale.US,"%02x",b&0xff));
+        return out.toString();
     }
 
     private static SecretKey getOrCreateKey() throws Exception {
