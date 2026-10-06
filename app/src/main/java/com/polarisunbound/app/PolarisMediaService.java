@@ -1642,6 +1642,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|
                 PlaybackStateCompat.ACTION_FAST_FORWARD|
                 PlaybackStateCompat.ACTION_REWIND;
+        }else if(currentMp3Id>=0){
+            // Keep the standard previous/next transport slots occupied by their
+            // actual transport actions. Android Auto can then keep the four
+            // MP3 custom actions together in the custom-action area instead of
+            // borrowing the previous/next slots and splitting the group.
+            actions|=PlaybackStateCompat.ACTION_SKIP_TO_NEXT|
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS;
         }
 
         PlaybackStateCompat.Builder b=new PlaybackStateCompat.Builder()
