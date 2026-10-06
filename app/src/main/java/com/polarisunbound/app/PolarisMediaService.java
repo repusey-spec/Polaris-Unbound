@@ -239,6 +239,26 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     dislikeCurrent();
                 }
             }
+            @Override public boolean onMediaButtonEvent(Intent mediaButtonIntent){
+                if(mediaButtonIntent!=null){
+                    android.view.KeyEvent event=
+                        mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                    if(event!=null && event.getAction()==android.view.KeyEvent.ACTION_DOWN){
+                        int code=event.getKeyCode();
+                        if(code==android.view.KeyEvent.KEYCODE_MEDIA_NEXT){
+                            trace("MEDIA BUTTON next");
+                            skipCurrent(1);
+                            return true;
+                        }
+                        if(code==android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS){
+                            trace("MEDIA BUTTON previous");
+                            skipCurrent(-1);
+                            return true;
+                        }
+                    }
+                }
+                return super.onMediaButtonEvent(mediaButtonIntent);
+            }
             @Override public void onStop(){
                 saveLastMp3Position();
                 userStopped=true;
@@ -649,20 +669,32 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return contains;
     }
 
-    private void startVoiceRandomMp3(){
+    private List<Long> favoriteIdsInLibraryOrder(){
+        Set<String> favorites=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getStringSet(PREF_MP3_FAVORITES,Collections.emptySet());
+        List<Long> out=new ArrayList<>();
+        for(Long id:loadAllMp3Ids()){
+            if(favorites.contains(String.valueOf(id))) out.add(id);
+        }
+        return out;
+    }
+
+    private void startVoiceLikedMp3(){
         currentMp3Queue.clear();
-        currentMp3Queue.addAll(loadAllMp3Ids());
+        currentMp3Queue.addAll(favoriteIdsInLibraryOrder());
         if(currentMp3Queue.isEmpty()){
-            publishError("MP3 파일이 없습니다");
+            publishError("좋아요 MP3가 없습니다");
+            trace("VOICE MP3 liked playlist empty");
             return;
         }
-        mp3Shuffle=true;
-        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
-            .putBoolean(PREF_MP3_SHUFFLE,true).apply();
-        session.setShuffleMode(PlaybackStateCompat.SHUFFLE_MODE_ALL);
-        currentMp3Index=mp3Random.nextInt(currentMp3Queue.size());
-        trace("VOICE MP3 random index="+currentMp3Index);
-        playLocalAudioId(currentMp3Queue.get(currentMp3Index));
+
+        int index=0;
+        if(mp3Shuffle && currentMp3Queue.size()>1)
+            index=mp3Random.nextInt(currentMp3Queue.size());
+
+        currentMp3Index=index;
+        trace("VOICE MP3 liked playlist size="+currentMp3Queue.size()+" index="+index);
+        playLocalAudioId(currentMp3Queue.get(index));
     }
 
     private void playVoiceRadio(String id){
@@ -701,7 +733,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(asksMp3){
             String wanted=stripVoiceMp3Prefix(raw);
             if(wanted.isEmpty()){
-                startVoiceRandomMp3();
+                startVoiceLikedMp3();
                 return;
             }
             long id=findMp3Title(wanted);
@@ -726,8 +758,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
         }
 
-        // Empty media play query: random MP3 is the requested default.
-        startVoiceRandomMp3();
+        // Empty/default MP3 play request opens the user's 좋아요 playlist.
+        startVoiceLikedMp3();
     }
 
     private void skipCurrent(int delta){
@@ -1313,35 +1345,82 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return out;
     }
 
-    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadGroupItems(String column,String prefix){
-        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
-        LinkedHashSet<String> seen=new LinkedHashSet<>();
-        String[] projection={column};
-        String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
-        try(Cursor c=getContentResolver().query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            projection,selection,null,column+" COLLATE NOCASE ASC")){
-            if(c!=null){
-                int col=c.getColumnIndexOrThrow(column);
-                while(c.moveToNext()){
-                    String value=safe(c.getString(col)).trim();
-                    if(value.isEmpty()||!seen.add(value)) continue;
-                    String title=value;
-                    if(prefix.equals("mp3_folder:")){
-                        String v=value.endsWith("/")?value.substring(0,value.length()-1):value;
-                        int slash=v.lastIndexOf('/');
-                        title=slash>=0?v.substring(slash+1):v;
-                    }
-                    out.add(folder(prefix+Uri.encode(value),title));
-                }
-            }
-        }catch(Exception ignored){}
-        return out;
+    private String folderTitleFromPath(String value){
+        if(value==null) return "";
+        String v=value.trim();
+        while(v.endsWith("/")) v=v.substring(0,v.length()-1);
+        int slash=v.lastIndexOf('/');
+        return slash>=0 ? v.substring(slash+1) : v;
     }
 
     private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadMp3Folders(){
-        String column=Build.VERSION.SDK_INT>=29 ? MediaStore.Audio.Media.RELATIVE_PATH : MediaStore.Audio.Media.DATA;
-        return loadGroupItems(column,"mp3_folder:");
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        LinkedHashSet<String> seen=new LinkedHashSet<>();
+
+        if(Build.VERSION.SDK_INT>=29){
+            String[] projection={
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                MediaStore.Audio.Media.DATA
+            };
+            String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
+            try(Cursor c=getContentResolver().query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,selection,null,
+                MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")){
+                if(c!=null){
+                    int relCol=c.getColumnIndex(MediaStore.Audio.Media.RELATIVE_PATH);
+                    int dataCol=c.getColumnIndex(MediaStore.Audio.Media.DATA);
+                    while(c.moveToNext()){
+                        String rel=relCol>=0 ? safe(c.getString(relCol)).trim() : "";
+                        if(!rel.isEmpty()){
+                            String key="rel|"+rel;
+                            if(seen.add(key))
+                                out.add(folder("mp3_folder:"+Uri.encode(key),folderTitleFromPath(rel)));
+                            continue;
+                        }
+
+                        String data=dataCol>=0 ? safe(c.getString(dataCol)).trim() : "";
+                        if(!data.isEmpty()){
+                            File parent=new File(data).getParentFile();
+                            if(parent!=null){
+                                String dir=parent.getAbsolutePath();
+                                String key="data|"+dir;
+                                if(seen.add(key))
+                                    out.add(folder("mp3_folder:"+Uri.encode(key),folderTitleFromPath(dir)));
+                            }
+                        }
+                    }
+                }
+            }catch(Exception e){
+                trace("MP3 folder query error: "+e);
+            }
+        }else{
+            String[] projection={MediaStore.Audio.Media.DATA};
+            String selection=MediaStore.Audio.Media.IS_MUSIC+" != 0";
+            try(Cursor c=getContentResolver().query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,selection,null,
+                MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC")){
+                if(c!=null){
+                    int dataCol=c.getColumnIndex(MediaStore.Audio.Media.DATA);
+                    while(c.moveToNext()){
+                        String data=dataCol>=0 ? safe(c.getString(dataCol)).trim() : "";
+                        if(data.isEmpty()) continue;
+                        File parent=new File(data).getParentFile();
+                        if(parent==null) continue;
+                        String dir=parent.getAbsolutePath();
+                        String key="data|"+dir;
+                        if(seen.add(key))
+                            out.add(folder("mp3_folder:"+Uri.encode(key),folderTitleFromPath(dir)));
+                    }
+                }
+            }catch(Exception e){
+                trace("MP3 legacy folder query error: "+e);
+            }
+        }
+
+        trace("MP3 folders="+out.size());
+        return out;
     }
 
     private void applyLive365Headers(HttpURLConnection con){
@@ -1678,10 +1757,20 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.addAll(loadLocalAudio(MediaStore.Audio.Media.ARTIST+"=?",new String[]{value},MediaStore.Audio.Media.ALBUM+" COLLATE NOCASE ASC, "+MediaStore.Audio.Media.TRACK+" ASC"));
         } else if(parent.startsWith("mp3_folder:")){
             String value=Uri.decode(parent.substring("mp3_folder:".length()));
-            if(Build.VERSION.SDK_INT>=29)
-                x.addAll(loadLocalAudio(MediaStore.Audio.Media.RELATIVE_PATH+"=?",new String[]{value},MediaStore.Audio.Media.TRACK+" ASC"));
-            else
-                x.addAll(loadLocalAudio(MediaStore.Audio.Media.DATA+" LIKE ?",new String[]{value.endsWith("/")?value+"%":value+"/%"},MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
+            if(value.startsWith("rel|")){
+                String rel=value.substring(4);
+                x.addAll(loadLocalAudio(
+                    MediaStore.Audio.Media.RELATIVE_PATH+"=?",
+                    new String[]{rel},
+                    MediaStore.Audio.Media.TRACK+" ASC"));
+            }else if(value.startsWith("data|")){
+                String dir=value.substring(5);
+                String prefix=dir.endsWith("/") ? dir+"%" : dir+"/%";
+                x.addAll(loadLocalAudio(
+                    MediaStore.Audio.Media.DATA+" LIKE ?",
+                    new String[]{prefix},
+                    MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
+            }
         }
         result.sendResult(x);
     }
