@@ -56,20 +56,32 @@ public final class CurrentProgramResolver {
             return program;
         }
 
+        public String aaTitle(String id){
+            String title=aaTitle();
+            if("kiis".equals(id)||"gallery".equals(id))
+                return title+"  |  "+localClockLabel(id);
+            return title;
+        }
+
         public String phoneText(String id){
             if("kiis".equals(id)||"gallery".equals(id)){
-                SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US);
-                f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles"));
-                String city="kiis".equals(id)?"LA":"SF";
-                String now=f.format(new Date());
+                String clock=localClockLabel(id);
                 if(program==null||program.trim().isEmpty()||program.equals(station))
-                    return station+"  |  "+city+" "+now;
-                return station+"  |  "+city+" "+now+"\n"+program;
+                    return station+"  |  "+clock;
+                return station+"\n"+program+"  |  "+clock;
             }
             if(program==null||program.trim().isEmpty()||program.equals(station)) return station;
             String prefix=(startLabel==null||startLabel.isEmpty())?"":startLabel+" ";
             return station+"\n"+prefix+program;
         }
+    }
+
+    public static String localClockLabel(String id){
+        if(!"kiis".equals(id)&&!"gallery".equals(id)) return "";
+        SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US);
+        f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles"));
+        String city="kiis".equals(id)?"LA":"SF";
+        return city+" "+f.format(new Date());
     }
 
     private static final class Entry {
