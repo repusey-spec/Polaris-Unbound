@@ -20,12 +20,17 @@ import android.media.MediaMetadataRetriever;
 import android.support.v4.media.*;
 import android.support.v4.media.session.*;
 import androidx.media.MediaBrowserServiceCompat;
+import androidx.media.utils.MediaConstants;
+import androidx.car.app.connection.CarConnection;
+import androidx.lifecycle.Observer;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Player;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import java.util.*;
 import java.io.*;
 import java.net.*;
@@ -51,12 +56,25 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final ExecutorService programExecutor=Executors.newSingleThreadExecutor();
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private String currentRadioId=null;
     private int retryCount=0;
+    private int radioSoftRetryCount=0;
     private boolean userStopped=false;
     private boolean resumeAfterTransientFocusLoss=false;
     private static final String PREFS="polaris_playback_state";
     private static final String PREF_LAST_RADIO="last_radio_id";
+    private static final String PREF_LAST_SOURCE="last_source";
+    private static final String PREF_LAST_MP3_ID="last_mp3_id";
+    private static final String PREF_LAST_MP3_POSITION="last_mp3_position_ms";
+    private static final String PREF_RESUME_ALLOWED="resume_allowed";
+    private static final String SOURCE_RADIO="RADIO";
+    private static final String SOURCE_MP3="MP3";
+    private static final String ACTION_MP3_LIKE="com.polarisunbound.app.action.MP3_LIKE";
+    private static final String ACTION_MP3_SHUFFLE="com.polarisunbound.app.action.MP3_SHUFFLE";
+    private static final String ACTION_MP3_REPEAT="com.polarisunbound.app.action.MP3_REPEAT";
+    private static final String ACTION_MP3_DISLIKE="com.polarisunbound.app.action.MP3_DISLIKE";
     private static final String MP3_PREFS="polaris_mp3";
     private static final String PREF_MP3_RECENT="recent_ids";
     private static final String PREF_MP3_FAVORITES="favorite_ids";
@@ -70,7 +88,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private boolean mp3Shuffle=false;
     private boolean mp3EndHandled=false;
     private final Random mp3Random=new Random();
-    private long lastAutoResumeAt=0L;
+    private CarConnection carConnection;
+    private Observer<Integer> carConnectionObserver;
+    private boolean aaProjectionConnected=false;
+    private boolean sessionRestoreConsumed=false;
+    private final DefaultLoadErrorHandlingPolicy radioLoadErrorPolicy=
+        new DefaultLoadErrorHandlingPolicy(8);
     private AudioManager audioManager;
     private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
@@ -103,7 +126,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         super.onCreate();
         ensurePlaybackChannel();
         audioManager=(AudioManager)getSystemService(Context.AUDIO_SERVICE);
-        player=new ExoPlayer.Builder(this).build();
+        DefaultMediaSourceFactory mediaSourceFactory=new DefaultMediaSourceFactory(this)
+            .setLoadErrorHandlingPolicy(radioLoadErrorPolicy);
+        player=new ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build();
         AudioAttributes audioAttributes=new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -135,7 +162,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
                     currentRadioId=id;
                     currentMp3Id=-1L;
-                    getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
+                    rememberRadioForResume(id);
                     enterPlaybackForeground(TITLES.get(id));
                     retryCount=0;
                     userStopped=false;
@@ -147,15 +174,38 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 trace("SERVICE onPlayFromSearch: query="+query+" extras="+String.valueOf(extras));
                 handleVoicePlaySearch(query,extras);
             }
-            @Override public void onPlay(){ if(requestPlaybackFocus()) player.play(); publishState(); }
+            @Override public void onPlay(){
+                userStopped=false;
+                setResumeAllowed(true);
+                if(currentRadioId==null && currentMp3Id<0){
+                    sessionRestoreConsumed=false;
+                    restoreLastSourceIfAllowed();
+                    return;
+                }
+                if(currentRadioId!=null) rememberRadioForResume(currentRadioId);
+                else if(currentMp3Id>=0) rememberMp3ForResume(currentMp3Id,currentPlayerPosition());
+                if(requestPlaybackFocus()) player.play();
+                publishState();
+            }
             @Override public void onSkipToNext(){ skipCurrent(1); }
             @Override public void onSkipToPrevious(){ skipCurrent(-1); }
             @Override public void onFastForward(){ skipCurrent(1); }
             @Override public void onRewind(){ skipCurrent(-1); }
-            @Override public void onPause(){ player.pause(); publishState(); }
+            @Override public void onPause(){
+                saveLastMp3Position();
+                userStopped=true;
+                resumeAfterTransientFocusLoss=false;
+                setResumeAllowed(false);
+                retryHandler.removeCallbacksAndMessages(null);
+                restoreHandler.removeCallbacksAndMessages(null);
+                player.pause();
+                publishState();
+                trace("USER pause -> automatic session restore disabled");
+            }
             @Override public void onSeekTo(long pos){
                 if(player!=null){
                     player.seekTo(Math.max(0L,pos));
+                    saveLastMp3Position();
                     publishState();
                 }
             }
@@ -168,6 +218,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     .putInt(PREF_MP3_REPEAT_MODE,mp3RepeatMode).apply();
                 session.setRepeatMode(mp3RepeatMode);
                 trace("MP3 repeat mode="+mp3RepeatMode);
+                publishState();
             }
             @Override public void onSetShuffleMode(int shuffleMode){
                 mp3Shuffle=shuffleMode!=PlaybackStateCompat.SHUFFLE_MODE_NONE;
@@ -175,21 +226,45 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     .putBoolean(PREF_MP3_SHUFFLE,mp3Shuffle).apply();
                 session.setShuffleMode(mp3Shuffle ? PlaybackStateCompat.SHUFFLE_MODE_ALL : PlaybackStateCompat.SHUFFLE_MODE_NONE);
                 trace("MP3 shuffle="+mp3Shuffle);
+                publishState();
+            }
+            @Override public void onCustomAction(String action,Bundle extras){
+                if(ACTION_MP3_LIKE.equals(action)){
+                    toggleFavoriteCurrent();
+                }else if(ACTION_MP3_SHUFFLE.equals(action)){
+                    toggleShuffleMode();
+                }else if(ACTION_MP3_REPEAT.equals(action)){
+                    cycleRepeatMode();
+                }else if(ACTION_MP3_DISLIKE.equals(action)){
+                    dislikeCurrent();
+                }
             }
             @Override public void onStop(){
+                saveLastMp3Position();
                 userStopped=true;
+                resumeAfterTransientFocusLoss=false;
+                setResumeAllowed(false);
                 currentRadioId=null;
                 currentMp3Id=-1L;
                 retryCount=0;
+                radioSoftRetryCount=0;
                 retryHandler.removeCallbacksAndMessages(null);
+                restoreHandler.removeCallbacksAndMessages(null);
                 leavePlaybackForeground();
                 abandonPlaybackFocus();
                 player.stop();
                 publishState();
+                trace("USER stop -> automatic session restore disabled");
             }
         });
         player.addListener(new Player.Listener(){
-            @Override public void onIsPlayingChanged(boolean playing){ publishState(); }
+            @Override public void onIsPlayingChanged(boolean playing){
+                if(playing && currentRadioId!=null){
+                    radioSoftRetryCount=0;
+                    retryCount=0;
+                }
+                publishState();
+            }
             @Override public void onPlaybackStateChanged(int state){
                 publishState();
                 if(state==Player.STATE_ENDED && currentMp3Id>=0 && !mp3EndHandled){
@@ -209,17 +284,229 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     cause=cause.getCause();
                 }
                 trace("PLAYER ERROR: "+msg);
-                publishError(msg);
-                scheduleRetry();
+                if(currentRadioId!=null && !userStopped){
+                    publishError(msg);
+                    scheduleSoftRadioRetry();
+                }else{
+                    publishError(msg);
+                }
             }
         });
         setSessionToken(session.getSessionToken());
         session.setActive(true);
         publishState();
         startProgramRefreshLoop();
+        startPositionSaver();
+        observeCarConnection();
     }
 
 
+    private long currentPlayerPosition(){
+        if(player==null) return 0L;
+        try{ return Math.max(0L,player.getCurrentPosition()); }
+        catch(Exception ignored){ return 0L; }
+    }
+
+    private void setResumeAllowed(boolean allowed){
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putBoolean(PREF_RESUME_ALLOWED,allowed).apply();
+    }
+
+    private boolean isResumeAllowed(android.content.SharedPreferences p){
+        if(p.contains(PREF_RESUME_ALLOWED))
+            return p.getBoolean(PREF_RESUME_ALLOWED,false);
+        // Migration from v0.36: an existing last radio means the old app intended auto-resume.
+        return p.getString(PREF_LAST_RADIO,null)!=null;
+    }
+
+    private void rememberRadioForResume(String id){
+        if(id==null||!STREAMS.containsKey(id)) return;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putString(PREF_LAST_SOURCE,SOURCE_RADIO)
+            .putString(PREF_LAST_RADIO,id)
+            .putBoolean(PREF_RESUME_ALLOWED,true)
+            .apply();
+    }
+
+    private void rememberMp3ForResume(long mediaId,long positionMs){
+        if(mediaId<0) return;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putString(PREF_LAST_SOURCE,SOURCE_MP3)
+            .putLong(PREF_LAST_MP3_ID,mediaId)
+            .putLong(PREF_LAST_MP3_POSITION,Math.max(0L,positionMs))
+            .putBoolean(PREF_RESUME_ALLOWED,true)
+            .apply();
+    }
+
+    private void saveLastMp3Position(){
+        if(currentMp3Id<0||player==null) return;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putString(PREF_LAST_SOURCE,SOURCE_MP3)
+            .putLong(PREF_LAST_MP3_ID,currentMp3Id)
+            .putLong(PREF_LAST_MP3_POSITION,currentPlayerPosition())
+            .apply();
+    }
+
+    private void startPositionSaver(){
+        positionHandler.postDelayed(new Runnable(){
+            @Override public void run(){
+                saveLastMp3Position();
+                positionHandler.postDelayed(this,5000L);
+            }
+        },5000L);
+    }
+
+    private void observeCarConnection(){
+        try{
+            carConnection=new CarConnection(this);
+            carConnectionObserver=type -> restoreHandler.post(() ->
+                handleCarConnection(type==null ?
+                    CarConnection.CONNECTION_TYPE_NOT_CONNECTED : type));
+            carConnection.getType().observeForever(carConnectionObserver);
+        }catch(Throwable e){
+            trace("CarConnection unavailable: "+e);
+        }
+    }
+
+    private void handleCarConnection(int type){
+        boolean projected=type==CarConnection.CONNECTION_TYPE_PROJECTION;
+        if(projected){
+            if(!aaProjectionConnected){
+                aaProjectionConnected=true;
+                sessionRestoreConsumed=false;
+                restoreHandler.removeCallbacksAndMessages(null);
+                restoreHandler.postDelayed(this::restoreLastSourceIfAllowed,2500L);
+                trace("AA projection connected");
+            }
+            return;
+        }
+
+        if(aaProjectionConnected){
+            trace("AA projection disconnected");
+            saveLastMp3Position();
+            aaProjectionConnected=false;
+            sessionRestoreConsumed=false;
+            resumeAfterTransientFocusLoss=false;
+            retryHandler.removeCallbacksAndMessages(null);
+            restoreHandler.removeCallbacksAndMessages(null);
+            if(player!=null){
+                try{ player.pause(); }catch(Exception ignored){}
+                try{ player.stop(); }catch(Exception ignored){}
+            }
+            currentRadioId=null;
+            currentMp3Id=-1L;
+            retryCount=0;
+            radioSoftRetryCount=0;
+            leavePlaybackForeground();
+            abandonPlaybackFocus();
+            publishState();
+        }
+    }
+
+    private void restoreLastSourceIfAllowed(){
+        if(sessionRestoreConsumed) return;
+        sessionRestoreConsumed=true;
+        if(!aaProjectionConnected) return;
+
+        android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
+        if(!isResumeAllowed(p)){
+            trace("AA restore skipped: manual pause/stop");
+            return;
+        }
+        if(currentRadioId!=null || currentMp3Id>=0 || (player!=null && player.isPlaying())){
+            trace("AA restore skipped: media already active");
+            return;
+        }
+
+        String source=p.getString(PREF_LAST_SOURCE,null);
+        if(source==null && p.getString(PREF_LAST_RADIO,null)!=null)
+            source=SOURCE_RADIO;
+
+        if(SOURCE_MP3.equals(source)){
+            long mediaId=p.getLong(PREF_LAST_MP3_ID,-1L);
+            long position=p.getLong(PREF_LAST_MP3_POSITION,0L);
+            if(mediaId>=0){
+                trace("AA restore MP3 id="+mediaId+" pos="+position);
+                userStopped=false;
+                playLocalAudioId(mediaId,position,true);
+            }
+            return;
+        }
+
+        if(SOURCE_RADIO.equals(source)){
+            String id=p.getString(PREF_LAST_RADIO,null);
+            if(id!=null && STREAMS.containsKey(id)){
+                trace("AA restore radio="+id);
+                currentRadioId=id;
+                currentMp3Id=-1L;
+                retryCount=0;
+                radioSoftRetryCount=0;
+                userStopped=false;
+                rememberRadioForResume(id);
+                enterPlaybackForeground(TITLES.get(id));
+                startRadio(id);
+            }
+        }
+    }
+
+    private boolean isFavorite(long mediaId){
+        if(mediaId<0) return false;
+        Set<String> set=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getStringSet(PREF_MP3_FAVORITES,Collections.emptySet());
+        return set.contains(String.valueOf(mediaId));
+    }
+
+    private void setFavorite(long mediaId,boolean favorite){
+        if(mediaId<0) return;
+        Set<String> stored=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getStringSet(PREF_MP3_FAVORITES,Collections.emptySet());
+        Set<String> copy=new HashSet<>(stored);
+        String key=String.valueOf(mediaId);
+        if(favorite) copy.add(key); else copy.remove(key);
+        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+            .putStringSet(PREF_MP3_FAVORITES,copy).apply();
+        notifyChildrenChanged("mp3_favorites");
+        trace("MP3 like id="+mediaId+" -> "+favorite);
+    }
+
+    private void toggleFavoriteCurrent(){
+        if(currentMp3Id<0) return;
+        setFavorite(currentMp3Id,!isFavorite(currentMp3Id));
+        publishState();
+    }
+
+    private void toggleShuffleMode(){
+        mp3Shuffle=!mp3Shuffle;
+        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+            .putBoolean(PREF_MP3_SHUFFLE,mp3Shuffle).apply();
+        session.setShuffleMode(mp3Shuffle ?
+            PlaybackStateCompat.SHUFFLE_MODE_ALL :
+            PlaybackStateCompat.SHUFFLE_MODE_NONE);
+        trace("MP3 custom shuffle="+mp3Shuffle);
+        publishState();
+    }
+
+    private void cycleRepeatMode(){
+        if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_NONE)
+            mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_ALL;
+        else if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ALL)
+            mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_ONE;
+        else
+            mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
+
+        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+            .putInt(PREF_MP3_REPEAT_MODE,mp3RepeatMode).apply();
+        session.setRepeatMode(mp3RepeatMode);
+        trace("MP3 custom repeat="+mp3RepeatMode);
+        publishState();
+    }
+
+    private void dislikeCurrent(){
+        if(currentMp3Id<0) return;
+        if(isFavorite(currentMp3Id)) setFavorite(currentMp3Id,false);
+        trace("MP3 dislike -> next");
+        skipMp3(1);
+    }
 
     private void startProgramRefreshLoop(){
         long stagger=0L;
@@ -385,7 +672,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
         currentRadioId=id;
         currentMp3Id=-1L;
-        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
+        rememberRadioForResume(id);
         enterPlaybackForeground(TITLES.get(id));
         retryCount=0;
         userStopped=false;
@@ -458,8 +745,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("RADIO skip "+currentRadioId+" -> "+id);
         currentRadioId=id;
         currentMp3Id=-1L;
-        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(PREF_LAST_RADIO,id).apply();
+        rememberRadioForResume(id);
         retryCount=0;
+        radioSoftRetryCount=0;
         userStopped=false;
         retryHandler.removeCallbacksAndMessages(null);
         enterPlaybackForeground(TITLES.get(id));
@@ -555,6 +843,43 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
     }
 
+    private void scheduleSoftRadioRetry(){
+        if(userStopped || currentRadioId==null || player==null) return;
+
+        radioSoftRetryCount++;
+        if(radioSoftRetryCount>3){
+            trace("RADIO soft retry exhausted -> hard resolver retry");
+            radioSoftRetryCount=0;
+            scheduleRetry();
+            return;
+        }
+
+        final String id=currentRadioId;
+        final int attempt=radioSoftRetryCount;
+        final long failedPosition=currentPlayerPosition();
+        final boolean seekable=player.isCurrentMediaItemSeekable();
+        long delay=attempt==1 ? 1500L : attempt==2 ? 3500L : 7000L;
+
+        trace("RADIO soft retry #"+attempt+" same source in "+delay+
+            "ms pos="+failedPosition+" seekable="+seekable);
+        retryHandler.removeCallbacksAndMessages(null);
+        retryHandler.postDelayed(() -> {
+            if(userStopped || !id.equals(currentRadioId)) return;
+            try{
+                // Do not resolve a new stream URL here. Retry the MediaItem already held
+                // by ExoPlayer, preserving the old timeline position when the source permits it.
+                if(seekable && failedPosition>0L)
+                    player.seekTo(failedPosition);
+                player.prepare();
+                if(requestPlaybackFocus()) player.play();
+                publishState();
+            }catch(Throwable e){
+                trace("RADIO soft retry exception: "+e);
+                scheduleSoftRadioRetry();
+            }
+        },delay);
+    }
+
     private void scheduleRetry(){
         if(userStopped || currentRadioId==null) return;
         if("gallery".equals(currentRadioId) && retryCount>=3){
@@ -564,11 +889,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         retryCount++;
         long delay=retryCount==1 ? 2000L : retryCount==2 ? 5000L : 10000L;
         final String id=currentRadioId;
-        trace("retry scheduled: "+id+" in "+delay+"ms");
+        trace("RADIO HARD retry scheduled: "+id+" in "+delay+"ms");
         retryHandler.removeCallbacksAndMessages(null);
         retryHandler.postDelayed(() -> {
             if(!userStopped && id.equals(currentRadioId)){
-                trace("retry start: "+id+" #"+retryCount);
+                trace("RADIO HARD retry start: "+id+" #"+retryCount);
                 startRadio(id);
             }
         },delay);
@@ -597,10 +922,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void playLocalAudioId(long mediaId){
+        playLocalAudioId(mediaId,0L,false);
+    }
+
+    private void playLocalAudioId(long mediaId,long startPositionMs,boolean restoring){
         try{
             currentRadioId=null;
             currentMp3Id=mediaId;
             retryCount=0;
+            radioSoftRetryCount=0;
             userStopped=false;
             mp3EndHandled=false;
             retryHandler.removeCallbacksAndMessages(null);
@@ -630,10 +960,14 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }
             }
 
+            long resumePosition=Math.max(0L,startPositionMs);
+            if(duration>0L && resumePosition>=duration-1000L) resumePosition=0L;
+            rememberMp3ForResume(mediaId,resumePosition);
             rememberRecent(mediaId);
             enterPlaybackForeground(title);
             final String t=title, a=artist, al=album;
             final long dur=duration;
+            final long startAt=resumePosition;
             final Bitmap art=embeddedArt(uri);
 
             runOnPlayerThread(() -> {
@@ -648,10 +982,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     session.setMetadata(mb.build());
 
                     player.setMediaItem(MediaItem.fromUri(uri));
+                    if(startAt>0L) player.seekTo(startAt);
                     player.prepare();
                     if(requestPlaybackFocus()) player.play();
                     publishState();
-                    trace("MP3 play id="+mediaId+" index="+currentMp3Index+"/"+currentMp3Queue.size());
+                    trace("MP3 play id="+mediaId+" index="+currentMp3Index+"/"+currentMp3Queue.size()+
+                        (restoring?" restore@"+startAt:""));
                 }catch(Throwable e){
                     publishError("local audio: "+e);
                 }
@@ -711,6 +1047,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
 
         trace("MP3 end -> queue finished");
+        setResumeAllowed(false);
         abandonPlaybackFocus();
         leavePlaybackForeground();
         publishState();
@@ -1092,6 +1429,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 .setDefaultRequestProperties(live365PlayerHeaders());
             DefaultDataSource.Factory dataFactory=new DefaultDataSource.Factory(this,httpFactory);
             MediaSource source=new ProgressiveMediaSource.Factory(dataFactory)
+                .setLoadErrorHandlingPolicy(radioLoadErrorPolicy)
                 .createMediaSource(MediaItem.fromUri(url));
 
             player.setMediaSource(source);
@@ -1205,45 +1543,70 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void publishState(){
         int state=PlaybackStateCompat.STATE_STOPPED;
         if(player!=null && player.isPlaying()) state=PlaybackStateCompat.STATE_PLAYING;
-        else if(player!=null && player.getPlaybackState()==Player.STATE_BUFFERING) state=PlaybackStateCompat.STATE_BUFFERING;
-        else if(player!=null && player.getPlaybackState()==Player.STATE_READY) state=PlaybackStateCompat.STATE_PAUSED;
+        else if(player!=null && player.getPlaybackState()==Player.STATE_BUFFERING)
+            state=PlaybackStateCompat.STATE_BUFFERING;
+        else if(player!=null && player.getPlaybackState()==Player.STATE_READY)
+            state=PlaybackStateCompat.STATE_PAUSED;
 
-        long position=0L;
-        if(player!=null){
-            try{ position=Math.max(0L,player.getCurrentPosition()); }catch(Exception ignored){}
-        }
+        long position=currentPlayerPosition();
         float speed=state==PlaybackStateCompat.STATE_PLAYING?1f:0f;
 
-        session.setPlaybackState(new PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY|PlaybackStateCompat.ACTION_PAUSE|PlaybackStateCompat.ACTION_STOP|PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH|PlaybackStateCompat.ACTION_SKIP_TO_NEXT|PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|PlaybackStateCompat.ACTION_FAST_FORWARD|PlaybackStateCompat.ACTION_REWIND|PlaybackStateCompat.ACTION_SEEK_TO|PlaybackStateCompat.ACTION_SET_REPEAT_MODE|PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE)
-            .setState(state,position,speed,android.os.SystemClock.elapsedRealtime()).build());
+        long actions=PlaybackStateCompat.ACTION_PLAY|
+            PlaybackStateCompat.ACTION_PAUSE|
+            PlaybackStateCompat.ACTION_STOP|
+            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|
+            PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH|
+            PlaybackStateCompat.ACTION_SEEK_TO;
+
+        if(currentRadioId!=null){
+            actions|=PlaybackStateCompat.ACTION_SKIP_TO_NEXT|
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|
+                PlaybackStateCompat.ACTION_FAST_FORWARD|
+                PlaybackStateCompat.ACTION_REWIND;
+        }
+
+        PlaybackStateCompat.Builder b=new PlaybackStateCompat.Builder()
+            .setActions(actions)
+            .setState(state,position,speed,android.os.SystemClock.elapsedRealtime());
+
+        if(currentMp3Id>=0){
+            boolean liked=isFavorite(currentMp3Id);
+            b.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                ACTION_MP3_LIKE,
+                liked ? "좋아요 해제" : "좋아요",
+                liked ? R.drawable.ic_mp3_like : R.drawable.ic_mp3_like_off).build());
+
+            b.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                ACTION_MP3_SHUFFLE,
+                mp3Shuffle ? "랜덤 켜짐" : "랜덤 꺼짐",
+                mp3Shuffle ? R.drawable.ic_mp3_shuffle : R.drawable.ic_mp3_shuffle_off).build());
+
+            int repeatIcon=R.drawable.ic_mp3_repeat_off;
+            String repeatName="반복 꺼짐";
+            if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ALL){
+                repeatIcon=R.drawable.ic_mp3_repeat_all;
+                repeatName="전체 반복";
+            }else if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ONE){
+                repeatIcon=R.drawable.ic_mp3_repeat_one;
+                repeatName="한 곡 반복";
+            }
+            b.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                ACTION_MP3_REPEAT,repeatName,repeatIcon).build());
+
+            b.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                ACTION_MP3_DISLIKE,"싫어요 · 다음 곡",R.drawable.ic_mp3_dislike).build());
+        }
+
+        session.setPlaybackState(b.build());
     }
 
     @Override public BrowserRoot onGetRoot(String pkg,int uid,Bundle hints){
-        // JC-style behavior: when Android Auto reconnects, restore the last radio source.
-        if("com.google.android.projection.gearhead".equals(pkg)){
-            long now=android.os.SystemClock.elapsedRealtime();
-            if(now-lastAutoResumeAt>5000L){
-                lastAutoResumeAt=now;
-                final String last=getSharedPreferences(PREFS,MODE_PRIVATE).getString(PREF_LAST_RADIO,null);
-                if(last!=null && STREAMS.containsKey(last)){
-                    retryHandler.postDelayed(() -> {
-                        if(!player.isPlaying()){
-                            trace("AA reconnect auto-resume: "+last);
-                            currentRadioId=last;
-                            userStopped=false;
-                            retryCount=0;
-                            retryHandler.removeCallbacksAndMessages(null);
-                            enterPlaybackForeground(TITLES.get(last));
-                            startRadio(last);
-                        }
-                    },6000L);
-                }
-            }
-        }
+        // Browsing is side-effect free. Rebinding the AA MediaBrowser must never start,
+        // restart, or replace the current source.
         Bundle style=new Bundle();
         style.putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT",1);
         style.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
+        style.putBoolean(MediaConstants.BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED,true);
         return new BrowserRoot("root",style);
     }
 
@@ -1289,7 +1652,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(item("kiis",radioProgramTitle("kiis"),TITLES.get("kiis")));
             x.add(item("gallery",radioProgramTitle("gallery"),TITLES.get("gallery")));
         } else if(parent.equals("mp3")){
-            x.add(folder("mp3_favorites","즐겨찾기"));
+            x.add(folder("mp3_favorites","좋아요"));
             x.add(folder("mp3_recent","최근 재생"));
             x.add(folder("mp3_albums","앨범"));
             x.add(folder("mp3_artists","아티스트"));
@@ -1340,8 +1703,15 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onDestroy(){
+        saveLastMp3Position();
         retryHandler.removeCallbacksAndMessages(null);
         programHandler.removeCallbacksAndMessages(null);
+        positionHandler.removeCallbacksAndMessages(null);
+        restoreHandler.removeCallbacksAndMessages(null);
+        if(carConnection!=null && carConnectionObserver!=null){
+            try{ carConnection.getType().removeObserver(carConnectionObserver); }
+            catch(Exception ignored){}
+        }
         abandonPlaybackFocus();
         if(player!=null) player.release();
         resolver.shutdownNow();
