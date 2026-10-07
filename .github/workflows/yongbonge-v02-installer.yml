@@ -20,8 +20,8 @@ jobs:
         run: |
           $base = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-build'
           $b64 = ''
-          0..3 | ForEach-Object {
-            $b64 += (Get-Content (Join-Path $base ("source.b64.part" + $_)) -Raw).Trim()
+          foreach ($name in @('source.b64.part0','source.b64.part1','source.b64.part2a','source.b64.part2b','source.b64.part3')) {
+            $b64 += (Get-Content (Join-Path $base $name) -Raw).Trim()
           }
           $zip = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-source-v0.2.zip'
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
