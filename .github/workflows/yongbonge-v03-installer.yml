@@ -1,4 +1,4 @@
-name: yongbonge-v03-installer-final8
+name: yongbonge-v03-installer-final9
 
 on:
   push:
@@ -270,6 +270,7 @@ jobs:
           '''
           s,n=re.subn(read_pat,read_rep,s,flags=re.S)
           if n != 1: raise SystemExit("Read method replacement failed")
+          s=s.replace('        private const int ReadBlockSize = 4 * 1024 * 1024;\n','')
           if 'ReadBlockSize' in s: raise SystemExit("legacy ReadBlockSize remains")
           p.write_text(s,encoding="utf-8")
 
