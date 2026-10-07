@@ -1,4 +1,4 @@
---- FtpClient.cs	2026-10-07 20:37:45.000000000 +0000
+--- FtpClient.cs	2026-10-07 20:27:59.000000000 +0000
 +++ FtpClient.cs
 @@ -45,6 +45,7 @@
          private readonly Dictionary<string, CacheItem> _dirCache = new Dictionary<string, CacheItem>(StringComparer.OrdinalIgnoreCase);
@@ -67,6 +67,15 @@
                      while (total < maxLength)
                      {
                          int n = ns.Read(buffer, total, maxLength - total);
+@@ -383,7 +394,7 @@
+                     return buffer;
+ 
+                 byte[] trimmed = new byte[total];
+-                if (total > 0) Buffer.BlockCopy(buffer, 0, trimmed, 0, total);
++                if (total > 0) System.Buffer.BlockCopy(buffer, 0, trimmed, 0, total);
+                 return trimmed;
+             }
+             finally
 @@ -558,6 +569,18 @@
              _dirCache.Remove(ParentPath(path));
          }
