@@ -25,16 +25,17 @@ jobs:
           }
           $zip = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-source-v0.2.zip'
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
-          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:GITHUB_WORKSPACE 'src') -Force
-          $utf8 = New-Object System.Text.UTF8Encoding($false)
-          $fs = Join-Path $env:GITHUB_WORKSPACE 'src\TinyFtpDrive\FtpFileSystem.cs'
-          $fc = [IO.File]::ReadAllText($fs)
-          $fc = $fc.Replace('Buffer.BlockCopy(', 'System.Buffer.BlockCopy(')
-          [IO.File]::WriteAllText($fs, $fc, $utf8)
-          $ftp = Join-Path $env:GITHUB_WORKSPACE 'src\TinyFtpDrive\FtpClient.cs'
-          $tc = [IO.File]::ReadAllText($ftp)
-          $tc = $tc.Replace('Buffer.BlockCopy(', 'System.Buffer.BlockCopy(')
-          [IO.File]::WriteAllText($ftp, $tc, $utf8)
+          Write-Host "ZIP SHA256:" (Get-FileHash $zip -Algorithm SHA256).Hash
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'src'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          & 7z x $zip "-o$dest" -y
+          if ($LASTEXITCODE -ne 0) { throw "7z extract failed: $LASTEXITCODE" }
+          $fs = Join-Path $dest 'TinyFtpDrive\FtpFileSystem.cs'
+          $ftp = Join-Path $dest 'TinyFtpDrive\FtpClient.cs'
+          python -c "from pathlib import Path; p=Path(r'''$fs'''); s=p.read_text(encoding='utf-8'); p.write_text(s.replace('Buffer.BlockCopy(', 'System.Buffer.BlockCopy('), encoding='utf-8')"
+          if ($LASTEXITCODE -ne 0) { throw "FtpFileSystem patch failed" }
+          python -c "from pathlib import Path; p=Path(r'''$ftp'''); s=p.read_text(encoding='utf-8'); p.write_text(s.replace('Buffer.BlockCopy(', 'System.Buffer.BlockCopy('), encoding='utf-8')"
+          if ($LASTEXITCODE -ne 0) { throw "FtpClient patch failed" }
 
       - uses: actions/setup-dotnet@v4
         with:
