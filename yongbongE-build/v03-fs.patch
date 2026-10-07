@@ -1,0 +1,123 @@
+--- FtpFileSystem.cs	2026-10-07 20:37:45.000000000 +0000
++++ FtpFileSystem.cs
+@@ -27,9 +27,14 @@
+             public List<RemoteEntry> DirectoryEntries;
+             public byte[] ReadCache;
+             public long ReadCacheOffset = -1;
++            public long LastReadEnd = -1;
++            public int SequentialReadCount;
+         }
+ 
+-        private const int ReadBlockSize = 4 * 1024 * 1024;
++        private const int MinReadBlockSize = 128 * 1024;
++        private const int MidReadBlockSize = 512 * 1024;
++        private const int LargeReadBlockSize = 1024 * 1024;
++        private const int MaxReadBlockSize = 4 * 1024 * 1024;
+ 
+         private readonly LightweightFtpClient _ftp;
+         private readonly string _cacheDir;
+@@ -38,6 +43,7 @@
+         {
+             _ftp = new LightweightFtpClient(cfg);
+             _cacheDir = AppConfig.CacheDirectory;
++            CleanupStaleTempFiles();
+         }
+ 
+         public void Dispose() => _ftp.Dispose();
+@@ -195,7 +201,7 @@
+             }
+             lock (h)
+             {
+-                EnsureLocal(h, createEmpty: false);
++                EnsureLocal(h, createEmpty: true);
+                 h.Stream.SetLength(0);
+                 if (AllocationSize > 0) h.Stream.SetLength((long)Math.Min(AllocationSize, (ulong)long.MaxValue));
+                 h.Dirty = true;
+@@ -281,6 +287,12 @@
+                     (ulong)Math.Min((long)Length, int.MaxValue),
+                     (ulong)fileSize - Offset);
+ 
++                long requestStart = checked((long)Offset);
++                bool sequential = h.LastReadEnd >= 0 && requestStart == h.LastReadEnd;
++                if (sequential) h.SequentialReadCount = Math.Min(h.SequentialReadCount + 1, 16);
++                else h.SequentialReadCount = 0;
++
++                int prefetch = AdaptiveReadSize(h.SequentialReadCount);
+                 byte[] output = new byte[wanted];
+                 int copied = 0;
+ 
+@@ -294,12 +306,13 @@
+ 
+                     if (!cacheHit)
+                     {
+-                        long blockStart = (position / ReadBlockSize) * ReadBlockSize;
+-                        int blockLength = (int)Math.Min((long)ReadBlockSize, fileSize - blockStart);
++                        int remainingWanted = wanted - copied;
++                        int blockLength = Math.Max(remainingWanted, prefetch);
++                        blockLength = (int)Math.Min((long)blockLength, fileSize - position);
+                         if (blockLength <= 0) break;
+ 
+-                        h.ReadCache = _ftp.ReadRange(h.RemotePath, blockStart, blockLength);
+-                        h.ReadCacheOffset = blockStart;
++                        h.ReadCache = _ftp.ReadRange(h.RemotePath, position, blockLength);
++                        h.ReadCacheOffset = position;
+                         if (h.ReadCache == null || h.ReadCache.Length == 0) break;
+                     }
+ 
+@@ -311,9 +324,7 @@
+                     System.Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);
+                     copied += take;
+ 
+-                    // 서버가 요청 블록보다 일찍 EOF를 반환한 경우 재요청 루프를 막는다.
+-                    if (h.ReadCache.Length < ReadBlockSize &&
+-                        cacheIndex + take >= h.ReadCache.Length)
++                    if (cacheIndex + take >= h.ReadCache.Length && h.ReadCache.Length < prefetch)
+                         break;
+                 }
+ 
+@@ -321,6 +332,7 @@
+                     Marshal.Copy(output, 0, Buffer, copied);
+ 
+                 PBytesTransferred = (uint)copied;
++                h.LastReadEnd = checked((long)Offset + copied);
+                 return STATUS_SUCCESS;
+             }
+         }
+@@ -449,7 +461,9 @@
+                 if (exists.IsDirectory) _ftp.RemoveDirectory(newPath);
+                 else _ftp.DeleteFile(newPath);
+             }
+-            _ftp.Rename(h.RemotePath, newPath);
++            if (h.Uploaded)
++                _ftp.Rename(h.RemotePath, newPath);
++
+             h.RemotePath = newPath;
+             h.Entry.FullPath = newPath;
+             h.Entry.Name = LightweightFtpClient.LeafName(newPath);
+@@ -510,6 +524,26 @@
+             }
+         }
+ 
++        private static int AdaptiveReadSize(int sequentialCount)
++        {
++            if (sequentialCount >= 6) return MaxReadBlockSize;
++            if (sequentialCount >= 3) return LargeReadBlockSize;
++            if (sequentialCount >= 1) return MidReadBlockSize;
++            return MinReadBlockSize;
++        }
++
++        private void CleanupStaleTempFiles()
++        {
++            try
++            {
++                foreach (string file in Directory.GetFiles(_cacheDir, "*.tmp"))
++                {
++                    try { File.Delete(file); } catch { }
++                }
++            }
++            catch { }
++        }
++
+         private void EnsureLocal(FtpHandle h, bool createEmpty)
+         {
+             if (h.LocalReady)
