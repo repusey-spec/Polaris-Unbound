@@ -1,4 +1,4 @@
-name: yongbonge-v03-installer-final6
+name: yongbonge-v03-installer-final7
 
 on:
   push:
@@ -120,7 +120,7 @@ jobs:
           private const int MaxReadBlockSize = 4 * 1024 * 1024;''',1)
           if 'private const int MinReadBlockSize' not in s:
               s=s.replace('        private const int ReadBlockSize = 4 * 1024 * 1024;',
-                          '        private const int MinReadBlockSize = 128 * 1024;\\n        private const int MidReadBlockSize = 512 * 1024;\\n        private const int LargeReadBlockSize = 1024 * 1024;\\n        private const int MaxReadBlockSize = 4 * 1024 * 1024;',1)
+                          '        private const int MinReadBlockSize = 128 * 1024;\n        private const int MidReadBlockSize = 512 * 1024;\n        private const int LargeReadBlockSize = 1024 * 1024;\n        private const int MaxReadBlockSize = 4 * 1024 * 1024;',1)
           if 'public long LastReadEnd' not in s:
               s=s.replace('            public long ReadCacheOffset = -1;\n',
                           '            public long ReadCacheOffset = -1;\n            public long LastReadEnd = -1;\n            public int SequentialReadCount;\n',1)
