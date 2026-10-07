@@ -1,4 +1,4 @@
-name: yongbonge-v03-installer-final
+name: yongbonge-v03-installer-final2
 
 on:
   push:
@@ -15,57 +15,187 @@ jobs:
         with:
           ref: yongbonge-v03-build
 
-      - name: Restore source
+      - name: Restore and transform source
         shell: pwsh
         run: |
           $base = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-build'
-
           $b64 = ''
           foreach ($name in @('source.b64.part0','source.b64.part1a','source.b64.part1b','source.b64.part2a','source.b64.part2b','source.b64.part3')) {
             $b64 += (Get-Content (Join-Path $base $name) -Raw).Trim()
           }
-          $zip = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-source-v0.2.zip'
+          $zip = Join-Path $env:GITHUB_WORKSPACE 'base-v02.zip'
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-          if ($hash -ne '445BB7F6F1432658B57AAF9933465E3B5AAC78696249C1E8040E6A87E736081C') {
-            throw "v0.2 base source hash mismatch: $hash"
-          }
-
+          if ($hash -ne '445BB7F6F1432658B57AAF9933465E3B5AAC78696249C1E8040E6A87E736081C') { throw "base hash mismatch: $hash" }
           $dest = Join-Path $env:GITHUB_WORKSPACE 'src'
           Expand-Archive -Path $zip -DestinationPath $dest -Force
 
-          $clientB64 = (Get-Content (Join-Path $base 'v03-FtpClient.gz.b64.0') -Raw).Trim() +
-                       (Get-Content (Join-Path $base 'v03-FtpClient.gz.b64.1') -Raw).Trim()
-          $fsB64 = (Get-Content (Join-Path $base 'v03-FtpFileSystem.gz.b64.0') -Raw).Trim() +
-                   (Get-Content (Join-Path $base 'v03-FtpFileSystem.gz.b64.1') -Raw).Trim()
+          $py = @'
+          from pathlib import Path
+          import re, hashlib
+          root=Path(r"__ROOT__")
 
-          Set-Content -Path "$env:GITHUB_WORKSPACE\client.b64" -Value $clientB64 -NoNewline
-          Set-Content -Path "$env:GITHUB_WORKSPACE\fs.b64" -Value $fsB64 -NoNewline
+          p=root/"FtpClient.cs"
+          s=p.read_text(encoding="utf-8")
+          s=s.replace('        private readonly Encoding _strictUtf8 = new UTF8Encoding(false, true);\n',
+                      '        private readonly Encoding _strictUtf8 = new UTF8Encoding(false, true);\n        private static readonly TimeSpan DirectoryCacheLifetime = TimeSpan.FromSeconds(30);\n',1)
+          pat=r'''        public RemoteEntry Stat\(string path\)\n        \{.*?\n        \}\n\n        public List<RemoteEntry> List\(string path\)\n        \{.*?\n        \}\n(?=\n        public void Download)'''
+          rep='''        public RemoteEntry Stat(string path)
+          {
+              path = NormalizePath(path);
+              if (path == "/")
+                  return new RemoteEntry { Name = "", FullPath = "/", IsDirectory = true, Size = 0, ModifiedUtc = DateTime.UtcNow };
 
-          python -c "import base64,gzip,pathlib; pathlib.Path(r'$env:GITHUB_WORKSPACE\src\TinyFtpDrive\FtpClient.cs').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path(r'$env:GITHUB_WORKSPACE\client.b64').read_text())))"
-          if ($LASTEXITCODE -ne 0) { throw "FtpClient restore failed" }
-
-          python -c "import base64,gzip,pathlib; pathlib.Path(r'$env:GITHUB_WORKSPACE\src\TinyFtpDrive\FtpFileSystem.cs').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path(r'$env:GITHUB_WORKSPACE\fs.b64').read_text())))"
-          if ($LASTEXITCODE -ne 0) { throw "FtpFileSystem restore failed" }
-
-          $clientHash = (Get-FileHash "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\FtpClient.cs" -Algorithm SHA256).Hash
-          $fsHash = (Get-FileHash "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\FtpFileSystem.cs" -Algorithm SHA256).Hash
-          if ($clientHash -ne '34E349AEC88C3BFEBF3B0BF4007BBDD62DDCDF74FB09824606E246C2F5BCF543') {
-            throw "FtpClient hash mismatch: $clientHash"
+              string parent = ParentPath(path);
+              string leaf = LeafName(path);
+              lock (_sync)
+              {
+                  List<RemoteEntry> list = GetDirectoryEntriesNoLock(parent);
+                  foreach (RemoteEntry e in list)
+                      if (string.Equals(e.Name, leaf, StringComparison.OrdinalIgnoreCase))
+                          return CloneEntry(e);
+                  return null;
+              }
           }
-          if ($fsHash -ne 'EC7AE6744F127D46EDC0E7D489EDAE6102315FC077E5FE73248F7C8D3C8FCC3C') {
-            throw "FtpFileSystem hash mismatch: $fsHash"
+
+          public List<RemoteEntry> List(string path)
+          {
+              path = NormalizePath(path);
+              lock (_sync)
+                  return CloneEntries(GetDirectoryEntriesNoLock(path));
           }
 
-          $proj = "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\TinyFtpDrive.csproj"
-          $pc = [IO.File]::ReadAllText($proj).Replace('<Version>0.2.0</Version>', '<Version>0.3.0</Version>')
-          [IO.File]::WriteAllText($proj, $pc, (New-Object System.Text.UTF8Encoding($false)))
+          private List<RemoteEntry> GetDirectoryEntriesNoLock(string path)
+          {
+              CacheItem cached;
+              if (_dirCache.TryGetValue(path, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
+                  return cached.Entries;
 
-          [IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\src\TinyFtpDrive\VERSION.txt", ('0.3.0' + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+              List<RemoteEntry> result = RunWithReconnectNoLock(() => ListNoLock(path));
+              _dirCache[path] = new CacheItem
+              {
+                  ExpiresUtc = DateTime.UtcNow.Add(DirectoryCacheLifetime),
+                  Entries = result
+              };
+              return result;
+          }
+          '''
+          s,n=re.subn(pat,rep,s,flags=re.S)
+          if n != 1: raise SystemExit("Stat/List transform failed")
+          s=s.replace('                    ns.ReadTimeout = 5000;','                    ns.ReadTimeout = 8000;',1)
+          s=s.replace('Buffer.BlockCopy(buffer, 0, trimmed, 0, total);','System.Buffer.BlockCopy(buffer, 0, trimmed, 0, total);')
+          needle='        private static List<RemoteEntry> CloneEntries(List<RemoteEntry> src)\n'
+          insert='''        private static RemoteEntry CloneEntry(RemoteEntry e)
+          {
+              return new RemoteEntry
+              {
+                  Name = e.Name,
+                  FullPath = e.FullPath,
+                  IsDirectory = e.IsDirectory,
+                  Size = e.Size,
+                  ModifiedUtc = e.ModifiedUtc
+              };
+          }
 
-          $sf = "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\SettingsForm.cs"
-          $sc = [IO.File]::ReadAllText($sf).Replace('FTP only  ·  UTF-8 파일명  ·  대용량 파일 부분 읽기', 'FTP only  ·  UTF-8 파일명  ·  적응형 읽기 캐시')
-          [IO.File]::WriteAllText($sf, $sc, (New-Object System.Text.UTF8Encoding($false)))
+          '''
+          if needle not in s: raise SystemExit("CloneEntries target missing")
+          s=s.replace(needle,insert+needle,1)
+          p.write_text(s,encoding="utf-8")
+          h=hashlib.sha256(p.read_bytes()).hexdigest().upper()
+          if h!='34E349AEC88C3BFEBF3B0BF4007BBDD62DDCDF74FB09824606E246C2F5BCF543': raise SystemExit("FtpClient transform hash "+h)
+
+          p=root/"FtpFileSystem.cs"
+          s=p.read_text(encoding="utf-8")
+          s=s.replace('''            public byte[] ReadCache;
+              public long ReadCacheOffset = -1;
+          }
+
+          private const int ReadBlockSize = 4 * 1024 * 1024;''','''            public byte[] ReadCache;
+              public long ReadCacheOffset = -1;
+              public long LastReadEnd = -1;
+              public int SequentialReadCount;
+          }
+
+          private const int MinReadBlockSize = 128 * 1024;
+          private const int MidReadBlockSize = 512 * 1024;
+          private const int LargeReadBlockSize = 1024 * 1024;
+          private const int MaxReadBlockSize = 4 * 1024 * 1024;''',1)
+          s=s.replace('            _cacheDir = AppConfig.CacheDirectory;\n',
+                      '            _cacheDir = AppConfig.CacheDirectory;\n            CleanupStaleTempFiles();\n',1)
+          s=s.replace('EnsureLocal(h, createEmpty: false);','EnsureLocal(h, createEmpty: true);',1)
+          s=s.replace('''                byte[] output = new byte[wanted];
+              int copied = 0;''','''                long requestStart = checked((long)Offset);
+              bool sequential = h.LastReadEnd >= 0 && requestStart == h.LastReadEnd;
+              if (sequential) h.SequentialReadCount = Math.Min(h.SequentialReadCount + 1, 16);
+              else h.SequentialReadCount = 0;
+
+              int prefetch = AdaptiveReadSize(h.SequentialReadCount);
+              byte[] output = new byte[wanted];
+              int copied = 0;''',1)
+          s=s.replace('''                        long blockStart = (position / ReadBlockSize) * ReadBlockSize;
+                      int blockLength = (int)Math.Min((long)ReadBlockSize, fileSize - blockStart);
+                      if (blockLength <= 0) break;
+
+                      h.ReadCache = _ftp.ReadRange(h.RemotePath, blockStart, blockLength);
+                      h.ReadCacheOffset = blockStart;''','''                        int remainingWanted = wanted - copied;
+                      int blockLength = Math.Max(remainingWanted, prefetch);
+                      blockLength = (int)Math.Min((long)blockLength, fileSize - position);
+                      if (blockLength <= 0) break;
+
+                      h.ReadCache = _ftp.ReadRange(h.RemotePath, position, blockLength);
+                      h.ReadCacheOffset = position;''',1)
+          s=s.replace('Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);','System.Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);')
+          s=s.replace('''                    // 서버가 요청 블록보다 일찍 EOF를 반환한 경우 재요청 루프를 막는다.
+                  if (h.ReadCache.Length < ReadBlockSize &&
+                      cacheIndex + take >= h.ReadCache.Length)
+                      break;''','''                    if (cacheIndex + take >= h.ReadCache.Length && h.ReadCache.Length < prefetch)
+                      break;''',1)
+          s=s.replace('''                PBytesTransferred = (uint)copied;
+              return STATUS_SUCCESS;''','''                PBytesTransferred = (uint)copied;
+              h.LastReadEnd = checked((long)Offset + copied);
+              return STATUS_SUCCESS;''',1)
+          s=s.replace('            _ftp.Rename(h.RemotePath, newPath);\n',
+                      '            if (h.Uploaded)\n                _ftp.Rename(h.RemotePath, newPath);\n\n',1)
+          needle='        private void EnsureLocal(FtpHandle h, bool createEmpty)\n'
+          insert='''        private static int AdaptiveReadSize(int sequentialCount)
+          {
+              if (sequentialCount >= 6) return MaxReadBlockSize;
+              if (sequentialCount >= 3) return LargeReadBlockSize;
+              if (sequentialCount >= 1) return MidReadBlockSize;
+              return MinReadBlockSize;
+          }
+
+          private void CleanupStaleTempFiles()
+          {
+              try
+              {
+                  foreach (string file in Directory.GetFiles(_cacheDir, "*.tmp"))
+                  {
+                      try { File.Delete(file); } catch { }
+                  }
+              }
+              catch { }
+          }
+
+          '''
+          if needle not in s: raise SystemExit("EnsureLocal target missing")
+          s=s.replace(needle,insert+needle,1)
+          p.write_text(s,encoding="utf-8")
+          h=hashlib.sha256(p.read_bytes()).hexdigest().upper()
+          if h!='EC7AE6744F127D46EDC0E7D489EDAE6102315FC077E5FE73248F7C8D3C8FCC3C': raise SystemExit("FtpFileSystem transform hash "+h)
+
+          proj=root/"TinyFtpDrive.csproj"
+          proj.write_text(proj.read_text(encoding="utf-8").replace("<Version>0.2.0</Version>","<Version>0.3.0</Version>"),encoding="utf-8")
+          (root/"VERSION.txt").write_text("0.3.0\n",encoding="utf-8")
+          sf=root/"SettingsForm.cs"
+          sf.write_text(sf.read_text(encoding="utf-8").replace("FTP only  ·  UTF-8 파일명  ·  대용량 파일 부분 읽기","FTP only  ·  UTF-8 파일명  ·  적응형 읽기 캐시"),encoding="utf-8")
+          '@
+          $root=(Join-Path $dest 'TinyFtpDrive').Replace('\','\\')
+          $py=$py.Replace('__ROOT__',$root)
+          $script=Join-Path $env:GITHUB_WORKSPACE 'transform.py'
+          Set-Content -Path $script -Value $py -Encoding UTF8
+          python $script
+          if ($LASTEXITCODE -ne 0) { throw "source transform failed" }
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -74,7 +204,7 @@ jobs:
       - name: Build x64
         shell: pwsh
         run: |
-          $proj = "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\TinyFtpDrive.csproj"
+          $proj="$env:GITHUB_WORKSPACE\src\TinyFtpDrive\TinyFtpDrive.csproj"
           dotnet restore $proj
           dotnet build $proj -c Release --no-restore
           Get-ChildItem "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\bin\Release\net48"
@@ -82,13 +212,11 @@ jobs:
       - name: Download WinFsp
         shell: pwsh
         run: |
-          $url = 'https://github.com/winfsp/winfsp/releases/download/v2.2B4/winfsp-2.2.26215.msi'
-          $out = "$env:GITHUB_WORKSPACE\winfsp-2.2.26215.msi"
+          $url='https://github.com/winfsp/winfsp/releases/download/v2.2B4/winfsp-2.2.26215.msi'
+          $out="$env:GITHUB_WORKSPACE\winfsp-2.2.26215.msi"
           Invoke-WebRequest -Uri $url -OutFile $out
-          $hash = (Get-FileHash $out -Algorithm SHA256).Hash
-          if ($hash -ne '2ECB5C89405488A95BBD8A01875E02C48534FD37BBDFD84488F7590464D65944') {
-            throw "WinFsp SHA256 mismatch: $hash"
-          }
+          $hash=(Get-FileHash $out -Algorithm SHA256).Hash
+          if ($hash -ne '2ECB5C89405488A95BBD8A01875E02C48534FD37BBDFD84488F7590464D65944') { throw "WinFsp hash mismatch" }
 
       - name: Install Inno Setup
         shell: pwsh
@@ -97,7 +225,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $iss = @'
+          $iss=@'
           [Setup]
           AppId=TinyFtpDrive.0.1
           AppName=yongbongE
@@ -138,19 +266,16 @@ jobs:
           end;
 
           function InitializeSetup(): Boolean;
-          var
-            ResultCode: Integer;
+          var ResultCode: Integer;
           begin
-            Exec(ExpandConstant('{cmd}'),
-              '/C taskkill /IM yongbongE.exe /F >NUL 2>&1 & taskkill /IM TinyFtpDrive.exe /F >NUL 2>&1 & exit /B 0',
-              '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+            Exec(ExpandConstant('{cmd}'), '/C taskkill /IM yongbongE.exe /F >NUL 2>&1 & taskkill /IM TinyFtpDrive.exe /F >NUL 2>&1 & exit /B 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
             Result := True;
           end;
           '@
-          Set-Content -Path "$env:GITHUB_WORKSPACE\yongbongE.iss" -Value $iss -Encoding UTF8
+          Set-Content "$env:GITHUB_WORKSPACE\yongbongE.iss" $iss -Encoding UTF8
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "$env:GITHUB_WORKSPACE\yongbongE.iss"
-          if ($LASTEXITCODE -ne 0) { throw "ISCC failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
       - uses: actions/upload-artifact@v4
         with:
