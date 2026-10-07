@@ -30,6 +30,10 @@ jobs:
           $src = $src.Replace('using Fsp;', "using Fsp;`r`nusing VolumeInfo = Fsp.Interop.VolumeInfo;`r`nusing FileInfo = Fsp.Interop.FileInfo;")
           $src = $src.Replace('Fsp.FileInfo', 'FileInfo')
           Set-Content -Path $fs -Value $src -Encoding UTF8
+          $proj = Join-Path $env:GITHUB_WORKSPACE 'src\TinyFtpDrive\TinyFtpDrive.csproj'
+          $pc = Get-Content $proj -Raw
+          $pc = $pc.Replace('</Project>', "  <ItemGroup>`r`n    <Reference Include=`"System.Security`" />`r`n  </ItemGroup>`r`n</Project>")
+          Set-Content -Path $proj -Value $pc -Encoding UTF8
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
