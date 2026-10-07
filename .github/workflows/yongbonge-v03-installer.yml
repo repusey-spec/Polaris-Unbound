@@ -1,4 +1,4 @@
-name: yongbonge-v03-installer-final7
+name: yongbonge-v03-installer-final8
 
 on:
   push:
@@ -187,6 +187,90 @@ jobs:
           '''
           if needle not in s: raise SystemExit("EnsureLocal target missing")
           s=s.replace(needle,insert+needle,1)
+
+          read_pat=r'''        public override int Read\(object FileNode, object FileDesc0, IntPtr Buffer, ulong Offset, uint Length, out uint PBytesTransferred\)\n        \{.*?\n        \}\n\n(?=        public override int Write\()'''
+          read_rep='''        public override int Read(object FileNode, object FileDesc0, IntPtr Buffer, ulong Offset, uint Length, out uint PBytesTransferred)
+          {
+              var h = (FtpHandle)FileDesc0;
+              PBytesTransferred = 0;
+              if (h.IsDirectory) return STATUS_FILE_IS_A_DIRECTORY;
+
+              lock (h)
+              {
+                  // 쓰기/편집을 시작한 파일은 기존 로컬 임시파일 경로를 사용한다.
+                  if (h.LocalReady && h.Stream != null)
+                  {
+                      if (Offset >= (ulong)h.Stream.Length) return STATUS_SUCCESS;
+                      int localCount = (int)Math.Min((ulong)Length, (ulong)h.Stream.Length - Offset);
+                      byte[] local = new byte[localCount];
+                      h.Stream.Position = (long)Offset;
+                      int localRead = h.Stream.Read(local, 0, localCount);
+                      if (localRead > 0) Marshal.Copy(local, 0, Buffer, localRead);
+                      PBytesTransferred = (uint)localRead;
+                      return STATUS_SUCCESS;
+                  }
+
+                  long fileSize = Math.Max(0, h.Entry.Size);
+                  if (Offset >= (ulong)fileSize || Length == 0) return STATUS_SUCCESS;
+
+                  int wanted = (int)Math.Min(
+                      (ulong)Math.Min((long)Length, int.MaxValue),
+                      (ulong)fileSize - Offset);
+
+                  long requestStart = checked((long)Offset);
+                  bool sequential = h.LastReadEnd >= 0 && requestStart == h.LastReadEnd;
+                  if (sequential) h.SequentialReadCount = Math.Min(h.SequentialReadCount + 1, 16);
+                  else h.SequentialReadCount = 0;
+
+                  int prefetch = AdaptiveReadSize(h.SequentialReadCount);
+                  byte[] output = new byte[wanted];
+                  int copied = 0;
+
+                  while (copied < wanted)
+                  {
+                      long position = checked((long)Offset + copied);
+                      bool cacheHit =
+                          h.ReadCache != null &&
+                          position >= h.ReadCacheOffset &&
+                          position < h.ReadCacheOffset + h.ReadCache.Length;
+
+                      if (!cacheHit)
+                      {
+                          int remainingWanted = wanted - copied;
+                          int blockLength = Math.Max(remainingWanted, prefetch);
+                          blockLength = (int)Math.Min((long)blockLength, fileSize - position);
+                          if (blockLength <= 0) break;
+
+                          h.ReadCache = _ftp.ReadRange(h.RemotePath, position, blockLength);
+                          h.ReadCacheOffset = position;
+                          if (h.ReadCache == null || h.ReadCache.Length == 0) break;
+                      }
+
+                      int cacheIndex = (int)(position - h.ReadCacheOffset);
+                      int available = h.ReadCache.Length - cacheIndex;
+                      if (available <= 0) break;
+
+                      int take = Math.Min(available, wanted - copied);
+                      System.Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);
+                      copied += take;
+
+                      if (cacheIndex + take >= h.ReadCache.Length && h.ReadCache.Length < prefetch)
+                          break;
+                  }
+
+                  if (copied > 0)
+                      Marshal.Copy(output, 0, Buffer, copied);
+
+                  PBytesTransferred = (uint)copied;
+                  h.LastReadEnd = checked((long)Offset + copied);
+                  return STATUS_SUCCESS;
+              }
+          }
+
+          '''
+          s,n=re.subn(read_pat,read_rep,s,flags=re.S)
+          if n != 1: raise SystemExit("Read method replacement failed")
+          if 'ReadBlockSize' in s: raise SystemExit("legacy ReadBlockSize remains")
           p.write_text(s,encoding="utf-8")
 
           proj=root/"TinyFtpDrive.csproj"
