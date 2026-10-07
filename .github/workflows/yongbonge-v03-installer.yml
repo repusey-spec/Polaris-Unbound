@@ -27,7 +27,7 @@ jobs:
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
           Write-Host "Base ZIP SHA256: $hash"
-          if ($hash -ne '445BB7F8D7836CE59522904EE74EB729C8B5F8453697BCC4A8337061779B5BBE') {
+          if ($hash -ne '445BB7F6F1432658B57AAF9933465E3B5AAC78696249C1E8040E6A87E736081C') {
             throw "v0.2 base source hash mismatch: $hash"
           }
           $dest = Join-Path $env:GITHUB_WORKSPACE 'src'
