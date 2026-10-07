@@ -26,14 +26,15 @@ jobs:
           $zip = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-source-v0.2.zip'
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
           Expand-Archive -Path $zip -DestinationPath (Join-Path $env:GITHUB_WORKSPACE 'src') -Force
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
           $fs = Join-Path $env:GITHUB_WORKSPACE 'src\TinyFtpDrive\FtpFileSystem.cs'
-          $fc = Get-Content $fs -Raw
+          $fc = [IO.File]::ReadAllText($fs)
           $fc = $fc.Replace('Buffer.BlockCopy(', 'System.Buffer.BlockCopy(')
-          Set-Content -Path $fs -Value $fc -Encoding UTF8
+          [IO.File]::WriteAllText($fs, $fc, $utf8)
           $ftp = Join-Path $env:GITHUB_WORKSPACE 'src\TinyFtpDrive\FtpClient.cs'
-          $tc = Get-Content $ftp -Raw
+          $tc = [IO.File]::ReadAllText($ftp)
           $tc = $tc.Replace('Buffer.BlockCopy(', 'System.Buffer.BlockCopy(')
-          Set-Content -Path $ftp -Value $tc -Encoding UTF8
+          [IO.File]::WriteAllText($ftp, $tc, $utf8)
 
       - uses: actions/setup-dotnet@v4
         with:
