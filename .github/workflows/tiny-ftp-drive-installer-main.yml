@@ -67,7 +67,7 @@ jobs:
         run: |
           $iss = @'
           [Setup]
-          AppId={5FD7EE7E-7D69-4AF4-A878-FAB88A942A61}
+          AppId=TinyFtpDrive.0.1
           AppName=Tiny FTP Drive
           AppVersion=0.1.0
           AppPublisher=Tiny FTP Drive
