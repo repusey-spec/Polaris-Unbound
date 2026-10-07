@@ -57,53 +57,53 @@ jobs:
         shell: pwsh
         run: |
           $iss = @'
-[Setup]
-AppId={5FD7EE7E-7D69-4AF4-A878-FAB88A942A61}
-AppName=Tiny FTP Drive
-AppVersion=0.1.0
-AppPublisher=Tiny FTP Drive
-DefaultDirName={autopf}\Tiny FTP Drive
-DefaultGroupName=Tiny FTP Drive
-DisableProgramGroupPage=yes
-OutputDir=dist
-OutputBaseFilename=TinyFtpDrive-Setup-v0.1
-Compression=lzma2/ultra64
-SolidCompression=yes
-WizardStyle=modern
-PrivilegesRequired=admin
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayName=Tiny FTP Drive
-CloseApplications=yes
-RestartApplications=no
-
-[Files]
-Source: "src\TinyFtpDrive\bin\Release\net48\TinyFtpDrive.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "src\TinyFtpDrive\bin\Release\net48\winfsp.net.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "winfsp-2.2.26215.msi"; DestDir: "{tmp}"; Flags: deleteafterinstall
-
-[Icons]
-Name: "{group}\Tiny FTP Drive"; Filename: "{app}\TinyFtpDrive.exe"
-
-[Run]
-Filename: "msiexec.exe"; Parameters: "/i ""{tmp}\winfsp-2.2.26215.msi"" /qn /norestart"; StatusMsg: "WinFsp 파일 시스템 드라이버 설치 중..."; Flags: waituntilterminated; Check: not WinFspInstalled
-Filename: "{app}\TinyFtpDrive.exe"; Description: "Tiny FTP Drive 실행"; Flags: nowait postinstall skipifsilent
-
-[UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /IM TinyFtpDrive.exe /F >NUL 2>&1 & exit /B 0"; Flags: runhidden; RunOnceId: "StopTinyFtpDrive"
-
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "TinyFtpDrive"; Flags: uninsdeletevalue
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\TinyFtpDrive"
-
-[Code]
-function WinFspInstalled(): Boolean;
-begin
-  Result := FileExists(ExpandConstant('{sys}\drivers\winfsp-x64.sys'));
-end;
-'@
+          [Setup]
+          AppId={5FD7EE7E-7D69-4AF4-A878-FAB88A942A61}
+          AppName=Tiny FTP Drive
+          AppVersion=0.1.0
+          AppPublisher=Tiny FTP Drive
+          DefaultDirName={autopf}\Tiny FTP Drive
+          DefaultGroupName=Tiny FTP Drive
+          DisableProgramGroupPage=yes
+          OutputDir=dist
+          OutputBaseFilename=TinyFtpDrive-Setup-v0.1
+          Compression=lzma2/ultra64
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=admin
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          UninstallDisplayName=Tiny FTP Drive
+          CloseApplications=yes
+          RestartApplications=no
+          
+          [Files]
+          Source: "src\TinyFtpDrive\bin\Release\net48\TinyFtpDrive.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "src\TinyFtpDrive\bin\Release\net48\winfsp.net.dll"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "winfsp-2.2.26215.msi"; DestDir: "{tmp}"; Flags: deleteafterinstall
+          
+          [Icons]
+          Name: "{group}\Tiny FTP Drive"; Filename: "{app}\TinyFtpDrive.exe"
+          
+          [Run]
+          Filename: "msiexec.exe"; Parameters: "/i ""{tmp}\winfsp-2.2.26215.msi"" /qn /norestart"; StatusMsg: "WinFsp 파일 시스템 드라이버 설치 중..."; Flags: waituntilterminated; Check: not WinFspInstalled
+          Filename: "{app}\TinyFtpDrive.exe"; Description: "Tiny FTP Drive 실행"; Flags: nowait postinstall skipifsilent
+          
+          [UninstallRun]
+          Filename: "{cmd}"; Parameters: "/C taskkill /IM TinyFtpDrive.exe /F >NUL 2>&1 & exit /B 0"; Flags: runhidden; RunOnceId: "StopTinyFtpDrive"
+          
+          [Registry]
+          Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "TinyFtpDrive"; Flags: uninsdeletevalue
+          
+          [UninstallDelete]
+          Type: filesandordirs; Name: "{localappdata}\TinyFtpDrive"
+          
+          [Code]
+          function WinFspInstalled(): Boolean;
+          begin
+            Result := FileExists(ExpandConstant('{sys}\drivers\winfsp-x64.sys'));
+          end;
+          '@
           Set-Content -Path "$env:GITHUB_WORKSPACE\TinyFtpDrive.iss" -Value $iss -Encoding UTF8
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
