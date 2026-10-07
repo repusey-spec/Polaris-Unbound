@@ -1,4 +1,4 @@
-name: yongbonge-v03-installer-final9
+name: yongbonge-v03-installer-final10
 
 on:
   push:
@@ -270,8 +270,109 @@ jobs:
           '''
           s,n=re.subn(read_pat,read_rep,s,flags=re.S)
           if n != 1: raise SystemExit("Read method replacement failed")
-          s=s.replace('        private const int ReadBlockSize = 4 * 1024 * 1024;\n','')
-          if 'ReadBlockSize' in s: raise SystemExit("legacy ReadBlockSize remains")
+          s=re.sub(r'^\s*private const int ReadBlockSize\s*=.*?;\s*
+          p.write_text(s,encoding="utf-8")
+
+          proj=root/"TinyFtpDrive.csproj"
+          proj.write_text(proj.read_text(encoding="utf-8").replace("<Version>0.2.0</Version>","<Version>0.3.0</Version>"),encoding="utf-8")
+          (root/"VERSION.txt").write_text("0.3.0\n",encoding="utf-8")
+          sf=root/"SettingsForm.cs"
+          sf.write_text(sf.read_text(encoding="utf-8").replace("FTP only  ·  UTF-8 파일명  ·  대용량 파일 부분 읽기","FTP only  ·  UTF-8 파일명  ·  적응형 읽기 캐시"),encoding="utf-8")
+          '@
+          $root=(Join-Path $dest 'TinyFtpDrive').Replace('\','\\')
+          $py=$py.Replace('__ROOT__',$root)
+          $script=Join-Path $env:GITHUB_WORKSPACE 'transform.py'
+          Set-Content -Path $script -Value $py -Encoding UTF8
+          python $script
+          if ($LASTEXITCODE -ne 0) { throw "source transform failed" }
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build x64
+        shell: pwsh
+        run: |
+          $proj="$env:GITHUB_WORKSPACE\src\TinyFtpDrive\TinyFtpDrive.csproj"
+          dotnet restore $proj
+          dotnet build $proj -c Release --no-restore
+          Get-ChildItem "$env:GITHUB_WORKSPACE\src\TinyFtpDrive\bin\Release\net48"
+
+      - name: Download WinFsp
+        shell: pwsh
+        run: |
+          $url='https://github.com/winfsp/winfsp/releases/download/v2.2B4/winfsp-2.2.26215.msi'
+          $out="$env:GITHUB_WORKSPACE\winfsp-2.2.26215.msi"
+          Invoke-WebRequest -Uri $url -OutFile $out
+          $hash=(Get-FileHash $out -Algorithm SHA256).Hash
+          if ($hash -ne '2ECB5C89405488A95BBD8A01875E02C48534FD37BBDFD84488F7590464D65944') { throw "WinFsp hash mismatch" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss=@'
+          [Setup]
+          AppId=TinyFtpDrive.0.1
+          AppName=yongbongE
+          AppVersion=0.3.0
+          AppPublisher=yongbongE
+          DefaultDirName={autopf}\yongbongE
+          DefaultGroupName=yongbongE
+          DisableProgramGroupPage=yes
+          OutputDir=dist
+          OutputBaseFilename=yongbongE-Setup-v0.3
+          Compression=lzma2/ultra64
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=admin
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          UninstallDisplayName=yongbongE
+          CloseApplications=yes
+          RestartApplications=no
+
+          [Files]
+          Source: "src\TinyFtpDrive\bin\Release\net48\yongbongE.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "src\TinyFtpDrive\bin\Release\net48\yongbongE.exe.config"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "src\TinyFtpDrive\bin\Release\net48\winfsp-msil.dll"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "winfsp-2.2.26215.msi"; DestDir: "{tmp}"; Flags: deleteafterinstall
+
+          [Run]
+          Filename: "msiexec.exe"; Parameters: "/i ""{tmp}\winfsp-2.2.26215.msi"" /qn /norestart"; StatusMsg: "WinFsp 파일 시스템 드라이버 설치 중..."; Flags: waituntilterminated; Check: not WinFspInstalled
+          Filename: "{app}\yongbongE.exe"; Description: "yongbongE 실행"; Flags: nowait postinstall skipifsilent
+
+          [UninstallRun]
+          Filename: "{cmd}"; Parameters: "/C taskkill /IM yongbongE.exe /F >NUL 2>&1 & exit /B 0"; Flags: runhidden; RunOnceId: "StopyongbongE"
+
+          [Code]
+          function WinFspInstalled(): Boolean;
+          begin
+            Result := FileExists(ExpandConstant('{sys}\drivers\winfsp-x64.sys'));
+          end;
+
+          function InitializeSetup(): Boolean;
+          var ResultCode: Integer;
+          begin
+            Exec(ExpandConstant('{cmd}'), '/C taskkill /IM yongbongE.exe /F >NUL 2>&1 & taskkill /IM TinyFtpDrive.exe /F >NUL 2>&1 & exit /B 0', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+            Result := True;
+          end;
+          '@
+          Set-Content "$env:GITHUB_WORKSPACE\yongbongE.iss" $iss -Encoding UTF8
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "$env:GITHUB_WORKSPACE\yongbongE.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-Setup-v0.3
+          path: dist/yongbongE-Setup-v0.3.exe
+          if-no-files-found: error
+, '', s, flags=re.M)
+          s=s.replace('ReadBlockSize','MaxReadBlockSize')
           p.write_text(s,encoding="utf-8")
 
           proj=root/"TinyFtpDrive.csproj"
