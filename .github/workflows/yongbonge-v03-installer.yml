@@ -1,4 +1,4 @@
-name: yongbonge-v03-installer-v2
+name: yongbonge-v03-installer-v3
 
 on:
   push:
@@ -15,7 +15,7 @@ jobs:
         with:
           ref: yongbonge-v03-build
 
-      - name: Restore v0.2 source and apply v0.3 patches
+      - name: Restore v0.2 source and apply v0.3 changes
         shell: pwsh
         run: |
           $base = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-build'
@@ -26,29 +26,240 @@ jobs:
           $zip = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-source-v0.2.zip'
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-          Write-Host "Base ZIP SHA256: $hash"
           if ($hash -ne '445BB7F6F1432658B57AAF9933465E3B5AAC78696249C1E8040E6A87E736081C') {
             throw "v0.2 base source hash mismatch: $hash"
           }
           $dest = Join-Path $env:GITHUB_WORKSPACE 'src'
           Expand-Archive -Path $zip -DestinationPath $dest -Force
-          Set-Location (Join-Path $dest 'TinyFtpDrive')
-          git init
-          git add .
-          git -c user.email=build@yongbonge.local -c user.name=yongbongE commit -m base
-          git apply "$env:GITHUB_WORKSPACE\yongbongE-build\v03-client.patch"
-          git apply "$env:GITHUB_WORKSPACE\yongbongE-build\v03-fs.patch"
 
-          $proj = Join-Path (Get-Location) 'TinyFtpDrive.csproj'
-          $pc = [IO.File]::ReadAllText($proj)
-          $pc = $pc.Replace('<Version>0.2.0</Version>', '<Version>0.3.0</Version>')
-          [IO.File]::WriteAllText($proj, $pc, (New-Object System.Text.UTF8Encoding($false)))
+          $py = @'
+          from pathlib import Path
 
-          [IO.File]::WriteAllText((Join-Path (Get-Location) 'VERSION.txt'), ('0.3.0' + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
-          $sf = Join-Path (Get-Location) 'SettingsForm.cs'
-          $sc = [IO.File]::ReadAllText($sf)
-          $sc = $sc.Replace('FTP only  ·  UTF-8 파일명  ·  대용량 파일 부분 읽기', 'FTP only  ·  UTF-8 파일명  ·  적응형 읽기 캐시')
-          [IO.File]::WriteAllText($sf, $sc, (New-Object System.Text.UTF8Encoding($false)))
+          root = Path(r"__ROOT__")
+
+          def rep(s, old, new, label):
+              if old not in s:
+                  raise SystemExit("missing patch target: " + label)
+              return s.replace(old, new, 1)
+
+          p = root / "FtpClient.cs"
+          s = p.read_text(encoding="utf-8")
+          s = rep(s,
+              '        private readonly Encoding _strictUtf8 = new UTF8Encoding(false, true);\n',
+              '        private readonly Encoding _strictUtf8 = new UTF8Encoding(false, true);\n        private static readonly TimeSpan DirectoryCacheLifetime = TimeSpan.FromSeconds(30);\n',
+              "dir cache const")
+          old = '''            string parent = ParentPath(path);
+              string leaf = LeafName(path);
+              List<RemoteEntry> list = List(parent);
+              foreach (RemoteEntry e in list)
+                  if (string.Equals(e.Name, leaf, StringComparison.OrdinalIgnoreCase))
+                      return e;
+              return null;
+          }
+
+          public List<RemoteEntry> List(string path)
+          {
+              path = NormalizePath(path);
+              lock (_sync)
+              {
+                  CacheItem cached;
+                  if (_dirCache.TryGetValue(path, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
+                      return CloneEntries(cached.Entries);
+
+                  List<RemoteEntry> result = RunWithReconnectNoLock(() => ListNoLock(path));
+                  _dirCache[path] = new CacheItem { ExpiresUtc = DateTime.UtcNow.AddMilliseconds(1500), Entries = CloneEntries(result) };
+                  return result;
+              }
+          }'''
+          new = '''            string parent = ParentPath(path);
+              string leaf = LeafName(path);
+              lock (_sync)
+              {
+                  List<RemoteEntry> list = GetDirectoryEntriesNoLock(parent);
+                  foreach (RemoteEntry e in list)
+                      if (string.Equals(e.Name, leaf, StringComparison.OrdinalIgnoreCase))
+                          return CloneEntry(e);
+                  return null;
+              }
+          }
+
+          public List<RemoteEntry> List(string path)
+          {
+              path = NormalizePath(path);
+              lock (_sync)
+                  return CloneEntries(GetDirectoryEntriesNoLock(path));
+          }
+
+          private List<RemoteEntry> GetDirectoryEntriesNoLock(string path)
+          {
+              CacheItem cached;
+              if (_dirCache.TryGetValue(path, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
+                  return cached.Entries;
+
+              List<RemoteEntry> result = RunWithReconnectNoLock(() => ListNoLock(path));
+              _dirCache[path] = new CacheItem
+              {
+                  ExpiresUtc = DateTime.UtcNow.Add(DirectoryCacheLifetime),
+                  Entries = result
+              };
+              return result;
+          }'''
+          s = rep(s, old, new, "Stat/List")
+          s = rep(s, '                    ns.ReadTimeout = 5000;\n', '                    ns.ReadTimeout = 8000;\n', "range timeout")
+          s = rep(s, '                if (total > 0) Buffer.BlockCopy(buffer, 0, trimmed, 0, total);\n',
+                    '                if (total > 0) System.Buffer.BlockCopy(buffer, 0, trimmed, 0, total);\n',
+                    "client Buffer")
+          s = rep(s,
+              '        private static List<RemoteEntry> CloneEntries(List<RemoteEntry> src)\n        {\n',
+              '''        private static RemoteEntry CloneEntry(RemoteEntry e)
+          {
+              return new RemoteEntry
+              {
+                  Name = e.Name,
+                  FullPath = e.FullPath,
+                  IsDirectory = e.IsDirectory,
+                  Size = e.Size,
+                  ModifiedUtc = e.ModifiedUtc
+              };
+          }
+
+          private static List<RemoteEntry> CloneEntries(List<RemoteEntry> src)
+          {
+          ''',
+              "CloneEntry")
+          p.write_text(s, encoding="utf-8")
+
+          p = root / "FtpFileSystem.cs"
+          s = p.read_text(encoding="utf-8")
+          s = rep(s,
+              '''            public byte[] ReadCache;
+              public long ReadCacheOffset = -1;
+          }
+
+          private const int ReadBlockSize = 4 * 1024 * 1024;''',
+              '''            public byte[] ReadCache;
+              public long ReadCacheOffset = -1;
+              public long LastReadEnd = -1;
+              public int SequentialReadCount;
+          }
+
+          private const int MinReadBlockSize = 128 * 1024;
+          private const int MidReadBlockSize = 512 * 1024;
+          private const int LargeReadBlockSize = 1024 * 1024;
+          private const int MaxReadBlockSize = 4 * 1024 * 1024;''',
+              "read fields")
+          s = rep(s,
+              '            _cacheDir = AppConfig.CacheDirectory;\n',
+              '            _cacheDir = AppConfig.CacheDirectory;\n            CleanupStaleTempFiles();\n',
+              "temp cleanup ctor")
+          s = rep(s,
+              '''            lock (h)
+              {
+                  EnsureLocal(h, createEmpty: false);
+                  h.Stream.SetLength(0);''',
+              '''            lock (h)
+              {
+                  EnsureLocal(h, createEmpty: true);
+                  h.Stream.SetLength(0);''',
+              "overwrite no download")
+          s = rep(s,
+              '                byte[] output = new byte[wanted];\n',
+              '''                long requestStart = checked((long)Offset);
+              bool sequential = h.LastReadEnd >= 0 && requestStart == h.LastReadEnd;
+              if (sequential) h.SequentialReadCount = Math.Min(h.SequentialReadCount + 1, 16);
+              else h.SequentialReadCount = 0;
+
+              int prefetch = AdaptiveReadSize(h.SequentialReadCount);
+              byte[] output = new byte[wanted];
+          ''',
+              "adaptive prefetch state")
+          s = rep(s,
+              '''                    if (!cacheHit)
+                  {
+                      long blockStart = (position / ReadBlockSize) * ReadBlockSize;
+                      int blockLength = (int)Math.Min((long)ReadBlockSize, fileSize - blockStart);
+                      if (blockLength <= 0) break;
+
+                      h.ReadCache = _ftp.ReadRange(h.RemotePath, blockStart, blockLength);
+                      h.ReadCacheOffset = blockStart;
+                      if (h.ReadCache == null || h.ReadCache.Length == 0) break;
+                  }''',
+              '''                    if (!cacheHit)
+                  {
+                      int remainingWanted = wanted - copied;
+                      int blockLength = Math.Max(remainingWanted, prefetch);
+                      blockLength = (int)Math.Min((long)blockLength, fileSize - position);
+                      if (blockLength <= 0) break;
+
+                      h.ReadCache = _ftp.ReadRange(h.RemotePath, position, blockLength);
+                      h.ReadCacheOffset = position;
+                      if (h.ReadCache == null || h.ReadCache.Length == 0) break;
+                  }''',
+              "adaptive read block")
+          s = s.replace('                    Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);\n',
+                        '                    System.Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);\n')
+          s = rep(s,
+              '''                    // 서버가 요청 블록보다 일찍 EOF를 반환한 경우 재요청 루프를 막는다.
+                  if (h.ReadCache.Length < ReadBlockSize &&
+                      cacheIndex + take >= h.ReadCache.Length)
+                      break;''',
+              '''                    if (cacheIndex + take >= h.ReadCache.Length && h.ReadCache.Length < prefetch)
+                      break;''',
+              "adaptive eof")
+          s = rep(s,
+              '''                PBytesTransferred = (uint)copied;
+              return STATUS_SUCCESS;''',
+              '''                PBytesTransferred = (uint)copied;
+              h.LastReadEnd = checked((long)Offset + copied);
+              return STATUS_SUCCESS;''',
+              "last read end")
+          s = rep(s,
+              '            _ftp.Rename(h.RemotePath, newPath);\n',
+              '            if (h.Uploaded)\n                _ftp.Rename(h.RemotePath, newPath);\n',
+              "rename unuploaded")
+          s = rep(s,
+              '        private void EnsureLocal(FtpHandle h, bool createEmpty)\n        {\n',
+              '''        private static int AdaptiveReadSize(int sequentialCount)
+          {
+              if (sequentialCount >= 6) return MaxReadBlockSize;
+              if (sequentialCount >= 3) return LargeReadBlockSize;
+              if (sequentialCount >= 1) return MidReadBlockSize;
+              return MinReadBlockSize;
+          }
+
+          private void CleanupStaleTempFiles()
+          {
+              try
+              {
+                  foreach (string file in Directory.GetFiles(_cacheDir, "*.tmp"))
+                  {
+                      try { File.Delete(file); } catch { }
+                  }
+              }
+              catch { }
+          }
+
+          private void EnsureLocal(FtpHandle h, bool createEmpty)
+          {
+          ''',
+              "helpers")
+          p.write_text(s, encoding="utf-8")
+
+          proj = root / "TinyFtpDrive.csproj"
+          t = proj.read_text(encoding="utf-8").replace("<Version>0.2.0</Version>", "<Version>0.3.0</Version>")
+          proj.write_text(t, encoding="utf-8")
+          (root / "VERSION.txt").write_text("0.3.0\n", encoding="utf-8")
+          sf = root / "SettingsForm.cs"
+          t = sf.read_text(encoding="utf-8").replace("FTP only  ·  UTF-8 파일명  ·  대용량 파일 부분 읽기",
+                                                     "FTP only  ·  UTF-8 파일명  ·  적응형 읽기 캐시")
+          sf.write_text(t, encoding="utf-8")
+          '@
+          $root = (Join-Path $dest 'TinyFtpDrive').Replace('\','\\')
+          $py = $py.Replace('__ROOT__', $root)
+          $patcher = Join-Path $env:GITHUB_WORKSPACE 'apply_v03.py'
+          Set-Content -Path $patcher -Value $py -Encoding UTF8
+          python $patcher
+          if ($LASTEXITCODE -ne 0) { throw "v0.3 source patch failed" }
 
       - uses: actions/setup-dotnet@v4
         with:
