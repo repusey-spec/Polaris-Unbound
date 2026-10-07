@@ -20,7 +20,7 @@ jobs:
         run: |
           $base = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-build'
           $b64 = ''
-          foreach ($name in @('source.b64.part0','source.b64.part1','source.b64.part2a','source.b64.part2b','source.b64.part3')) {
+          foreach ($name in @('source.b64.part0','source.b64.part1a','source.b64.part1b','source.b64.part2a','source.b64.part2b','source.b64.part3')) {
             $b64 += (Get-Content (Join-Path $base $name) -Raw).Trim()
           }
           $zip = Join-Path $env:GITHUB_WORKSPACE 'yongbongE-source-v0.2.zip'
