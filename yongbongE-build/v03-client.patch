@@ -1,0 +1,88 @@
+--- FtpClient.cs	2026-10-07 20:37:45.000000000 +0000
++++ FtpClient.cs
+@@ -45,6 +45,7 @@
+         private readonly Dictionary<string, CacheItem> _dirCache = new Dictionary<string, CacheItem>(StringComparer.OrdinalIgnoreCase);
+         private readonly Encoding _commandEncoding = new UTF8Encoding(false, false);
+         private readonly Encoding _strictUtf8 = new UTF8Encoding(false, true);
++        private static readonly TimeSpan DirectoryCacheLifetime = TimeSpan.FromSeconds(30);
+ 
+         private TcpClient _control;
+         private NetworkStream _controlStream;
+@@ -83,26 +84,36 @@
+ 
+             string parent = ParentPath(path);
+             string leaf = LeafName(path);
+-            List<RemoteEntry> list = List(parent);
+-            foreach (RemoteEntry e in list)
+-                if (string.Equals(e.Name, leaf, StringComparison.OrdinalIgnoreCase))
+-                    return e;
+-            return null;
++            lock (_sync)
++            {
++                List<RemoteEntry> list = GetDirectoryEntriesNoLock(parent);
++                foreach (RemoteEntry e in list)
++                    if (string.Equals(e.Name, leaf, StringComparison.OrdinalIgnoreCase))
++                        return CloneEntry(e);
++                return null;
++            }
+         }
+ 
+         public List<RemoteEntry> List(string path)
+         {
+             path = NormalizePath(path);
+             lock (_sync)
++                return CloneEntries(GetDirectoryEntriesNoLock(path));
++        }
++
++        private List<RemoteEntry> GetDirectoryEntriesNoLock(string path)
++        {
++            CacheItem cached;
++            if (_dirCache.TryGetValue(path, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
++                return cached.Entries;
++
++            List<RemoteEntry> result = RunWithReconnectNoLock(() => ListNoLock(path));
++            _dirCache[path] = new CacheItem
+             {
+-                CacheItem cached;
+-                if (_dirCache.TryGetValue(path, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
+-                    return CloneEntries(cached.Entries);
+-
+-                List<RemoteEntry> result = RunWithReconnectNoLock(() => ListNoLock(path));
+-                _dirCache[path] = new CacheItem { ExpiresUtc = DateTime.UtcNow.AddMilliseconds(1500), Entries = CloneEntries(result) };
+-                return result;
+-            }
++                ExpiresUtc = DateTime.UtcNow.Add(DirectoryCacheLifetime),
++                Entries = result
++            };
++            return result;
+         }
+ 
+         public void Download(string remotePath, string localPath)
+@@ -370,7 +381,7 @@
+                 int total = 0;
+                 using (NetworkStream ns = data.GetStream())
+                 {
+-                    ns.ReadTimeout = 5000;
++                    ns.ReadTimeout = 8000;
+                     while (total < maxLength)
+                     {
+                         int n = ns.Read(buffer, total, maxLength - total);
+@@ -558,6 +569,18 @@
+             _dirCache.Remove(ParentPath(path));
+         }
+ 
++        private static RemoteEntry CloneEntry(RemoteEntry e)
++        {
++            return new RemoteEntry
++            {
++                Name = e.Name,
++                FullPath = e.FullPath,
++                IsDirectory = e.IsDirectory,
++                Size = e.Size,
++                ModifiedUtc = e.ModifiedUtc
++            };
++        }
++
+         private static List<RemoteEntry> CloneEntries(List<RemoteEntry> src)
+         {
+             var dst = new List<RemoteEntry>(src.Count);
