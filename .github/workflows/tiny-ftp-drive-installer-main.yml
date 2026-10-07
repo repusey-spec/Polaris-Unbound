@@ -25,6 +25,11 @@ jobs:
           }
           [IO.File]::WriteAllBytes((Join-Path $env:GITHUB_WORKSPACE 'TinyFtpDrive-source-v0.1.zip'), [Convert]::FromBase64String($b64))
           Expand-Archive -Path (Join-Path $env:GITHUB_WORKSPACE 'TinyFtpDrive-source-v0.1.zip') -DestinationPath (Join-Path $env:GITHUB_WORKSPACE 'src') -Force
+          $fs = Join-Path $env:GITHUB_WORKSPACE 'src\TinyFtpDrive\FtpFileSystem.cs'
+          $src = Get-Content $fs -Raw
+          $src = $src.Replace('using Fsp;', "using Fsp;`r`nusing VolumeInfo = Fsp.Interop.VolumeInfo;`r`nusing FileInfo = Fsp.Interop.FileInfo;")
+          $src = $src.Replace('Fsp.FileInfo', 'FileInfo')
+          Set-Content -Path $fs -Value $src -Encoding UTF8
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
