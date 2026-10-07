@@ -1,4 +1,4 @@
---- FtpFileSystem.cs	2026-10-07 20:37:45.000000000 +0000
+--- FtpFileSystem.cs	2026-10-07 20:27:15.000000000 +0000
 +++ FtpFileSystem.cs
 @@ -27,9 +27,14 @@
              public List<RemoteEntry> DirectoryEntries;
@@ -64,8 +64,12 @@
                          if (h.ReadCache == null || h.ReadCache.Length == 0) break;
                      }
  
-@@ -311,9 +324,7 @@
-                     System.Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);
+@@ -308,12 +321,10 @@
+                     if (available <= 0) break;
+ 
+                     int take = Math.Min(available, wanted - copied);
+-                    Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);
++                    System.Buffer.BlockCopy(h.ReadCache, cacheIndex, output, copied, take);
                      copied += take;
  
 -                    // 서버가 요청 블록보다 일찍 EOF를 반환한 경우 재요청 루프를 막는다.
