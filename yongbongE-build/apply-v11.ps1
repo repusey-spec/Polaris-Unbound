@@ -12,8 +12,8 @@ $patch = Join-Path $Root 'v11-core.patch'
 & 7z x $xz "-o$Root" -y | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'v0.11 patch extract failed' }
 
-Push-Location $SourceDir
-git apply --verbose --ignore-space-change --ignore-whitespace --whitespace=nowarn $patch
+Push-Location $Root
+git apply --verbose --directory=src/TinyFtpDrive --ignore-space-change --ignore-whitespace --whitespace=nowarn $patch
 if ($LASTEXITCODE -ne 0) { throw 'v0.11 core patch failed' }
 Pop-Location
 
