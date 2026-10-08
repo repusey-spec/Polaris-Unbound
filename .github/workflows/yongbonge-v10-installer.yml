@@ -21,3 +21,4 @@ jobs:
           name: yongbongE-Setup-v0.10
           path: dist/yongbongE-Setup-v0.10.exe
           if-no-files-found: error
+# final pinned build
