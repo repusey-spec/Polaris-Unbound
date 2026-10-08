@@ -23,3 +23,4 @@ jobs:
           if-no-files-found: error
 # verify v0.11 core patch
 # apply v0.11 patch to source dir
+# final pinned v0.11 build
