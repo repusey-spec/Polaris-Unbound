@@ -1,0 +1,22 @@
+name: Inspect yongbongE config path
+on:
+  push:
+    branches: [yongbonge-v15-trace]
+    paths:
+      - .github/workflows/inspect-yongbonge-config.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct source
+        shell: pwsh
+        run: ./yongbongE-build/build-v11.ps1
+      - name: Print AppConfig definition
+        shell: pwsh
+        run: |
+          Get-ChildItem src/TinyFtpDrive -Filter *.cs -Recurse |
+            Select-String -Pattern 'ConfigDirectory|CacheDirectory|class AppConfig|static string ConfigDirectory' -Context 8,20 |
+            ForEach-Object { $_.Context.PreContext; $_.Line; $_.Context.PostContext; '-----' }
