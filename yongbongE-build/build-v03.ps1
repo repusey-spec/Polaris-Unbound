@@ -15,14 +15,10 @@ New-Item -ItemType Directory -Force $dest | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "source extract failed" }
 
 $src = Join-Path $dest 'TinyFtpDrive'
-Copy-Item (Join-Path $base 'v03-client.patch') (Join-Path $src 'v03-client.patch')
-Copy-Item (Join-Path $base 'v03-fs.patch') (Join-Path $src 'v03-fs.patch')
-Push-Location $src
-git apply --whitespace=nowarn v03-client.patch
-if ($LASTEXITCODE -ne 0) { throw "client patch failed" }
-git apply --whitespace=nowarn v03-fs.patch
-if ($LASTEXITCODE -ne 0) { throw "filesystem patch failed" }
-Pop-Location
+python (Join-Path $base 'apply-client-v03.py') (Join-Path $src 'FtpClient.cs')
+if ($LASTEXITCODE -ne 0) { throw "client transform failed" }
+python (Join-Path $base 'apply-fs-v03.py') (Join-Path $src 'FtpFileSystem.cs')
+if ($LASTEXITCODE -ne 0) { throw "filesystem transform failed" }
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $proj = Join-Path $src 'TinyFtpDrive.csproj'
