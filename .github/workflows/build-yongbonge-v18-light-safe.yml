@@ -1,0 +1,82 @@
+name: Build yongbongE v0.18 LIGHT-SAFE
+
+on:
+  push:
+    branches:
+      - yongbonge-v18-light-safe
+    paths:
+      - .github/workflows/build-yongbonge-v18-light-safe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.18 LIGHT-SAFE sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v18-light-safe/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v18-light-safe/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v18-light-safe/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.18.0-LIGHT-SAFE" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Verify source invariants
+        shell: pwsh
+        run: |
+          $fs = Get-Content "src/TinyFtpDrive/FtpFileSystem.cs" -Raw
+          foreach ($needle in @(
+            "host.FileInfoTimeout = 0;",
+            "host.DirInfoTimeout = 0;",
+            "host.SecurityTimeout = 0;",
+            "host.StreamInfoTimeout = 0;",
+            "host.EaTimeout = 0;",
+            'host.Prefix = @"\yongbongE\ftp";'
+          )) {
+            if (!$fs.Contains($needle)) { throw "Missing invariant: $needle" }
+          }
+          if (Select-String -Path "src/TinyFtpDrive/FtpClient.cs","src/TinyFtpDrive/FtpFileSystem.cs" -Pattern "TraceLog" -SimpleMatch) {
+            throw "TRACE reference remains"
+          }
+
+      - name: Compile v0.18 LIGHT-SAFE
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "LIGHT-SAFE build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.18.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.18-LIGHT-SAFE")
+          [IO.File]::WriteAllText("yongbongE-v18-light-safe.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v18-light-safe.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.18-LIGHT-SAFE.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/FtpClient.cs" -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/FtpFileSystem.cs" -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/Program.cs" -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.18-LIGHT-SAFE
+          path: dist/yongbongE-Setup-v0.18-LIGHT-SAFE.exe
+          if-no-files-found: error
+          retention-days: 30
