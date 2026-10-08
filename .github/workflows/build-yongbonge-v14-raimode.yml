@@ -1,0 +1,63 @@
+name: Build yongbongE v0.14 RAI-MODE
+
+on:
+  push:
+    branches:
+      - yongbonge-v14-raimode
+    paths:
+      - .github/workflows/build-yongbonge-v14-raimode.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply RAI-MODE sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v14-raimode/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v14-raimode/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v14-raimode/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.14.0-RAI-MODE" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Compile RAI-MODE
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "RAI-MODE build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.14.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.14-RAI-MODE")
+          [IO.File]::WriteAllText("yongbongE-v14-raimode.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v14-raimode.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.14-RAI-MODE.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/FtpClient.cs" -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/FtpFileSystem.cs" -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.14-RAI-MODE
+          path: dist/yongbongE-Setup-v0.14-RAI-MODE.exe
+          if-no-files-found: error
+          retention-days: 30
