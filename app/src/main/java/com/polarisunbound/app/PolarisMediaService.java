@@ -28,7 +28,9 @@ import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Player;
 import androidx.media3.common.PlaybackException;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import java.util.*;
@@ -56,10 +58,14 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final ExecutorService programExecutor=Executors.newSingleThreadExecutor();
     private final ExecutorService ftpExecutor=Executors.newFixedThreadPool(2);
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler resolverRefreshHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private String currentRadioId=null;
+    private volatile String currentResolvedRadioUrl=null;
+    private final Map<String,String> standbyResolvedUrls=new ConcurrentHashMap<>();
+    private final Map<String,Long> standbyResolvedAt=new ConcurrentHashMap<>();
     private int retryCount=0;
     private int radioSoftRetryCount=0;
     private boolean userStopped=false;
@@ -79,6 +85,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private static final String MP3_PREFS="polaris_mp3";
     private static final String PREF_MP3_RECENT="recent_ids";
     private static final String PREF_MP3_FAVORITES="favorite_ids";
+    private static final String PREF_MP3_FTP_FAVORITES="favorite_ftp_paths";
     private static final String PREF_MP3_REPEAT_MODE="repeat_mode";
     private static final String PREF_MP3_SHUFFLE="shuffle";
     private final List<Long> currentMp3Queue=new ArrayList<>();
@@ -90,6 +97,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final List<String> currentFtpMp3Queue=new ArrayList<>();
     private volatile int currentFtpMp3Index=-1;
     private volatile boolean ftpMp3Preparing=false;
+    private final List<String> currentFavoriteQueue=new ArrayList<>();
+    private int currentFavoriteIndex=-1;
+    private boolean favoriteQueueActive=false;
+    private Bitmap ftpBrowseArt=null;
     private int mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
     private boolean mp3Shuffle=false;
     private boolean mp3EndHandled=false;
@@ -102,6 +113,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private volatile String mp3FtpStatus="Synology FTP";
     private final DefaultLoadErrorHandlingPolicy radioLoadErrorPolicy=
         new DefaultLoadErrorHandlingPolicy(8);
+    private static final long RADIO_HLS_TARGET_OFFSET_MS=20000L;
+    private static final long RADIO_RESOLVER_PREFETCH_MS=120000L;
     private AudioManager audioManager;
     private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
@@ -134,10 +147,20 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         super.onCreate();
         ensurePlaybackChannel();
         audioManager=(AudioManager)getSystemService(Context.AUDIO_SERVICE);
-        DefaultMediaSourceFactory mediaSourceFactory=new DefaultMediaSourceFactory(this)
+        DefaultHttpDataSource.Factory playerHttpFactory=new DefaultHttpDataSource.Factory()
+            .setUserAgent("Polaris-Unbound/"+BuildConfig.VERSION_NAME)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(10000)
+            .setReadTimeoutMs(15000);
+        DefaultDataSource.Factory playerDataFactory=new DefaultDataSource.Factory(this,playerHttpFactory);
+        DefaultMediaSourceFactory mediaSourceFactory=new DefaultMediaSourceFactory(playerDataFactory)
             .setLoadErrorHandlingPolicy(radioLoadErrorPolicy);
+        DefaultLoadControl loadControl=new DefaultLoadControl.Builder()
+            .setBufferDurationsMs(30000,60000,1500,5000)
+            .build();
         player=new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
             .build();
         AudioAttributes audioAttributes=new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -169,16 +192,35 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 try{
                     if("can:ftp_upload".equals(id)){ uploadFtpFromAa("CAN","can"); return; }
                     if("mp3:ftp_upload".equals(id)){ uploadFtpFromAa("MP3","mp3_ftp"); return; }
-                    if(id!=null && id.startsWith("ftpmp3:")) { playFtpAudio(id); return; }
-                    if(id!=null && id.startsWith("mp3:")) { playLocalAudio(id); return; }
+                    if(id!=null && id.startsWith("favlocal:")){
+                        startFavoriteQueueAt("local:"+id.substring("favlocal:".length()));
+                        return;
+                    }
+                    if(id!=null && id.startsWith("favftp:")){
+                        startFavoriteQueueAt("ftp:"+Uri.decode(id.substring("favftp:".length())));
+                        return;
+                    }
+                    if(id!=null && id.startsWith("ftpmp3:")){
+                        favoriteQueueActive=false;
+                        playFtpAudio(id);
+                        return;
+                    }
+                    if(id!=null && id.startsWith("mp3:")){
+                        favoriteQueueActive=false;
+                        playLocalAudio(id);
+                        return;
+                    }
+                    favoriteQueueActive=false;
                     currentFtpMp3Path=null;
                     currentRadioId=id;
                     currentMp3Id=-1L;
                     rememberRadioForResume(id);
                     enterPlaybackForeground(TITLES.get(id));
                     retryCount=0;
+                    radioSoftRetryCount=0;
                     userStopped=false;
                     retryHandler.removeCallbacksAndMessages(null);
+                    resolverRefreshHandler.removeCallbacksAndMessages(null);
                     startRadio(id);
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
@@ -214,6 +256,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 resumeAfterTransientFocusLoss=false;
                 setResumeAllowed(false);
                 retryHandler.removeCallbacksAndMessages(null);
+                resolverRefreshHandler.removeCallbacksAndMessages(null);
                 restoreHandler.removeCallbacksAndMessages(null);
                 player.pause();
                 publishState();
@@ -304,13 +347,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 if(playing && currentRadioId!=null){
                     radioSoftRetryCount=0;
                     retryCount=0;
+                    traceRadioHealth("PLAYING");
                 }
                 publishState();
             }
             @Override public void onPlaybackStateChanged(int state){
+                if(currentRadioId!=null && state==Player.STATE_BUFFERING)
+                    traceRadioHealth("BUFFERING");
                 publishState();
                 if(state==Player.STATE_ENDED && !mp3EndHandled){
-                    if(currentFtpMp3Path!=null){
+                    if(favoriteQueueActive){
+                        mp3EndHandled=true;
+                        handleFavoriteEnded();
+                    }else if(currentFtpMp3Path!=null){
                         mp3EndHandled=true;
                         skipFtpMp3(1);
                     }else if(currentMp3Id>=0){
@@ -320,20 +369,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }
             }
             @Override public void onPlayerError(PlaybackException error){
-                String msg="Media3 "+error.getErrorCodeName()+": "+error.getMessage();
-                Throwable cause=error;
-                while(cause!=null){
-                    if(cause instanceof HttpDataSource.InvalidResponseCodeException){
-                        HttpDataSource.InvalidResponseCodeException h=(HttpDataSource.InvalidResponseCodeException)cause;
-                        msg+=" HTTP "+h.responseCode;
-                        break;
-                    }
-                    cause=cause.getCause();
-                }
+                String msg=describePlaybackError(error);
                 trace("PLAYER ERROR: "+msg);
                 if(currentRadioId!=null && !userStopped){
-                    publishError(msg);
-                    scheduleSoftRadioRetry();
+                    traceRadioHealth("ERROR "+msg);
+                    publishRadioRecovering(msg);
+                    recoverRadioAfterError(error);
                 }else{
                     publishError(msg);
                 }
