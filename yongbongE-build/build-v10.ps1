@@ -131,7 +131,7 @@ $clientHash = Get-NormalizedSha256 (Join-Path $src 'FtpClient.cs')
 $fsHash = Get-NormalizedSha256 (Join-Path $src 'FtpFileSystem.cs')
 Write-Host "v0.10 FtpClient normalized SHA256:" $clientHash
 Write-Host "v0.10 FtpFileSystem normalized SHA256:" $fsHash
-if ($clientHash -eq 'D16E2DEBC3A6B353451F111A4DF3AABCD133985E1377EF7CF52B68920C98FC43') { throw "v0.10 client transform did not change source" }
+if ($clientHash -ne '8E9192C4AF718C5496C01F9DFCBE3FD4DA1A972575E8845969D28B2C39C38E0C') { throw "v0.10 FtpClient hash mismatch" }
 if ($fsHash -ne '890CCC09B91ADE01898D904883F95793297232A2012CE2032DEFF65099098511') { throw "v0.10 unexpectedly changed filesystem source" }
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
