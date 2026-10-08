@@ -34,12 +34,19 @@ git apply --whitespace=nowarn (Join-Path $Root 'v05-fs-rel.patch')
 if ($LASTEXITCODE -ne 0) { throw "filesystem patch failed" }
 Pop-Location
 
-$clientHash = (Get-FileHash (Join-Path $src 'FtpClient.cs') -Algorithm SHA256).Hash
-$fsHash = (Get-FileHash (Join-Path $src 'FtpFileSystem.cs') -Algorithm SHA256).Hash
-Write-Host "FtpClient SHA256:" $clientHash
-Write-Host "FtpFileSystem SHA256:" $fsHash
-if ($clientHash -ne '7D8CFC726EDA062799AF5C6F0A77149376582EB38F1F67F63517E28911811566') { throw "FtpClient hash mismatch" }
-if ($fsHash -ne '79157D1D80B241C3271E8C06AA2F36EF404CFA7E58249067F3B69DB852E49DE2') { throw "FtpFileSystem hash mismatch" }
+function Get-NormalizedSha256([string]$Path) {
+  $text = [IO.File]::ReadAllText($Path).Replace("`r`n", "`n")
+  $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($text)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "") }
+  finally { $sha.Dispose() }
+}
+$clientHash = Get-NormalizedSha256 (Join-Path $src 'FtpClient.cs')
+$fsHash = Get-NormalizedSha256 (Join-Path $src 'FtpFileSystem.cs')
+Write-Host "FtpClient normalized SHA256:" $clientHash
+Write-Host "FtpFileSystem normalized SHA256:" $fsHash
+if ($clientHash -ne '7D8CFC726EDA062799AF5C6F0A77149376582EB38F1F67F63517E28911811566') { throw "FtpClient normalized hash mismatch" }
+if ($fsHash -ne '79157D1D80B241C3271E8C06AA2F36EF404CFA7E58249067F3B69DB852E49DE2') { throw "FtpFileSystem normalized hash mismatch" }
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $proj = Join-Path $src 'TinyFtpDrive.csproj'
