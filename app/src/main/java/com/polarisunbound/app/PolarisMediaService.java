@@ -560,9 +560,154 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("MP3 like id="+mediaId+" -> "+favorite);
     }
 
+    private List<String> ftpFavoritePaths(){
+        Set<String> stored=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getStringSet(PREF_MP3_FTP_FAVORITES,Collections.emptySet());
+        List<String> out=new ArrayList<>(stored);
+        Collections.sort(out,String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    private boolean isFtpFavorite(String relativePath){
+        if(relativePath==null) return false;
+        Set<String> stored=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getStringSet(PREF_MP3_FTP_FAVORITES,Collections.emptySet());
+        return stored.contains(relativePath);
+    }
+
+    private void setFtpFavorite(String relativePath,boolean favorite){
+        if(relativePath==null||relativePath.trim().isEmpty()) return;
+        Set<String> stored=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
+            .getStringSet(PREF_MP3_FTP_FAVORITES,Collections.emptySet());
+        Set<String> copy=new HashSet<>(stored);
+        if(favorite) copy.add(relativePath); else copy.remove(relativePath);
+        getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
+            .putStringSet(PREF_MP3_FTP_FAVORITES,copy).apply();
+        notifyChildrenChanged("mp3_favorites");
+        trace("FTP MP3 like path="+relativePath+" -> "+favorite);
+    }
+
+    private boolean isCurrentFavorite(){
+        if(currentFtpMp3Path!=null) return isFtpFavorite(currentFtpMp3Path);
+        return currentMp3Id>=0 && isFavorite(currentMp3Id);
+    }
+
+    private String currentFavoriteKey(){
+        if(currentFtpMp3Path!=null) return "ftp:"+currentFtpMp3Path;
+        if(currentMp3Id>=0) return "local:"+currentMp3Id;
+        return null;
+    }
+
+    private List<String> favoriteQueueSnapshot(){
+        List<String> out=new ArrayList<>();
+        for(Long id:favoriteIdsInLibraryOrder()) out.add("local:"+id);
+        for(String rel:ftpFavoritePaths()) out.add("ftp:"+rel);
+        return out;
+    }
+
+    private void startFavoriteQueueAt(String key){
+        List<String> queue=favoriteQueueSnapshot();
+        int index=queue.indexOf(key);
+        if(index<0){
+            publishError("좋아요 항목을 찾지 못했습니다");
+            return;
+        }
+        synchronized(currentFavoriteQueue){
+            currentFavoriteQueue.clear();
+            currentFavoriteQueue.addAll(queue);
+            currentFavoriteIndex=index;
+        }
+        favoriteQueueActive=true;
+        playFavoriteQueueEntry(key);
+    }
+
+    private void playFavoriteQueueEntry(String key){
+        if(key==null) return;
+        favoriteQueueActive=true;
+        mp3EndHandled=false;
+        if(key.startsWith("local:")){
+            try{
+                long id=Long.parseLong(key.substring("local:".length()));
+                playLocalAudioId(id);
+            }catch(Exception e){
+                publishError("좋아요 로컬 MP3 오류: "+e.getMessage());
+            }
+        }else if(key.startsWith("ftp:")){
+            String rel=key.substring("ftp:".length());
+            playFtpAudio("ftpmp3:"+Uri.encode(rel));
+        }
+    }
+
+    private void skipFavoriteQueue(int delta){
+        String nextKey=null;
+        synchronized(currentFavoriteQueue){
+            if(currentFavoriteQueue.isEmpty()){
+                currentFavoriteQueue.addAll(favoriteQueueSnapshot());
+            }
+            if(currentFavoriteQueue.isEmpty()) return;
+            String current=currentFavoriteKey();
+            int at=currentFavoriteQueue.indexOf(current);
+            if(at<0) at=Math.max(0,Math.min(currentFavoriteIndex,currentFavoriteQueue.size()-1));
+            int next;
+            if(mp3Shuffle && delta>0 && currentFavoriteQueue.size()>1){
+                next=at;
+                for(int tries=0;tries<8&&next==at;tries++)
+                    next=mp3Random.nextInt(currentFavoriteQueue.size());
+                if(next==at) next=(at+1)%currentFavoriteQueue.size();
+            }else{
+                next=(at+delta+currentFavoriteQueue.size())%currentFavoriteQueue.size();
+            }
+            currentFavoriteIndex=next;
+            nextKey=currentFavoriteQueue.get(next);
+        }
+        playFavoriteQueueEntry(nextKey);
+    }
+
+    private void handleFavoriteEnded(){
+        List<String> queue;
+        int at;
+        synchronized(currentFavoriteQueue){
+            queue=new ArrayList<>(currentFavoriteQueue);
+            at=currentFavoriteIndex;
+        }
+        if(queue.isEmpty()){
+            favoriteQueueActive=false;
+            return;
+        }
+        if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ONE){
+            playFavoriteQueueEntry(queue.get(Math.max(0,Math.min(at,queue.size()-1))));
+            return;
+        }
+        if(mp3Shuffle){
+            skipFavoriteQueue(1);
+            return;
+        }
+        int next=at+1;
+        if(next<queue.size()){
+            synchronized(currentFavoriteQueue){ currentFavoriteIndex=next; }
+            playFavoriteQueueEntry(queue.get(next));
+            return;
+        }
+        if(mp3RepeatMode==PlaybackStateCompat.REPEAT_MODE_ALL){
+            synchronized(currentFavoriteQueue){ currentFavoriteIndex=0; }
+            playFavoriteQueueEntry(queue.get(0));
+            return;
+        }
+        favoriteQueueActive=false;
+        setResumeAllowed(false);
+        abandonPlaybackFocus();
+        leavePlaybackForeground();
+        publishState();
+    }
+
     private void toggleFavoriteCurrent(){
-        if(currentMp3Id<0) return;
-        setFavorite(currentMp3Id,!isFavorite(currentMp3Id));
+        if(currentFtpMp3Path!=null){
+            setFtpFavorite(currentFtpMp3Path,!isFtpFavorite(currentFtpMp3Path));
+        }else if(currentMp3Id>=0){
+            setFavorite(currentMp3Id,!isFavorite(currentMp3Id));
+        }else{
+            return;
+        }
         publishState();
     }
 
@@ -593,10 +738,39 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void dislikeCurrent(){
-        if(currentMp3Id<0) return;
-        if(isFavorite(currentMp3Id)) setFavorite(currentMp3Id,false);
+        String current=currentFavoriteKey();
+        if(current==null) return;
+
+        if(current.startsWith("ftp:"))
+            setFtpFavorite(current.substring("ftp:".length()),false);
+        else if(current.startsWith("local:")){
+            try{ setFavorite(Long.parseLong(current.substring("local:".length())),false); }
+            catch(Exception ignored){}
+        }
+
         trace("MP3 dislike -> next");
-        skipMp3(1);
+        if(favoriteQueueActive){
+            String nextKey=null;
+            synchronized(currentFavoriteQueue){
+                int at=currentFavoriteQueue.indexOf(current);
+                if(at>=0) currentFavoriteQueue.remove(at);
+                if(!currentFavoriteQueue.isEmpty()){
+                    int next=Math.min(Math.max(0,at),currentFavoriteQueue.size()-1);
+                    currentFavoriteIndex=next;
+                    nextKey=currentFavoriteQueue.get(next);
+                }
+            }
+            if(nextKey!=null) playFavoriteQueueEntry(nextKey);
+            else{
+                favoriteQueueActive=false;
+                player.stop();
+                publishState();
+            }
+        }else if(currentFtpMp3Path!=null){
+            skipFtpMp3(1);
+        }else{
+            skipMp3(1);
+        }
     }
 
     private void uploadFtpFromAa(String scope,String parentId){
@@ -799,21 +973,22 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void startVoiceLikedMp3(){
-        currentMp3Queue.clear();
-        currentMp3Queue.addAll(favoriteIdsInLibraryOrder());
-        if(currentMp3Queue.isEmpty()){
+        List<String> queue=favoriteQueueSnapshot();
+        if(queue.isEmpty()){
             publishError("좋아요 MP3가 없습니다");
             trace("VOICE MP3 liked playlist empty");
             return;
         }
-
         int index=0;
-        if(mp3Shuffle && currentMp3Queue.size()>1)
-            index=mp3Random.nextInt(currentMp3Queue.size());
-
-        currentMp3Index=index;
-        trace("VOICE MP3 liked playlist size="+currentMp3Queue.size()+" index="+index);
-        playLocalAudioId(currentMp3Queue.get(index));
+        if(mp3Shuffle && queue.size()>1) index=mp3Random.nextInt(queue.size());
+        synchronized(currentFavoriteQueue){
+            currentFavoriteQueue.clear();
+            currentFavoriteQueue.addAll(queue);
+            currentFavoriteIndex=index;
+        }
+        favoriteQueueActive=true;
+        trace("VOICE liked playlist size="+queue.size()+" index="+index);
+        playFavoriteQueueEntry(queue.get(index));
     }
 
     private void playVoiceRadio(String id){
@@ -821,6 +996,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             publishError("라디오 채널을 찾지 못했습니다");
             return;
         }
+        favoriteQueueActive=false;
         currentFtpMp3Path=null;
         ftpMp3Preparing=false;
         currentRadioId=id;
@@ -828,8 +1004,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         rememberRadioForResume(id);
         enterPlaybackForeground(TITLES.get(id));
         retryCount=0;
+        radioSoftRetryCount=0;
         userStopped=false;
         retryHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
         trace("VOICE radio -> "+id+" "+TITLES.get(id));
         startRadio(id);
     }
@@ -860,6 +1038,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             long id=findMp3Title(wanted);
             if(id>=0){
                 trace("VOICE MP3 title -> "+wanted+" / "+id);
+                favoriteQueueActive=false;
                 ensureMp3Queue(id);
                 playLocalAudioId(id);
             }else{
@@ -873,6 +1052,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             long id=findMp3Title(normalized);
             if(id>=0){
                 trace("VOICE plain title -> "+normalized+" / "+id);
+                favoriteQueueActive=false;
                 ensureMp3Queue(id);
                 playLocalAudioId(id);
                 return;
@@ -885,6 +1065,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void skipCurrent(int delta){
         if(currentRadioId!=null) skipRadio(delta);
+        else if(favoriteQueueActive) skipFavoriteQueue(delta);
         else if(currentFtpMp3Path!=null) skipFtpMp3(delta);
         else if(currentMp3Id>=0 || !currentMp3Queue.isEmpty()) skipMp3(delta);
     }
@@ -1668,6 +1849,35 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             b.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
     }
 
+    private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadFavoriteMediaItems(){
+        List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+        for(Long mediaId:favoriteIdsInLibraryOrder()){
+            Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,mediaId);
+            String[] p={
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.ALBUM_ID
+            };
+            try(Cursor c=getContentResolver().query(uri,p,null,null,null)){
+                if(c!=null&&c.moveToFirst()){
+                    String title=safe(c.getString(0));
+                    String artist=safe(c.getString(1));
+                    String album=safe(c.getString(2));
+                    long albumId=c.getLong(3);
+                    String sub=artist+(album.isEmpty()?"":" · "+album);
+                    out.add(itemWithAlbumArt("favlocal:"+mediaId,title,sub,albumId));
+                }
+            }catch(SecurityException ignored){}
+        }
+        for(String rel:ftpFavoritePaths()){
+            String parent=PolarisFtp.parentRelative(rel);
+            String sub=parent.isEmpty()?"FTP":"FTP · "+parent;
+            out.add(item("favftp:"+Uri.encode(rel),PolarisFtp.displayTitle(rel),sub));
+        }
+        return out;
+    }
+
     private List<android.support.v4.media.MediaBrowserCompat.MediaItem> loadAudioByIds(List<Long> ids){
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
         for(Long mediaId:ids){
@@ -2131,8 +2341,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             .setActions(actions)
             .setState(state,position,speed,android.os.SystemClock.elapsedRealtime());
 
-        if(currentMp3Id>=0){
-            boolean liked=isFavorite(currentMp3Id);
+        if(currentMp3Id>=0 || currentFtpMp3Path!=null){
+            boolean liked=isCurrentFavorite();
             b.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                 ACTION_MP3_LIKE,
                 liked ? "좋아요 해제" : "좋아요",
@@ -2185,10 +2395,31 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setExtras(e).build(),
             android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
     }
+    private Bitmap ftpMusicArt(){
+        if(ftpBrowseArt!=null&&!ftpBrowseArt.isRecycled()) return ftpBrowseArt;
+        int size=192;
+        Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(b);
+        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(0xFF34343C);
+        canvas.drawRect(0,0,size,size,paint);
+        paint.setColor(0xFFF2F2F4);
+        paint.setTextAlign(android.graphics.Paint.Align.CENTER);
+        paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        paint.setTextSize(104f);
+        canvas.drawText("♪",size/2f,size*0.62f,paint);
+        paint.setTextSize(26f);
+        canvas.drawText("FTP",size/2f,size*0.86f,paint);
+        ftpBrowseArt=b;
+        return b;
+    }
+
     private android.support.v4.media.MediaBrowserCompat.MediaItem item(String id,String title,String sub){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
             .setMediaId(id).setTitle(title).setSubtitle(sub);
         if(STREAMS.containsKey(id)) b.setIconBitmap(StationArt.bitmap(this,id,128));
+        else if(id!=null && (id.startsWith("ftpmp3:")||id.startsWith("favftp:")))
+            b.setIconBitmap(ftpMusicArt());
         Bundle e=new Bundle();
         e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
         b.setExtras(e);
@@ -2307,7 +2538,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         } else if(parent.equals("mp3_all")){
             x.addAll(loadLocalAudio(null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
         } else if(parent.equals("mp3_favorites")){
-            x.addAll(loadAudioByIds(favoriteIds()));
+            x.addAll(loadFavoriteMediaItems());
         } else if(parent.startsWith("mp3_album:")){
             String value=Uri.decode(parent.substring("mp3_album:".length()));
             x.addAll(loadLocalAudio(MediaStore.Audio.Media.ALBUM+"=?",new String[]{value},MediaStore.Audio.Media.TRACK+" ASC"));
@@ -2353,6 +2584,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     @Override public void onDestroy(){
         saveLastMp3Position();
         retryHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
         programHandler.removeCallbacksAndMessages(null);
         positionHandler.removeCallbacksAndMessages(null);
         restoreHandler.removeCallbacksAndMessages(null);
