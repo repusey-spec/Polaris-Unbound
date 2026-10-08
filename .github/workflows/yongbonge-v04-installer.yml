@@ -21,3 +21,4 @@ jobs:
           name: yongbongE-Setup-v0.4
           path: dist/yongbongE-Setup-v0.4.exe
           if-no-files-found: error
+
