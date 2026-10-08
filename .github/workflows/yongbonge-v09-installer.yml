@@ -1,0 +1,23 @@
+name: yongbonge-v09-installer
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/yongbonge-v09-installer.yml']
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: yongbonge-v09-build
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build
+        shell: pwsh
+        run: ./yongbongE-build/build-v09.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-Setup-v0.9
+          path: dist/yongbongE-Setup-v0.9.exe
+          if-no-files-found: error
