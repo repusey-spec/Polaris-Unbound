@@ -143,6 +143,9 @@ $programHash = Get-NormalizedSha256 (Join-Path $src 'Program.cs')
 Write-Host "v0.11 FtpClient normalized SHA256:" $clientHash
 Write-Host "v0.11 FtpFileSystem normalized SHA256:" $fsHash
 Write-Host "v0.11 Program normalized SHA256:" $programHash
+if ($clientHash -ne '751DB5610B1563C1512CFB75D8D714A9EEBEA2CA7FF81C3431429D0B9B48D86C') { throw "v0.11 FtpClient hash mismatch" }
+if ($fsHash -ne '6F22D00A4D5EB0E27F6160D982B0DBC0527EC4BBBD9CCD89CAFC463242217337') { throw "v0.11 FtpFileSystem hash mismatch" }
+if ($programHash -ne 'F6F76C86F515C63A4122ECB5814443B3B2D99823A4463F94B5627FA282AB93DB') { throw "v0.11 Program hash mismatch" }
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $proj = Join-Path $src 'TinyFtpDrive.csproj'
