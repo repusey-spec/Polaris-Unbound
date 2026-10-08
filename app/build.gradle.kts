@@ -2,7 +2,7 @@ plugins { id("com.android.application") }
 
 android {
     namespace = "com.polarisunbound.app"
-    compileSdk = 35
+    compileSdk = 36
     buildFeatures { buildConfig = true }
     defaultConfig {
         applicationId = "com.polarisunbound.app"
