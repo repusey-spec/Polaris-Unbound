@@ -3,12 +3,16 @@ $ErrorActionPreference = 'Stop'
 
 $base = Join-Path $Root 'yongbongE-build'
 $b64 = ''
-0..4 | ForEach-Object {
-  $b64 += (Get-Content (Join-Path $base ("v04-src.xz.b64.part" + $_)) -Raw).Trim()
+foreach ($name in @('v04-src.xz.b64.part0a','v04-src.xz.b64.part0b1','v04-src.xz.b64.part0b2','v04-src.xz.b64.part1a','v04-src.xz.b64.part1b','v04-src.xz.b64.part2','v04-src.xz.b64.part3','v04-src.xz.b64.part4')) {
+  $b64 += (Get-Content (Join-Path $base $name) -Raw).Trim()
 }
 $archive = Join-Path $Root 'yongbongE-source-v0.4.tar.xz'
 [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($b64))
-Write-Host "SOURCE SHA256:" (Get-FileHash $archive -Algorithm SHA256).Hash
+$sourceHash = (Get-FileHash $archive -Algorithm SHA256).Hash
+Write-Host "SOURCE SHA256:" $sourceHash
+if ($sourceHash -ne '96889E373572185EC6B97285F8614D1C3DDE189B95CCAE5074EEE1031F07A015') {
+  throw "source hash mismatch: $sourceHash"
+}
 
 $srcroot = Join-Path $Root 'src'
 New-Item -ItemType Directory -Force $srcroot | Out-Null
