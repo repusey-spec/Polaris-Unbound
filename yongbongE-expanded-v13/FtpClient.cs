@@ -533,7 +533,6 @@ namespace TinyFtpDrive
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 LightweightFtpClient worker = BorrowOperationWorker();
-                bool discard = false;
                 try
                 {
                     List<RemoteEntry> result;
@@ -547,7 +546,6 @@ namespace TinyFtpDrive
                 }
                 catch (Exception ex)
                 {
-                    discard = true;
                     ReturnOperationWorker(worker, true);
                     if (attempt == 0 && IsTransportFailure(ex))
                     {
