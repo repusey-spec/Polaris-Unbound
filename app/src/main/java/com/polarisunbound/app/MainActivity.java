@@ -79,6 +79,7 @@ public class MainActivity extends AppCompatActivity {
     private String currentPage="home";
     private String currentFtpMp3Path="";
     private int currentFtpMp3Offset=0;
+    private boolean returnToFavoritesFromPlayer=false;
     private static final String[] RADIO_NAMES={"89.1 KBS CoolFM","91.9 MBC FM4U","93.9 CBS MusicFM","95.9 MBC 표준FM","102.7 AFN EagleFM","107.7 SBS PowerFM"};
     private int presetStation(int slot){ return getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot); }
     private void choosePreset(int slot){ new androidx.appcompat.app.AlertDialog.Builder(this).setTitle((slot+1)+"번 프리셋에 저장").setItems(RADIO_NAMES,(d,which)->{ getSharedPreferences("radio_presets",MODE_PRIVATE).edit().putInt("slot"+slot,which).apply(); showDomestic(); Toast.makeText(this,(slot+1)+"번 → "+RADIO_NAMES[which],Toast.LENGTH_SHORT).show(); }).show(); }
@@ -190,6 +191,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void returnFromNowPlaying(){
+        if(returnToFavoritesFromPlayer){
+            showMp3Favorites();
+            return;
+        }
         MediaMetadataCompat m=lastMetadata;
         if(m==null&&controller!=null) m=controller.getMetadata();
         String mediaId=m==null?null:m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
@@ -384,8 +389,10 @@ public class MainActivity extends AppCompatActivity {
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
-        if(id!=null && (id.startsWith("mp3:")||id.startsWith("ftpmp3:"))){
+        if(id!=null && (id.startsWith("mp3:")||id.startsWith("ftpmp3:")||
+                       id.startsWith("favlocal:")||id.startsWith("favftp:"))){
             selectedRadioId=null;
+            returnToFavoritesFromPlayer=id.startsWith("favlocal:")||id.startsWith("favftp:");
             scheduleHandler.removeCallbacksAndMessages(null);
         }else{
             selectedRadioId=id;
@@ -1027,11 +1034,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean currentMp3Liked(){
-        long id=currentMp3MediaId();
-        if(id<0) return false;
-        Set<String> set=getSharedPreferences("polaris_mp3",MODE_PRIVATE)
-            .getStringSet("favorite_ids",Collections.emptySet());
-        return set.contains(String.valueOf(id));
+        MediaMetadataCompat m=lastMetadata;
+        if(m==null&&controller!=null) m=controller.getMetadata();
+        if(m==null) return false;
+        String mediaId=m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if(mediaId==null) return false;
+        android.content.SharedPreferences p=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+        if(mediaId.startsWith("ftpmp3:")){
+            String rel=android.net.Uri.decode(mediaId.substring("ftpmp3:".length()));
+            return p.getStringSet("favorite_ftp_paths",Collections.emptySet()).contains(rel);
+        }
+        if(mediaId.startsWith("mp3:")){
+            try{
+                long id=Long.parseLong(mediaId.substring(4));
+                return p.getStringSet("favorite_ids",Collections.emptySet())
+                    .contains(String.valueOf(id));
+            }catch(Exception ignored){}
+        }
+        return false;
     }
 
     private TextView playerIconButton(String text,int textSize){
@@ -1512,6 +1532,23 @@ public class MainActivity extends AppCompatActivity {
             labels.addView(sub,new LinearLayout.LayoutParams(-1,-2));
             row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
 
+            if(!entry.directory){
+                TextView star=new TextView(this);
+                boolean liked=isFtpFavorite(entry.relativePath);
+                star.setText(liked?"★":"☆");
+                star.setTextSize(24);
+                star.setTextColor(liked?0xFFFFD54F:0xCCFFFFFF);
+                star.setGravity(17);
+                star.setPadding(dp(6),dp(6),dp(6),dp(6));
+                star.setOnClickListener(v->{
+                    toggleFtpFavorite(entry.relativePath);
+                    boolean now=isFtpFavorite(entry.relativePath);
+                    star.setText(now?"★":"☆");
+                    star.setTextColor(now?0xFFFFD54F:0xCCFFFFFF);
+                });
+                row.addView(star,new LinearLayout.LayoutParams(dp(50),dp(52)));
+            }
+
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
             lp.setMargins(0,dp(4),0,dp(4));
             body.addView(row,lp);
@@ -1858,7 +1895,7 @@ public class MainActivity extends AppCompatActivity {
                 TextView v=mp3Shortcut(items[at][0],items[at][1]);
                 row.addView(v,lp);
                 v.setOnClickListener(x->{
-                    if(at==0) showMp3Ids("좋아요",mp3FavoriteIds());
+                    if(at==0) showMp3Favorites();
                     else if(at==1) showMp3Tracks("전체 곡",null,null,MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC");
                     else if(at==2) showMp3Ftp();
                     else if(at==3) showMp3Albums();
@@ -2102,6 +2139,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addMp3Track(long id,String title,String artist,String album,long albumId){
+        addMp3Track(id,title,artist,album,albumId,"mp3:"+id);
+    }
+
+    private void addMp3Track(
+        long id,String title,String artist,String album,long albumId,String playMediaId){
         String t=title==null||title.isEmpty()?"(제목 없음)":title;
         String a=artist==null?"":artist;
         String al=album==null?"":album;
@@ -2120,9 +2162,11 @@ public class MainActivity extends AppCompatActivity {
         labels.setOrientation(LinearLayout.VERTICAL);
         labels.setPadding(dp(12),0,dp(8),0);
         TextView tt=new TextView(this);
-        tt.setText(t); tt.setTextSize(15); tt.setTypeface(Typeface.DEFAULT,Typeface.BOLD); tt.setTextColor(Color.WHITE); tt.setMaxLines(1);
+        tt.setText(t); tt.setTextSize(15); tt.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        tt.setTextColor(Color.WHITE); tt.setMaxLines(1);
         TextView sub=new TextView(this);
-        sub.setText(a+(al.isEmpty()?"":" · "+al)); sub.setTextSize(12); sub.setTextColor(0xAAFFFFFF); sub.setMaxLines(1);
+        sub.setText(a+(al.isEmpty()?"":" · "+al)); sub.setTextSize(12);
+        sub.setTextColor(0xAAFFFFFF); sub.setMaxLines(1);
         labels.addView(tt);
         labels.addView(sub);
         row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
@@ -2141,7 +2185,113 @@ public class MainActivity extends AppCompatActivity {
         });
         row.addView(star,new LinearLayout.LayoutParams(dp(54),-1));
 
-        row.setOnClickListener(v->playId("mp3:"+id,t));
+        row.setOnClickListener(v->playId(playMediaId,t));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+        lp.setMargins(0,dp(4),0,dp(4));
+        body.addView(row,lp);
+    }
+
+    private List<String> ftpFavoritePaths(){
+        List<String> out=new ArrayList<>(
+            getSharedPreferences("polaris_mp3",MODE_PRIVATE)
+                .getStringSet("favorite_ftp_paths",Collections.emptySet()));
+        Collections.sort(out,String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    private boolean isFtpFavorite(String rel){
+        return getSharedPreferences("polaris_mp3",MODE_PRIVATE)
+            .getStringSet("favorite_ftp_paths",Collections.emptySet())
+            .contains(rel);
+    }
+
+    private void toggleFtpFavorite(String rel){
+        android.content.SharedPreferences p=getSharedPreferences("polaris_mp3",MODE_PRIVATE);
+        Set<String> set=new HashSet<>(
+            p.getStringSet("favorite_ftp_paths",Collections.emptySet()));
+        if(set.contains(rel)) set.remove(rel); else set.add(rel);
+        p.edit().putStringSet("favorite_ftp_paths",set).apply();
+    }
+
+    private void showMp3Favorites(){
+        currentPage="mp3";
+        base("좋아요");
+        addMp3Back();
+
+        int shown=0;
+        for(Long id:mp3FavoriteIds()){
+            android.net.Uri uri=ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,id);
+            String[] p={
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.ALBUM_ID
+            };
+            try(Cursor c=getContentResolver().query(uri,p,null,null,null)){
+                if(c!=null&&c.moveToFirst()){
+                    addMp3Track(id,c.getString(0),c.getString(1),c.getString(2),c.getLong(3),
+                        "favlocal:"+id);
+                    shown++;
+                }
+            }catch(Exception ignored){}
+        }
+
+        for(String rel:ftpFavoritePaths()){
+            addFtpFavoriteRow(rel);
+            shown++;
+        }
+
+        if(shown==0) addMp3Empty();
+    }
+
+    private void addFtpFavoriteRow(String rel){
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12),dp(10),dp(8),dp(10));
+        row.setBackground(roundedBg(0x77232329,16));
+
+        TextView icon=new TextView(this);
+        icon.setText("♫");
+        icon.setTextSize(24);
+        icon.setTextColor(Color.WHITE);
+        icon.setGravity(17);
+        row.addView(icon,new LinearLayout.LayoutParams(dp(50),dp(54)));
+
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView title=new TextView(this);
+        title.setText(PolarisFtp.displayTitle(rel));
+        title.setTextSize(15);
+        title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        title.setTextColor(Color.WHITE);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView sub=new TextView(this);
+        String parent=PolarisFtp.parentRelative(rel);
+        sub.setText(parent.isEmpty()?"FTP":"FTP · "+parent);
+        sub.setTextSize(12);
+        sub.setTextColor(0xAAFFFFFF);
+        sub.setSingleLine(true);
+        labels.addView(title);
+        labels.addView(sub);
+        row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+
+        TextView star=new TextView(this);
+        star.setText("★");
+        star.setTextSize(25);
+        star.setTextColor(0xFFFFD54F);
+        star.setGravity(17);
+        star.setPadding(dp(8),dp(8),dp(8),dp(8));
+        star.setOnClickListener(v->{
+            toggleFtpFavorite(rel);
+            showMp3Favorites();
+        });
+        row.addView(star,new LinearLayout.LayoutParams(dp(54),-1));
+
+        row.setOnClickListener(v->
+            playId("favftp:"+android.net.Uri.encode(rel),PolarisFtp.displayTitle(rel)));
+
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
         lp.setMargins(0,dp(4),0,dp(4));
         body.addView(row,lp);
@@ -2227,7 +2377,7 @@ public class MainActivity extends AppCompatActivity {
     }
     @Override public void onBackPressed(){
         if("mp3_now".equals(currentPage)){
-            showMp3();
+            returnFromNowPlaying();
             return;
         }
         super.onBackPressed();

@@ -2,14 +2,14 @@ plugins { id("com.android.application") }
 
 android {
     namespace = "com.polarisunbound.app"
-    compileSdk = 35
+    compileSdk = 36
     buildFeatures { buildConfig = true }
     defaultConfig {
         applicationId = "com.polarisunbound.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 44
-        versionName = "0.44"
+        versionCode = 45
+        versionName = "0.45"
     }
 
     signingConfigs {
@@ -35,6 +35,6 @@ dependencies {
     implementation("androidx.media:media:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
 }
