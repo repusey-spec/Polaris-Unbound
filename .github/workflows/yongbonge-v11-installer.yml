@@ -21,3 +21,4 @@ jobs:
           name: yongbongE-Setup-v0.11
           path: dist/yongbongE-Setup-v0.11.exe
           if-no-files-found: error
+# verify v0.11 core patch
