@@ -1,0 +1,43 @@
+name: Expand yongbongE v0.11 source
+
+on:
+  push:
+    branches:
+      - yongbonge-v12-build
+    paths:
+      - .github/workflows/expand-yongbonge-v11.yml
+
+permissions:
+  contents: write
+
+jobs:
+  expand:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct v0.11 source
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Save expanded source
+        shell: pwsh
+        run: |
+          $dst = "yongbongE-expanded-v11"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item "src/TinyFtpDrive/FtpClient.cs" "$dst/FtpClient.cs" -Force
+          Copy-Item "src/TinyFtpDrive/FtpFileSystem.cs" "$dst/FtpFileSystem.cs" -Force
+          Copy-Item "src/TinyFtpDrive/Program.cs" "$dst/Program.cs" -Force
+          Copy-Item "src/TinyFtpDrive/TinyFtpDrive.csproj" "$dst/TinyFtpDrive.csproj" -Force
+
+      - name: Commit expanded source
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add yongbongE-expanded-v11
+          git commit -m "chore: expand yongbongE v0.11 source [skip ci]"
+          git push
