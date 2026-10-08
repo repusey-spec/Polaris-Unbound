@@ -280,14 +280,21 @@ public final class PolarisFtp {
             if(!changeToExistingRoot(ftp,cfg.mp3Root))
                 throw new IllegalStateException("MP3 FTP Root가 없습니다: "+cfg.mp3Root);
 
-            long expectedSize=remoteSize(ftp,rel);
+            // Walk the directory first, then RETR the exact LIST filename. This avoids
+            // re-parsing a full slash-separated UTF-8 path on Synology for Korean names.
+            String parent=parentRelative(rel);
+            if(!parent.isEmpty() && !changeRelativeDirectory(ftp,parent))
+                throw new IllegalStateException("FTP 폴더 접근 실패: "+parent);
+            String fileName=rel.substring(rel.lastIndexOf('/')+1);
+
+            long expectedSize=remoteSize(ftp,fileName);
             if(target.isFile() && target.length()>0L &&
                (expectedSize<=0L || target.length()==expectedSize))
                 return target;
 
             if(part.exists()) part.delete();
             try(FileOutputStream out=new FileOutputStream(part)){
-                if(!ftp.retrieveFile(rel,out))
+                if(!ftp.retrieveFile(fileName,out))
                     throw new IllegalStateException("FTP 다운로드 실패: "+ftp.getReplyString().trim());
             }
 
