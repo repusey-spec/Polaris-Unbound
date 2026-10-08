@@ -1,0 +1,64 @@
+name: Build yongbongE v0.12
+
+on:
+  push:
+    branches:
+      - yongbonge-v12-build
+    paths:
+      - .github/workflows/build-yongbonge-v12.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.12 sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v12/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v12/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v12/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.12.0" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Compile v0.12
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "v0.12 build failed" }
+
+      - name: Build v0.12 installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.12.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.12")
+          [IO.File]::WriteAllText("yongbongE-v12.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v12.iss"
+          if ($LASTEXITCODE -ne 0) { throw "v0.12 installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.12.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/FtpClient.cs" -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/FtpFileSystem.cs" -Algorithm SHA256
+          Get-FileHash "src/TinyFtpDrive/Program.cs" -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.12
+          path: dist/yongbongE-Setup-v0.12.exe
+          if-no-files-found: error
+          retention-days: 30
