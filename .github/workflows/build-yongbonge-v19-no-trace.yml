@@ -1,0 +1,80 @@
+name: Build yongbongE v0.19 NO-TRACE
+
+on:
+  push:
+    branches:
+      - yongbonge-v19-no-trace
+    paths:
+      - .github/workflows/build-yongbonge-v19-no-trace.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.19 NO-TRACE sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v19-no-trace/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v19-no-trace/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v19-no-trace/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          Copy-Item "yongbongE-expanded-v19-no-trace/TraceLog.cs" "src/TinyFtpDrive/TraceLog.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.19.0-NO-TRACE" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Verify v0.16 behavior sources unchanged
+        shell: pwsh
+        run: |
+          $pairs = @(
+            @("yongbongE-expanded-v15-trace/FtpClient.cs","yongbongE-expanded-v19-no-trace/FtpClient.cs"),
+            @("yongbongE-expanded-v16-nettrace/FtpFileSystem.cs","yongbongE-expanded-v19-no-trace/FtpFileSystem.cs"),
+            @("yongbongE-expanded-v15-trace/Program.cs","yongbongE-expanded-v19-no-trace/Program.cs")
+          )
+          foreach ($p in $pairs) {
+            $a=(Get-FileHash $p[0] -Algorithm SHA256).Hash
+            $b=(Get-FileHash $p[1] -Algorithm SHA256).Hash
+            Write-Host "$($p[0]) $a"
+            Write-Host "$($p[1]) $b"
+            if ($a -ne $b) { throw "v0.16 behavior source changed: $($p[1])" }
+          }
+          $trace = Get-Content "yongbongE-expanded-v19-no-trace/TraceLog.cs" -Raw
+          if ($trace.Contains("File.AppendAllText") -or $trace.Contains("File.WriteAllText")) { throw "Trace file I/O remains" }
+
+      - name: Compile v0.19 NO-TRACE
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "NO-TRACE build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.19.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.19-NO-TRACE")
+          [IO.File]::WriteAllText("yongbongE-v19-no-trace.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v19-no-trace.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.19-NO-TRACE.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.19-NO-TRACE
+          path: dist/yongbongE-Setup-v0.19-NO-TRACE.exe
+          if-no-files-found: error
+          retention-days: 30
