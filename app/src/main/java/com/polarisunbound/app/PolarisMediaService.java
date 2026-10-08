@@ -1047,30 +1047,126 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         stopForeground(true);
     }
 
+    private boolean isResolverRadio(String id){
+        return "kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id);
+    }
+
+    private boolean looksLikeHls(String url){
+        if(url==null) return false;
+        String lower=url.toLowerCase(Locale.US);
+        return lower.contains(".m3u8") || lower.contains("format=m3u8") || lower.contains("protocol=hls");
+    }
+
+    private String radioUrlLabel(String url){
+        if(url==null||url.isEmpty()) return "-";
+        try{
+            Uri u=Uri.parse(url);
+            String host=u.getHost()==null?"":u.getHost();
+            String path=u.getPath()==null?"":u.getPath();
+            return host+path;
+        }catch(Exception e){
+            int q=url.indexOf('?');
+            return q>0?url.substring(0,q):url;
+        }
+    }
+
+    private void traceRadioHealth(String event){
+        if(currentRadioId==null||player==null) return;
+        long live=C.TIME_UNSET;
+        long buffered=0L;
+        try{ live=player.getCurrentLiveOffset(); }catch(Exception ignored){}
+        try{ buffered=player.getTotalBufferedDuration(); }catch(Exception ignored){}
+        trace("RADIO "+event+" id="+currentRadioId+
+            " liveOffset="+(live==C.TIME_UNSET?"unset":live+"ms")+
+            " buffered="+buffered+"ms src="+radioUrlLabel(currentResolvedRadioUrl));
+    }
+
+    private int httpCodeFromError(Throwable error){
+        Throwable cause=error;
+        while(cause!=null){
+            if(cause instanceof HttpDataSource.InvalidResponseCodeException)
+                return ((HttpDataSource.InvalidResponseCodeException)cause).responseCode;
+            cause=cause.getCause();
+        }
+        return -1;
+    }
+
+    private boolean isPlaylistLifecycleError(Throwable error){
+        Throwable cause=error;
+        while(cause!=null){
+            String name=cause.getClass().getSimpleName();
+            if(name.contains("PlaylistStuck")||name.contains("PlaylistReset")) return true;
+            cause=cause.getCause();
+        }
+        return false;
+    }
+
+    private String describePlaybackError(PlaybackException error){
+        String msg="Media3 "+error.getErrorCodeName()+": "+String.valueOf(error.getMessage());
+        int code=httpCodeFromError(error);
+        if(code>0) msg+=" HTTP "+code;
+        if(isPlaylistLifecycleError(error)) msg+=" playlist-refresh";
+        return msg;
+    }
+
+    private void publishRadioRecovering(String message){
+        long actions=PlaybackStateCompat.ACTION_PLAY|
+            PlaybackStateCompat.ACTION_PAUSE|
+            PlaybackStateCompat.ACTION_STOP|
+            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|
+            PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH|
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT|
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS|
+            PlaybackStateCompat.ACTION_FAST_FORWARD|
+            PlaybackStateCompat.ACTION_REWIND;
+        session.setPlaybackState(new PlaybackStateCompat.Builder()
+            .setActions(actions)
+            .setState(PlaybackStateCompat.STATE_BUFFERING,currentPlayerPosition(),0f,
+                android.os.SystemClock.elapsedRealtime())
+            .setErrorMessage(message)
+            .build());
+    }
+
     private void startRadio(String id){
         String url=STREAMS.get(id);
         if(url==null || userStopped) return;
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
+            currentResolvedRadioUrl=null;
             trace("Gallery Live365 resolver start: "+url);
             resolveGalleryAndPlay(id,url);
-        } else if("kr1".equals(id)||"kr2".equals(id)||"kr4".equals(id)||"kr6".equals(id)){
+        } else if(isResolverRadio(id)){
             trace("resolver start: "+id);
             resolveAndPlay(id,url);
         } else {
             trace("direct play start: "+id);
+            currentResolvedRadioUrl=url;
             playUrl(url,TITLES.get(id),"kiis".equals(id) ? "Los Angeles" : "Live");
         }
+    }
+
+    private void recoverRadioAfterError(PlaybackException error){
+        if(userStopped||currentRadioId==null) return;
+        int http=httpCodeFromError(error);
+        boolean staleSource=(http==401||http==403||isPlaylistLifecycleError(error));
+        if(staleSource && isResolverRadio(currentRadioId)){
+            trace("RADIO fresh-source recovery: http="+http+
+                " playlist="+isPlaylistLifecycleError(error));
+            radioSoftRetryCount=0;
+            scheduleHardRadioRetry(150L);
+            return;
+        }
+        scheduleSoftRadioRetry();
     }
 
     private void scheduleSoftRadioRetry(){
         if(userStopped || currentRadioId==null || player==null) return;
 
         radioSoftRetryCount++;
-        if(radioSoftRetryCount>3){
-            trace("RADIO soft retry exhausted -> hard resolver retry");
+        if(radioSoftRetryCount>2){
+            trace("RADIO soft retry exhausted -> fresh/hard source");
             radioSoftRetryCount=0;
-            scheduleRetry();
+            scheduleHardRadioRetry(250L);
             return;
         }
 
@@ -1078,7 +1174,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         final int attempt=radioSoftRetryCount;
         final long failedPosition=currentPlayerPosition();
         final boolean seekable=player.isCurrentMediaItemSeekable();
-        long delay=attempt==1 ? 1500L : attempt==2 ? 3500L : 7000L;
+        long delay=attempt==1 ? 500L : 1500L;
 
         trace("RADIO soft retry #"+attempt+" same source in "+delay+
             "ms pos="+failedPosition+" seekable="+seekable);
@@ -1086,13 +1182,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         retryHandler.postDelayed(() -> {
             if(userStopped || !id.equals(currentRadioId)) return;
             try{
-                // Do not resolve a new stream URL here. Retry the MediaItem already held
-                // by ExoPlayer, preserving the old timeline position when the source permits it.
-                if(seekable && failedPosition>0L)
-                    player.seekTo(failedPosition);
+                if(seekable && failedPosition>0L) player.seekTo(failedPosition);
                 player.prepare();
                 if(requestPlaybackFocus()) player.play();
                 publishState();
+                traceRadioHealth("SOFT-RETRY");
             }catch(Throwable e){
                 trace("RADIO soft retry exception: "+e);
                 scheduleSoftRadioRetry();
@@ -1100,23 +1194,68 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         },delay);
     }
 
-    private void scheduleRetry(){
+    private void scheduleHardRadioRetry(long delay){
         if(userStopped || currentRadioId==null) return;
         if("gallery".equals(currentRadioId) && retryCount>=3){
             trace("Gallery retry limit reached");
             return;
         }
         retryCount++;
-        long delay=retryCount==1 ? 2000L : retryCount==2 ? 5000L : 10000L;
         final String id=currentRadioId;
         trace("RADIO HARD retry scheduled: "+id+" in "+delay+"ms");
         retryHandler.removeCallbacksAndMessages(null);
         retryHandler.postDelayed(() -> {
-            if(!userStopped && id.equals(currentRadioId)){
-                trace("RADIO HARD retry start: "+id+" #"+retryCount);
-                startRadio(id);
-            }
-        },delay);
+            if(userStopped || !id.equals(currentRadioId)) return;
+            trace("RADIO HARD retry start: "+id+" #"+retryCount);
+            if(isResolverRadio(id)) recoverResolverRadio(id);
+            else startRadio(id);
+        },Math.max(0L,delay));
+    }
+
+    private void scheduleRetry(){
+        long delay=retryCount==0 ? 750L : retryCount==1 ? 2000L : 5000L;
+        scheduleHardRadioRetry(delay);
+    }
+
+    private void recoverResolverRadio(String id){
+        String standby=standbyResolvedUrls.remove(id);
+        Long at=standbyResolvedAt.remove(id);
+        long age=at==null?Long.MAX_VALUE:(System.currentTimeMillis()-at);
+        if(standby!=null && age<4L*60L*1000L &&
+           !standby.equals(currentResolvedRadioUrl)){
+            trace("RADIO standby source -> "+id+" age="+age+"ms");
+            currentResolvedRadioUrl=standby;
+            playUrl(standby,TITLES.get(id),"Live");
+            return;
+        }
+        trace("RADIO standby unavailable -> resolver now: "+id);
+        resolveAndPlay(id,STREAMS.get(id));
+    }
+
+    private void scheduleResolverPrefetch(String id){
+        if(!isResolverRadio(id)) return;
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.postDelayed(() -> {
+            if(userStopped||!id.equals(currentRadioId)) return;
+            final String lookup=STREAMS.get(id);
+            resolver.execute(() -> {
+                try{
+                    String fresh=resolveStreamUrl(id,lookup);
+                    if(fresh!=null && id.equals(currentRadioId)){
+                        standbyResolvedUrls.put(id,fresh);
+                        standbyResolvedAt.put(id,System.currentTimeMillis());
+                        trace("RADIO standby refreshed: "+id+" -> "+radioUrlLabel(fresh));
+                    }
+                }catch(Exception e){
+                    trace("RADIO standby refresh error: "+id+" / "+e);
+                }finally{
+                    runOnPlayerThread(() -> {
+                        if(!userStopped&&id.equals(currentRadioId))
+                            scheduleResolverPrefetch(id);
+                    });
+                }
+            });
+        },RADIO_RESOLVER_PREFETCH_MS);
     }
 
     private void playFtpAudio(String id){
@@ -1836,42 +1975,53 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
 
+    private String resolveStreamUrl(String id,String lookupUrl) throws Exception {
+        if(lookupUrl==null||lookupUrl.isEmpty()) throw new IOException("No resolver URL");
+        HttpURLConnection con=(HttpURLConnection)new URL(lookupUrl).openConnection();
+        try{
+            con.setConnectTimeout(8000);
+            con.setReadTimeout(8000);
+            con.setInstanceFollowRedirects(true);
+            con.setRequestProperty("User-Agent","Mozilla/5.0");
+            StringBuilder b=new StringBuilder();
+            try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){
+                String line;
+                while((line=r.readLine())!=null) b.append(line);
+            }
+            String raw=b.toString();
+            int response=con.getResponseCode();
+            trace("resolver HTTP "+response+": "+id+" bytes="+raw.length());
+            String resolved=extractStreamUrl(raw);
+            if(resolved==null){
+                String preview=raw.replace("\n"," ").replace("\r"," ");
+                if(preview.length()>240) preview=preview.substring(0,240);
+                trace("resolver no URL: "+id+" body="+preview);
+                throw new IOException("No stream URL in resolver response");
+            }
+            trace("resolver URL: "+id+" -> "+radioUrlLabel(resolved));
+            return resolved;
+        } finally {
+            con.disconnect();
+        }
+    }
+
     private void resolveAndPlay(final String id,final String lookupUrl){
         resolver.execute(() -> {
             try{
-                HttpURLConnection con=(HttpURLConnection)new URL(lookupUrl).openConnection();
-                con.setConnectTimeout(8000); con.setReadTimeout(8000);
-                con.setInstanceFollowRedirects(true);
-                con.setRequestProperty("User-Agent","Mozilla/5.0");
-                StringBuilder b=new StringBuilder();
-                try(BufferedReader r=new BufferedReader(new InputStreamReader(con.getInputStream()))){
-                    String line; while((line=r.readLine())!=null) b.append(line);
-                }
-                String raw=b.toString();
-                trace("resolver HTTP "+con.getResponseCode()+": "+id+" bytes="+raw.length());
-                String resolved=extractStreamUrl(raw);
-                if(resolved==null){
-                    String preview=raw.replace("\n"," ").replace("\r"," ");
-                    if(preview.length()>240) preview=preview.substring(0,240);
-                    trace("resolver no URL: "+id+" body="+preview);
-                    throw new IOException("No stream URL in resolver response");
-                }
-                trace("resolver URL: "+id+" -> "+resolved);
-                final String u=resolved;
+                final String resolved=resolveStreamUrl(id,lookupUrl);
                 runOnPlayerThread(() -> {
-                    if(!userStopped && id.equals(currentRadioId)) playUrl(u,TITLES.get(id),"Live");
+                    if(!userStopped && id.equals(currentRadioId)){
+                        currentResolvedRadioUrl=resolved;
+                        playUrl(resolved,TITLES.get(id),"Live");
+                    }
                 });
             }catch(Exception e){
                 runOnPlayerThread(() -> {
-                    session.setMetadata(new MediaMetadataCompat.Builder()
-                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE,TITLES.get(id))
-                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,"Stream resolver error").build());
-                    session.setPlaybackState(new PlaybackStateCompat.Builder()
-                        .setActions(PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID|PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH)
-                        .setState(PlaybackStateCompat.STATE_ERROR,0,1f)
-                        .setErrorMessage(e.getMessage()).build());
                     trace("resolver error: "+id+" / "+e);
-                    if(id.equals(currentRadioId)) scheduleRetry();
+                    if(id.equals(currentRadioId)){
+                        publishRadioRecovering("resolver: "+e.getMessage());
+                        scheduleRetry();
+                    }
                 });
             }
         });
@@ -1906,29 +2056,42 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void playUrlOnMain(String url,String title,String subtitle){
-        trace("PLAYER enter: "+title);
+        trace("PLAYER enter: "+title+" src="+radioUrlLabel(url));
         try{
-        String metaTitle=title;
-        String metaArtist=subtitle;
-        if(currentRadioId!=null && STREAMS.containsKey(currentRadioId)){
-            metaTitle=radioProgramTitle(currentRadioId);
-            metaArtist=TITLES.get(currentRadioId);
+            String metaTitle=title;
+            String metaArtist=subtitle;
+            if(currentRadioId!=null && STREAMS.containsKey(currentRadioId)){
+                metaTitle=radioProgramTitle(currentRadioId);
+                metaArtist=TITLES.get(currentRadioId);
+            }
+            MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE,metaTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,metaArtist);
+            if(currentRadioId!=null && STREAMS.containsKey(currentRadioId))
+                mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,
+                    StationArt.bitmap(this,currentRadioId,256));
+            session.setMetadata(mb.build());
+
+            MediaItem.Builder itemBuilder=new MediaItem.Builder().setUri(url);
+            if(looksLikeHls(url)){
+                itemBuilder
+                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder()
+                        .setTargetOffsetMs(RADIO_HLS_TARGET_OFFSET_MS)
+                        .build());
+                trace("RADIO HLS target live offset="+RADIO_HLS_TARGET_OFFSET_MS+"ms");
+            }
+            currentResolvedRadioUrl=url;
+            player.setMediaItem(itemBuilder.build());
+            player.prepare();
+            if(requestPlaybackFocus()) player.play();
+            else trace("PLAYER audio focus denied");
+            publishState();
+            if(currentRadioId!=null) scheduleResolverPrefetch(currentRadioId);
+        }catch(Throwable e){
+            trace("PLAYER ERROR: "+e);
+            publishError("player: "+e);
         }
-        MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE,metaTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,metaArtist);
-        if(currentRadioId!=null && STREAMS.containsKey(currentRadioId))
-            mb.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,currentRadioId,256));
-        session.setMetadata(mb.build());
-        trace("PLAYER setMediaItem");
-        player.setMediaItem(MediaItem.fromUri(url));
-        trace("PLAYER prepare");
-        player.prepare();
-        trace("PLAYER play");
-        if(requestPlaybackFocus()) player.play();
-        else trace("PLAYER audio focus denied");
-        publishState();
-        }catch(Throwable e){ trace("PLAYER ERROR: "+e); publishError("player: "+e); }
     }
 
     private void publishState(){
