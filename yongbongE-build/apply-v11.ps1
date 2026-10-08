@@ -13,9 +13,16 @@ $patch = Join-Path $Root 'v11-core.patch'
 if ($LASTEXITCODE -ne 0) { throw 'v0.11 patch extract failed' }
 
 Push-Location $SourceDir
-git apply --ignore-space-change --ignore-whitespace --whitespace=nowarn $patch
+git apply --verbose --ignore-space-change --ignore-whitespace --whitespace=nowarn $patch
 if ($LASTEXITCODE -ne 0) { throw 'v0.11 core patch failed' }
 Pop-Location
+
+$clientCheck = [IO.File]::ReadAllText((Join-Path $SourceDir 'FtpClient.cs'))
+$fsCheck = [IO.File]::ReadAllText((Join-Path $SourceDir 'FtpFileSystem.cs'))
+if (-not $clientCheck.Contains('private const int MetadataSlotWaitTimeoutMs = 250;')) { throw 'v0.11 client patch marker missing' }
+if (-not $clientCheck.Contains('TimeSpan.FromSeconds(30)')) { throw 'v0.11 directory-cache marker missing' }
+if (-not $fsCheck.Contains('private const long MaxRuntimeLogBytes = 1024L * 1024L;')) { throw 'v0.11 filesystem patch marker missing' }
+if (-not $fsCheck.Contains('private readonly object _adsSync = new object();')) { throw 'v0.11 ADS-lock marker missing' }
 
 $programPath = Join-Path $SourceDir 'Program.cs'
 $text = [IO.File]::ReadAllText($programPath)
