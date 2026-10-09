@@ -258,7 +258,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onFastForward(){ skipCurrent(1); }
             @Override public void onRewind(){ skipCurrent(-1); }
             @Override public void onPause(){
-                saveLastMp3Position();
+                saveLastPlaybackPosition();
                 userStopped=true;
                 resumeAfterTransientFocusLoss=false;
                 setResumeAllowed(false);
@@ -273,7 +273,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onSeekTo(long pos){
                 if(player!=null){
                     player.seekTo(Math.max(0L,pos));
-                    saveLastMp3Position();
+                    saveLastPlaybackPosition();
                     publishState();
                 }
             }
@@ -328,7 +328,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 return super.onMediaButtonEvent(mediaButtonIntent);
             }
             @Override public void onStop(){
-                saveLastMp3Position();
+                saveLastPlaybackPosition();
                 userStopped=true;
                 resumeAfterTransientFocusLoss=false;
                 setResumeAllowed(false);
@@ -508,7 +508,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
         if(aaProjectionConnected){
             trace("AA projection disconnected");
-            saveLastMp3Position();
+            saveLastPlaybackPosition();
             aaProjectionConnected=false;
             sessionRestoreConsumed=false;
             resumeAfterTransientFocusLoss=false;
@@ -2714,7 +2714,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onDestroy(){
-        saveLastMp3Position();
+        saveLastPlaybackPosition();
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
         radioBufferingHandler.removeCallbacksAndMessages(null);
