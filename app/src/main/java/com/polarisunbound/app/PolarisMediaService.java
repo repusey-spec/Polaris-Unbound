@@ -1161,8 +1161,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         rememberRadioForResume(id);
         retryCount=0;
         radioSoftRetryCount=0;
+        radioHasPlayed=false;
         userStopped=false;
         retryHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
         enterPlaybackForeground(TITLES.get(id));
         startRadio(id);
     }
@@ -1323,6 +1326,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void startRadio(String id){
         String url=STREAMS.get(id);
         if(url==null || userStopped) return;
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        radioHasPlayed=false;
+        // A manual/new tune must not inherit an old standby token for the same station.
+        standbyResolvedUrls.remove(id);
+        standbyResolvedAt.remove(id);
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
             currentResolvedRadioUrl=null;
@@ -1338,16 +1346,55 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
     }
 
+    private boolean hasFreshStandby(String id){
+        if(id==null) return false;
+        String standby=standbyResolvedUrls.get(id);
+        Long at=standbyResolvedAt.get(id);
+        if(standby==null||at==null) return false;
+        long age=System.currentTimeMillis()-at;
+        return age>=0L && age<4L*60L*1000L &&
+            !standby.equals(currentResolvedRadioUrl);
+    }
+
+    private void scheduleRadioBufferHandoff(){
+        if(userStopped||currentRadioId==null||player==null) return;
+        if(!radioHasPlayed||!isResolverRadio(currentRadioId)) return;
+
+        final String id=currentRadioId;
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.postDelayed(() -> {
+            if(userStopped||!id.equals(currentRadioId)||player==null) return;
+            if(player.getPlaybackState()!=Player.STATE_BUFFERING) return;
+
+            traceRadioHealth("BUFFERING-HANDOFF");
+            publishRadioRecovering("라이브 스트림 연결 전환 중");
+            retryHandler.removeCallbacksAndMessages(null);
+            radioSoftRetryCount=0;
+            // Prefer the pre-resolved source. If it is unavailable, resolve a fresh
+            // source immediately instead of waiting for a long rebuffer window.
+            recoverResolverRadio(id);
+        },1200L);
+    }
+
     private void recoverRadioAfterError(PlaybackException error){
         if(userStopped||currentRadioId==null) return;
         int http=httpCodeFromError(error);
         boolean staleSource=(http==401||http==403||isPlaylistLifecycleError(error));
-        if(staleSource && isResolverRadio(currentRadioId)){
-            trace("RADIO fresh-source recovery: http="+http+
-                " playlist="+isPlaylistLifecycleError(error));
-            radioSoftRetryCount=0;
-            scheduleHardRadioRetry(150L);
-            return;
+
+        if(isResolverRadio(currentRadioId)){
+            if(hasFreshStandby(currentRadioId)){
+                trace("RADIO error -> immediate standby handoff: http="+http);
+                radioSoftRetryCount=0;
+                recoverResolverRadio(currentRadioId);
+                return;
+            }
+            if(staleSource){
+                trace("RADIO stale source -> immediate fresh resolver: http="+http+
+                    " playlist="+isPlaylistLifecycleError(error));
+                radioSoftRetryCount=0;
+                recoverResolverRadio(currentRadioId);
+                return;
+            }
         }
         scheduleSoftRadioRetry();
     }
@@ -1355,19 +1402,20 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void scheduleSoftRadioRetry(){
         if(userStopped || currentRadioId==null || player==null) return;
 
+        final String id=currentRadioId;
         radioSoftRetryCount++;
-        if(radioSoftRetryCount>2){
+        int maxAttempts=isResolverRadio(id)?1:2;
+        if(radioSoftRetryCount>maxAttempts){
             trace("RADIO soft retry exhausted -> fresh/hard source");
             radioSoftRetryCount=0;
-            scheduleHardRadioRetry(250L);
+            scheduleHardRadioRetry(isResolverRadio(id)?100L:250L);
             return;
         }
 
-        final String id=currentRadioId;
         final int attempt=radioSoftRetryCount;
         final long failedPosition=currentPlayerPosition();
         final boolean seekable=player.isCurrentMediaItemSeekable();
-        long delay=attempt==1 ? 500L : 1500L;
+        long delay=isResolverRadio(id) ? 300L : (attempt==1 ? 500L : 1500L);
 
         trace("RADIO soft retry #"+attempt+" same source in "+delay+
             "ms pos="+failedPosition+" seekable="+seekable);
@@ -1411,6 +1459,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void recoverResolverRadio(String id){
+        radioBufferingHandler.removeCallbacksAndMessages(null);
         String standby=standbyResolvedUrls.remove(id);
         Long at=standbyResolvedAt.remove(id);
         long age=at==null?Long.MAX_VALUE:(System.currentTimeMillis()-at);
@@ -1461,6 +1510,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
         final String rel=relative.trim();
         final String fallbackTitle=PolarisFtp.displayTitle(rel);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
+        radioHasPlayed=false;
         currentRadioId=null;
         currentMp3Id=-1L;
         currentMp3Queue.clear();
@@ -1601,6 +1653,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void playLocalAudioId(long mediaId,long startPositionMs,boolean restoring){
         try{
+            radioBufferingHandler.removeCallbacksAndMessages(null);
+            resolverRefreshHandler.removeCallbacksAndMessages(null);
+            radioHasPlayed=false;
             currentFtpMp3Path=null;
             ftpMp3Preparing=false;
             currentRadioId=null;
