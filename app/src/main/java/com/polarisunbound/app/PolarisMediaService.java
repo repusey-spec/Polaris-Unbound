@@ -59,6 +59,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final ExecutorService ftpExecutor=Executors.newFixedThreadPool(2);
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler resolverRefreshHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler radioBufferingHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -68,6 +69,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final Map<String,Long> standbyResolvedAt=new ConcurrentHashMap<>();
     private int retryCount=0;
     private int radioSoftRetryCount=0;
+    private boolean radioHasPlayed=false;
     private boolean userStopped=false;
     private boolean resumeAfterTransientFocusLoss=false;
     private static final String PREFS="polaris_playback_state";
@@ -100,7 +102,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final List<String> currentFavoriteQueue=new ArrayList<>();
     private int currentFavoriteIndex=-1;
     private boolean favoriteQueueActive=false;
-    private Bitmap ftpBrowseArt=null;
     private int mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
     private boolean mp3Shuffle=false;
     private boolean mp3EndHandled=false;
@@ -156,7 +157,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         DefaultMediaSourceFactory mediaSourceFactory=new DefaultMediaSourceFactory(playerDataFactory)
             .setLoadErrorHandlingPolicy(radioLoadErrorPolicy);
         DefaultLoadControl loadControl=new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30000,60000,1500,5000)
+            // Keep a large reservoir, but do not force a five-second refill after
+            // a transient HLS gap. Resume once ~1.5 s of audio is available.
+            .setBufferDurationsMs(30000,60000,1500,1500)
             .build();
         player=new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -345,15 +348,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         player.addListener(new Player.Listener(){
             @Override public void onIsPlayingChanged(boolean playing){
                 if(playing && currentRadioId!=null){
+                    radioHasPlayed=true;
                     radioSoftRetryCount=0;
                     retryCount=0;
+                    radioBufferingHandler.removeCallbacksAndMessages(null);
                     traceRadioHealth("PLAYING");
                 }
                 publishState();
             }
             @Override public void onPlaybackStateChanged(int state){
-                if(currentRadioId!=null && state==Player.STATE_BUFFERING)
-                    traceRadioHealth("BUFFERING");
+                if(currentRadioId!=null){
+                    if(state==Player.STATE_BUFFERING){
+                        traceRadioHealth("BUFFERING");
+                        scheduleRadioBufferHandoff();
+                    }else if(state==Player.STATE_READY){
+                        radioBufferingHandler.removeCallbacksAndMessages(null);
+                    }
+                }
                 publishState();
                 if(state==Player.STATE_ENDED && !mp3EndHandled){
                     if(favoriteQueueActive){
@@ -369,6 +380,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }
             }
             @Override public void onPlayerError(PlaybackException error){
+                radioBufferingHandler.removeCallbacksAndMessages(null);
                 String msg=describePlaybackError(error);
                 trace("PLAYER ERROR: "+msg);
                 if(currentRadioId!=null && !userStopped){
@@ -1864,16 +1876,18 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     String title=safe(c.getString(0));
                     String artist=safe(c.getString(1));
                     String album=safe(c.getString(2));
-                    long albumId=c.getLong(3);
                     String sub=artist+(album.isEmpty()?"":" · "+album);
-                    out.add(itemWithAlbumArt("favlocal:"+mediaId,title,sub,albumId));
+                    out.add(listTextItem("favlocal:"+mediaId,title,sub));
                 }
             }catch(SecurityException ignored){}
         }
         for(String rel:ftpFavoritePaths()){
             String parent=PolarisFtp.parentRelative(rel);
             String sub=parent.isEmpty()?"FTP":"FTP · "+parent;
-            out.add(item("favftp:"+Uri.encode(rel),PolarisFtp.displayTitle(rel),sub));
+            out.add(listTextItem(
+                "favftp:"+Uri.encode(rel),
+                PolarisFtp.displayTitle(rel),
+                sub));
         }
         return out;
     }
@@ -2395,31 +2409,41 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setExtras(e).build(),
             android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
     }
-    private Bitmap ftpMusicArt(){
-        if(ftpBrowseArt!=null&&!ftpBrowseArt.isRecycled()) return ftpBrowseArt;
-        int size=192;
-        Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
-        android.graphics.Canvas canvas=new android.graphics.Canvas(b);
-        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(0xFF34343C);
-        canvas.drawRect(0,0,size,size,paint);
-        paint.setColor(0xFFF2F2F4);
-        paint.setTextAlign(android.graphics.Paint.Align.CENTER);
-        paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        paint.setTextSize(104f);
-        canvas.drawText("♪",size/2f,size*0.62f,paint);
-        paint.setTextSize(26f);
-        canvas.drawText("FTP",size/2f,size*0.86f,paint);
-        ftpBrowseArt=b;
-        return b;
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem listTextFolder(
+        String id,String title){
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+        e.putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT",1);
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            new MediaDescriptionCompat.Builder()
+                .setMediaId(id)
+                .setTitle(title)
+                .setExtras(e)
+                .build(),
+            android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
+    }
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem listTextItem(
+        String id,String title,String sub){
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            new MediaDescriptionCompat.Builder()
+                .setMediaId(id)
+                .setTitle(title)
+                .setSubtitle(sub)
+                .setExtras(e)
+                .build(),
+            android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
     }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem item(String id,String title,String sub){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
             .setMediaId(id).setTitle(title).setSubtitle(sub);
         if(STREAMS.containsKey(id)) b.setIconBitmap(StationArt.bitmap(this,id,128));
-        else if(id!=null && (id.startsWith("ftpmp3:")||id.startsWith("favftp:")))
-            b.setIconBitmap(ftpMusicArt());
         Bundle e=new Bundle();
         e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
         b.setExtras(e);
@@ -2456,9 +2480,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 PolarisFtp.DirectoryPage page=PolarisFtp.listMp3(this,rel,offset,200);
                 for(PolarisFtp.Entry entry:page.entries){
                     if(entry.directory){
-                        out.add(folder("ftpdir:"+Uri.encode(entry.relativePath),entry.name));
+                        out.add(listTextFolder(
+                            "ftpdir:"+Uri.encode(entry.relativePath),
+                            entry.name));
                     }else{
-                        out.add(item(
+                        out.add(listTextItem(
                             "ftpmp3:"+Uri.encode(entry.relativePath),
                             PolarisFtp.displayTitle(entry.name),
                             "FTP · "+formatFtpBytes(entry.size)));
@@ -2467,7 +2493,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
                 if(page.hasMore()){
                     int next=page.offset+page.entries.size();
-                    out.add(folder(
+                    out.add(listTextFolder(
                         "ftppage:"+next+":"+Uri.encode(rel),
                         "다음 200개 →"));
                 } 
@@ -2585,6 +2611,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         saveLastMp3Position();
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
         programHandler.removeCallbacksAndMessages(null);
         positionHandler.removeCallbacksAndMessages(null);
         restoreHandler.removeCallbacksAndMessages(null);
