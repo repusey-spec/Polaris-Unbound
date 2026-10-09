@@ -1,0 +1,71 @@
+name: Build yongbongE v0.21 NO-ADS
+
+on:
+  push:
+    branches:
+      - yongbonge-v21-no-ads
+    paths:
+      - .github/workflows/build-yongbonge-v21-no-ads.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.20 base plus no-ADS filesystem
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v15-trace/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v21-no-ads/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v15-trace/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          Copy-Item "yongbongE-expanded-v20-trace-nodisk/TraceLog.cs" "src/TinyFtpDrive/TraceLog.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.21.0-NO-ADS" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Verify no ADS exposure
+        shell: pwsh
+        run: |
+          $fs = Get-Content "src/TinyFtpDrive/FtpFileSystem.cs" -Raw
+          if (!$fs.Contains("host.NamedStreams = false;")) { throw "NamedStreams not disabled" }
+          if ($fs.Contains("host.NamedStreams = true;")) { throw "NamedStreams still enabled" }
+          if (!$fs.Contains("ADS disabled in v0.21.")) { throw "ADS cleanup path not disabled" }
+          if ($fs.Contains("Directory.CreateDirectory(_adsDir);")) { throw "ADS sidecar directory still created" }
+
+      - name: Compile v0.21 NO-ADS
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "NO-ADS build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.21.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.21-NO-ADS")
+          [IO.File]::WriteAllText("yongbongE-v21-no-ads.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v21-no-ads.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.21-NO-ADS.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.21-NO-ADS
+          path: dist/yongbongE-Setup-v0.21-NO-ADS.exe
+          if-no-files-found: error
+          retention-days: 30
