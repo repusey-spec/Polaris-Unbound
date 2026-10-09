@@ -59,6 +59,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final ExecutorService ftpExecutor=Executors.newFixedThreadPool(2);
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler resolverRefreshHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler radioBufferingHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -68,6 +69,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final Map<String,Long> standbyResolvedAt=new ConcurrentHashMap<>();
     private int retryCount=0;
     private int radioSoftRetryCount=0;
+    private boolean radioHasPlayed=false;
     private boolean userStopped=false;
     private boolean resumeAfterTransientFocusLoss=false;
     private static final String PREFS="polaris_playback_state";
@@ -100,7 +102,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final List<String> currentFavoriteQueue=new ArrayList<>();
     private int currentFavoriteIndex=-1;
     private boolean favoriteQueueActive=false;
-    private Bitmap ftpBrowseArt=null;
     private int mp3RepeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
     private boolean mp3Shuffle=false;
     private boolean mp3EndHandled=false;
@@ -156,7 +157,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         DefaultMediaSourceFactory mediaSourceFactory=new DefaultMediaSourceFactory(playerDataFactory)
             .setLoadErrorHandlingPolicy(radioLoadErrorPolicy);
         DefaultLoadControl loadControl=new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30000,60000,1500,5000)
+            // Keep a large reservoir, but do not force a five-second refill after
+            // a transient HLS gap. Resume once ~1.5 s of audio is available.
+            .setBufferDurationsMs(30000,60000,1500,1500)
             .build();
         player=new ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -257,6 +260,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 setResumeAllowed(false);
                 retryHandler.removeCallbacksAndMessages(null);
                 resolverRefreshHandler.removeCallbacksAndMessages(null);
+                radioBufferingHandler.removeCallbacksAndMessages(null);
                 restoreHandler.removeCallbacksAndMessages(null);
                 player.pause();
                 publishState();
@@ -333,7 +337,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 synchronized(currentFtpMp3Queue){ currentFtpMp3Queue.clear(); }
                 retryCount=0;
                 radioSoftRetryCount=0;
+                radioHasPlayed=false;
                 retryHandler.removeCallbacksAndMessages(null);
+                resolverRefreshHandler.removeCallbacksAndMessages(null);
+                radioBufferingHandler.removeCallbacksAndMessages(null);
                 restoreHandler.removeCallbacksAndMessages(null);
                 leavePlaybackForeground();
                 abandonPlaybackFocus();
@@ -345,15 +352,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         player.addListener(new Player.Listener(){
             @Override public void onIsPlayingChanged(boolean playing){
                 if(playing && currentRadioId!=null){
+                    radioHasPlayed=true;
                     radioSoftRetryCount=0;
                     retryCount=0;
+                    radioBufferingHandler.removeCallbacksAndMessages(null);
                     traceRadioHealth("PLAYING");
                 }
                 publishState();
             }
             @Override public void onPlaybackStateChanged(int state){
-                if(currentRadioId!=null && state==Player.STATE_BUFFERING)
-                    traceRadioHealth("BUFFERING");
+                if(currentRadioId!=null){
+                    if(state==Player.STATE_BUFFERING){
+                        traceRadioHealth("BUFFERING");
+                        scheduleRadioBufferHandoff();
+                    }else if(state==Player.STATE_READY){
+                        radioBufferingHandler.removeCallbacksAndMessages(null);
+                    }
+                }
                 publishState();
                 if(state==Player.STATE_ENDED && !mp3EndHandled){
                     if(favoriteQueueActive){
@@ -369,6 +384,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }
             }
             @Override public void onPlayerError(PlaybackException error){
+                radioBufferingHandler.removeCallbacksAndMessages(null);
                 String msg=describePlaybackError(error);
                 trace("PLAYER ERROR: "+msg);
                 if(currentRadioId!=null && !userStopped){
@@ -477,6 +493,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             sessionRestoreConsumed=false;
             resumeAfterTransientFocusLoss=false;
             retryHandler.removeCallbacksAndMessages(null);
+            resolverRefreshHandler.removeCallbacksAndMessages(null);
+            radioBufferingHandler.removeCallbacksAndMessages(null);
             restoreHandler.removeCallbacksAndMessages(null);
             if(player!=null){
                 try{ player.pause(); }catch(Exception ignored){}
@@ -487,6 +505,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             currentFtpMp3Path=null;
             retryCount=0;
             radioSoftRetryCount=0;
+            radioHasPlayed=false;
             leavePlaybackForeground();
             abandonPlaybackFocus();
             publishState();
@@ -532,6 +551,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 currentMp3Id=-1L;
                 retryCount=0;
                 radioSoftRetryCount=0;
+                radioHasPlayed=false;
                 userStopped=false;
                 rememberRadioForResume(id);
                 enterPlaybackForeground(TITLES.get(id));
@@ -1005,9 +1025,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         enterPlaybackForeground(TITLES.get(id));
         retryCount=0;
         radioSoftRetryCount=0;
+        radioHasPlayed=false;
         userStopped=false;
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
         trace("VOICE radio -> "+id+" "+TITLES.get(id));
         startRadio(id);
     }
@@ -1149,8 +1171,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         rememberRadioForResume(id);
         retryCount=0;
         radioSoftRetryCount=0;
+        radioHasPlayed=false;
         userStopped=false;
         retryHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
         enterPlaybackForeground(TITLES.get(id));
         startRadio(id);
     }
@@ -1311,6 +1336,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void startRadio(String id){
         String url=STREAMS.get(id);
         if(url==null || userStopped) return;
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        radioHasPlayed=false;
+        // A manual/new tune must not inherit an old standby token for the same station.
+        standbyResolvedUrls.remove(id);
+        standbyResolvedAt.remove(id);
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
             currentResolvedRadioUrl=null;
@@ -1326,16 +1356,55 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
     }
 
+    private boolean hasFreshStandby(String id){
+        if(id==null) return false;
+        String standby=standbyResolvedUrls.get(id);
+        Long at=standbyResolvedAt.get(id);
+        if(standby==null||at==null) return false;
+        long age=System.currentTimeMillis()-at;
+        return age>=0L && age<4L*60L*1000L &&
+            !standby.equals(currentResolvedRadioUrl);
+    }
+
+    private void scheduleRadioBufferHandoff(){
+        if(userStopped||currentRadioId==null||player==null) return;
+        if(!radioHasPlayed||!isResolverRadio(currentRadioId)) return;
+
+        final String id=currentRadioId;
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.postDelayed(() -> {
+            if(userStopped||!id.equals(currentRadioId)||player==null) return;
+            if(player.getPlaybackState()!=Player.STATE_BUFFERING) return;
+
+            traceRadioHealth("BUFFERING-HANDOFF");
+            publishRadioRecovering("라이브 스트림 연결 전환 중");
+            retryHandler.removeCallbacksAndMessages(null);
+            radioSoftRetryCount=0;
+            // Prefer the pre-resolved source. If it is unavailable, resolve a fresh
+            // source immediately instead of waiting for a long rebuffer window.
+            recoverResolverRadio(id);
+        },1200L);
+    }
+
     private void recoverRadioAfterError(PlaybackException error){
         if(userStopped||currentRadioId==null) return;
         int http=httpCodeFromError(error);
         boolean staleSource=(http==401||http==403||isPlaylistLifecycleError(error));
-        if(staleSource && isResolverRadio(currentRadioId)){
-            trace("RADIO fresh-source recovery: http="+http+
-                " playlist="+isPlaylistLifecycleError(error));
-            radioSoftRetryCount=0;
-            scheduleHardRadioRetry(150L);
-            return;
+
+        if(isResolverRadio(currentRadioId)){
+            if(hasFreshStandby(currentRadioId)){
+                trace("RADIO error -> immediate standby handoff: http="+http);
+                radioSoftRetryCount=0;
+                recoverResolverRadio(currentRadioId);
+                return;
+            }
+            if(staleSource){
+                trace("RADIO stale source -> immediate fresh resolver: http="+http+
+                    " playlist="+isPlaylistLifecycleError(error));
+                radioSoftRetryCount=0;
+                recoverResolverRadio(currentRadioId);
+                return;
+            }
         }
         scheduleSoftRadioRetry();
     }
@@ -1343,19 +1412,20 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void scheduleSoftRadioRetry(){
         if(userStopped || currentRadioId==null || player==null) return;
 
+        final String id=currentRadioId;
         radioSoftRetryCount++;
-        if(radioSoftRetryCount>2){
+        int maxAttempts=isResolverRadio(id)?1:2;
+        if(radioSoftRetryCount>maxAttempts){
             trace("RADIO soft retry exhausted -> fresh/hard source");
             radioSoftRetryCount=0;
-            scheduleHardRadioRetry(250L);
+            scheduleHardRadioRetry(isResolverRadio(id)?100L:250L);
             return;
         }
 
-        final String id=currentRadioId;
         final int attempt=radioSoftRetryCount;
         final long failedPosition=currentPlayerPosition();
         final boolean seekable=player.isCurrentMediaItemSeekable();
-        long delay=attempt==1 ? 500L : 1500L;
+        long delay=isResolverRadio(id) ? 300L : (attempt==1 ? 500L : 1500L);
 
         trace("RADIO soft retry #"+attempt+" same source in "+delay+
             "ms pos="+failedPosition+" seekable="+seekable);
@@ -1399,6 +1469,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void recoverResolverRadio(String id){
+        radioBufferingHandler.removeCallbacksAndMessages(null);
         String standby=standbyResolvedUrls.remove(id);
         Long at=standbyResolvedAt.remove(id);
         long age=at==null?Long.MAX_VALUE:(System.currentTimeMillis()-at);
@@ -1449,6 +1520,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
         final String rel=relative.trim();
         final String fallbackTitle=PolarisFtp.displayTitle(rel);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
+        resolverRefreshHandler.removeCallbacksAndMessages(null);
+        radioHasPlayed=false;
         currentRadioId=null;
         currentMp3Id=-1L;
         currentMp3Queue.clear();
@@ -1589,6 +1663,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void playLocalAudioId(long mediaId,long startPositionMs,boolean restoring){
         try{
+            radioBufferingHandler.removeCallbacksAndMessages(null);
+            resolverRefreshHandler.removeCallbacksAndMessages(null);
+            radioHasPlayed=false;
             currentFtpMp3Path=null;
             ftpMp3Preparing=false;
             currentRadioId=null;
@@ -1864,16 +1941,18 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     String title=safe(c.getString(0));
                     String artist=safe(c.getString(1));
                     String album=safe(c.getString(2));
-                    long albumId=c.getLong(3);
                     String sub=artist+(album.isEmpty()?"":" · "+album);
-                    out.add(itemWithAlbumArt("favlocal:"+mediaId,title,sub,albumId));
+                    out.add(listTextItem("favlocal:"+mediaId,title,sub));
                 }
             }catch(SecurityException ignored){}
         }
         for(String rel:ftpFavoritePaths()){
             String parent=PolarisFtp.parentRelative(rel);
             String sub=parent.isEmpty()?"FTP":"FTP · "+parent;
-            out.add(item("favftp:"+Uri.encode(rel),PolarisFtp.displayTitle(rel),sub));
+            out.add(listTextItem(
+                "favftp:"+Uri.encode(rel),
+                PolarisFtp.displayTitle(rel),
+                sub));
         }
         return out;
     }
@@ -2395,31 +2474,41 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setExtras(e).build(),
             android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
     }
-    private Bitmap ftpMusicArt(){
-        if(ftpBrowseArt!=null&&!ftpBrowseArt.isRecycled()) return ftpBrowseArt;
-        int size=192;
-        Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
-        android.graphics.Canvas canvas=new android.graphics.Canvas(b);
-        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(0xFF34343C);
-        canvas.drawRect(0,0,size,size,paint);
-        paint.setColor(0xFFF2F2F4);
-        paint.setTextAlign(android.graphics.Paint.Align.CENTER);
-        paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        paint.setTextSize(104f);
-        canvas.drawText("♪",size/2f,size*0.62f,paint);
-        paint.setTextSize(26f);
-        canvas.drawText("FTP",size/2f,size*0.86f,paint);
-        ftpBrowseArt=b;
-        return b;
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem listTextFolder(
+        String id,String title){
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+        e.putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT",1);
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            new MediaDescriptionCompat.Builder()
+                .setMediaId(id)
+                .setTitle(title)
+                .setExtras(e)
+                .build(),
+            android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
+    }
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem listTextItem(
+        String id,String title,String sub){
+        Bundle e=new Bundle();
+        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            new MediaDescriptionCompat.Builder()
+                .setMediaId(id)
+                .setTitle(title)
+                .setSubtitle(sub)
+                .setExtras(e)
+                .build(),
+            android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
     }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem item(String id,String title,String sub){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
             .setMediaId(id).setTitle(title).setSubtitle(sub);
         if(STREAMS.containsKey(id)) b.setIconBitmap(StationArt.bitmap(this,id,128));
-        else if(id!=null && (id.startsWith("ftpmp3:")||id.startsWith("favftp:")))
-            b.setIconBitmap(ftpMusicArt());
         Bundle e=new Bundle();
         e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
         b.setExtras(e);
@@ -2456,9 +2545,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 PolarisFtp.DirectoryPage page=PolarisFtp.listMp3(this,rel,offset,200);
                 for(PolarisFtp.Entry entry:page.entries){
                     if(entry.directory){
-                        out.add(folder("ftpdir:"+Uri.encode(entry.relativePath),entry.name));
+                        out.add(listTextFolder(
+                            "ftpdir:"+Uri.encode(entry.relativePath),
+                            entry.name));
                     }else{
-                        out.add(item(
+                        out.add(listTextItem(
                             "ftpmp3:"+Uri.encode(entry.relativePath),
                             PolarisFtp.displayTitle(entry.name),
                             "FTP · "+formatFtpBytes(entry.size)));
@@ -2467,7 +2558,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
                 if(page.hasMore()){
                     int next=page.offset+page.entries.size();
-                    out.add(folder(
+                    out.add(listTextFolder(
                         "ftppage:"+next+":"+Uri.encode(rel),
                         "다음 200개 →"));
                 } 
@@ -2585,6 +2676,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         saveLastMp3Position();
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
         programHandler.removeCallbacksAndMessages(null);
         positionHandler.removeCallbacksAndMessages(null);
         restoreHandler.removeCallbacksAndMessages(null);
