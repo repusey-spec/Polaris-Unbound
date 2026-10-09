@@ -260,6 +260,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 setResumeAllowed(false);
                 retryHandler.removeCallbacksAndMessages(null);
                 resolverRefreshHandler.removeCallbacksAndMessages(null);
+                radioBufferingHandler.removeCallbacksAndMessages(null);
                 restoreHandler.removeCallbacksAndMessages(null);
                 player.pause();
                 publishState();
@@ -336,7 +337,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 synchronized(currentFtpMp3Queue){ currentFtpMp3Queue.clear(); }
                 retryCount=0;
                 radioSoftRetryCount=0;
+                radioHasPlayed=false;
                 retryHandler.removeCallbacksAndMessages(null);
+                resolverRefreshHandler.removeCallbacksAndMessages(null);
+                radioBufferingHandler.removeCallbacksAndMessages(null);
                 restoreHandler.removeCallbacksAndMessages(null);
                 leavePlaybackForeground();
                 abandonPlaybackFocus();
@@ -489,6 +493,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             sessionRestoreConsumed=false;
             resumeAfterTransientFocusLoss=false;
             retryHandler.removeCallbacksAndMessages(null);
+            resolverRefreshHandler.removeCallbacksAndMessages(null);
+            radioBufferingHandler.removeCallbacksAndMessages(null);
             restoreHandler.removeCallbacksAndMessages(null);
             if(player!=null){
                 try{ player.pause(); }catch(Exception ignored){}
@@ -499,6 +505,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             currentFtpMp3Path=null;
             retryCount=0;
             radioSoftRetryCount=0;
+            radioHasPlayed=false;
             leavePlaybackForeground();
             abandonPlaybackFocus();
             publishState();
@@ -544,6 +551,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 currentMp3Id=-1L;
                 retryCount=0;
                 radioSoftRetryCount=0;
+                radioHasPlayed=false;
                 userStopped=false;
                 rememberRadioForResume(id);
                 enterPlaybackForeground(TITLES.get(id));
@@ -1017,9 +1025,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         enterPlaybackForeground(TITLES.get(id));
         retryCount=0;
         radioSoftRetryCount=0;
+        radioHasPlayed=false;
         userStopped=false;
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
+        radioBufferingHandler.removeCallbacksAndMessages(null);
         trace("VOICE radio -> "+id+" "+TITLES.get(id));
         startRadio(id);
     }
