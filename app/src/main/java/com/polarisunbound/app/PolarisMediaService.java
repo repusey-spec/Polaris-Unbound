@@ -77,9 +77,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private static final String PREF_LAST_SOURCE="last_source";
     private static final String PREF_LAST_MP3_ID="last_mp3_id";
     private static final String PREF_LAST_MP3_POSITION="last_mp3_position_ms";
+    private static final String PREF_LAST_FTP_PATH="last_ftp_path";
+    private static final String PREF_LAST_FTP_POSITION="last_ftp_position_ms";
     private static final String PREF_RESUME_ALLOWED="resume_allowed";
     private static final String SOURCE_RADIO="RADIO";
     private static final String SOURCE_MP3="MP3";
+    private static final String SOURCE_FTP="FTP";
     private static final String ACTION_MP3_LIKE="com.polarisunbound.app.action.MP3_LIKE";
     private static final String ACTION_MP3_SHUFFLE="com.polarisunbound.app.action.MP3_SHUFFLE";
     private static final String ACTION_MP3_REPEAT="com.polarisunbound.app.action.MP3_REPEAT";
@@ -234,6 +237,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onPlay(){
                 userStopped=false;
                 if(currentFtpMp3Path!=null){
+                    rememberFtpForResume(currentFtpMp3Path,currentPlayerPosition());
                     if(!ftpMp3Preparing && requestPlaybackFocus()) player.play();
                     publishState();
                     return;
@@ -443,19 +447,35 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             .apply();
     }
 
-    private void saveLastMp3Position(){
-        if(currentMp3Id<0||player==null) return;
+    private void rememberFtpForResume(String relativePath,long positionMs){
+        if(relativePath==null||relativePath.trim().isEmpty()) return;
         getSharedPreferences(PREFS,MODE_PRIVATE).edit()
-            .putString(PREF_LAST_SOURCE,SOURCE_MP3)
-            .putLong(PREF_LAST_MP3_ID,currentMp3Id)
-            .putLong(PREF_LAST_MP3_POSITION,currentPlayerPosition())
+            .putString(PREF_LAST_SOURCE,SOURCE_FTP)
+            .putString(PREF_LAST_FTP_PATH,relativePath)
+            .putLong(PREF_LAST_FTP_POSITION,Math.max(0L,positionMs))
+            .putBoolean(PREF_RESUME_ALLOWED,true)
             .apply();
+    }
+
+    private void saveLastPlaybackPosition(){
+        if(player==null) return;
+        if(currentFtpMp3Path!=null){
+            rememberFtpForResume(currentFtpMp3Path,currentPlayerPosition());
+            return;
+        }
+        if(currentMp3Id>=0){
+            getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+                .putString(PREF_LAST_SOURCE,SOURCE_MP3)
+                .putLong(PREF_LAST_MP3_ID,currentMp3Id)
+                .putLong(PREF_LAST_MP3_POSITION,currentPlayerPosition())
+                .apply();
+        }
     }
 
     private void startPositionSaver(){
         positionHandler.postDelayed(new Runnable(){
             @Override public void run(){
-                saveLastMp3Position();
+                saveLastPlaybackPosition();
                 positionHandler.postDelayed(this,5000L);
             }
         },5000L);
@@ -539,6 +559,17 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 trace("AA restore MP3 id="+mediaId+" pos="+position);
                 userStopped=false;
                 playLocalAudioId(mediaId,position,true);
+            }
+            return;
+        }
+
+        if(SOURCE_FTP.equals(source)){
+            String rel=p.getString(PREF_LAST_FTP_PATH,null);
+            long position=p.getLong(PREF_LAST_FTP_POSITION,0L);
+            if(rel!=null&&!rel.trim().isEmpty()){
+                trace("AA restore FTP path="+rel+" pos="+position);
+                userStopped=false;
+                playFtpAudio("ftpmp3:"+Uri.encode(rel),position,true);
             }
             return;
         }
@@ -1511,6 +1542,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private void playFtpAudio(String id){
+        playFtpAudio(id,0L,false);
+    }
+
+    private void playFtpAudio(String id,long startPositionMs,boolean restoring){
         String encoded=id.substring("ftpmp3:".length());
         String relative=Uri.decode(encoded);
         if(relative==null||relative.trim().isEmpty()){
@@ -1536,7 +1571,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         userStopped=false;
         mp3EndHandled=false;
         resumeAfterTransientFocusLoss=false;
-        setResumeAllowed(false);
+        rememberFtpForResume(rel,Math.max(0L,startPositionMs));
         retryHandler.removeCallbacksAndMessages(null);
         restoreHandler.removeCallbacksAndMessages(null);
         enterPlaybackForeground(fallbackTitle);
@@ -1596,10 +1631,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     try{ mmr.release(); }catch(Exception ignored){}
                 }
 
+                long resumePosition=Math.max(0L,startPositionMs);
+                if(duration>0L && resumePosition>=duration-1000L) resumePosition=0L;
                 final String t=title;
                 final String a=artist;
                 final String al=album;
                 final long dur=duration;
+                final long startAt=resumePosition;
                 final Bitmap cover=art;
                 final Uri uri=Uri.fromFile(cached);
 
@@ -1616,10 +1654,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         session.setMetadata(mb.build());
 
                         player.setMediaItem(MediaItem.fromUri(uri));
+                        if(startAt>0L) player.seekTo(startAt);
                         player.prepare();
                         if(!userStopped && requestPlaybackFocus()) player.play();
+                        rememberFtpForResume(rel,startAt);
                         publishState();
-                        trace("FTP MP3 cached play: "+rel+" -> "+cached.getName());
+                        trace("FTP MP3 cached play: "+rel+" -> "+cached.getName()+
+                            (restoring?" restore@"+startAt:""));
                     }catch(Throwable e){
                         publishError("FTP 음악 재생 오류: "+e.getMessage());
                     }
