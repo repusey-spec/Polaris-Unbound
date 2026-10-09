@@ -1,0 +1,78 @@
+name: Build yongbongE v0.22 PENDING-FILE
+
+on:
+  push:
+    branches:
+      - yongbonge-v22-pending-files
+    paths:
+      - .github/workflows/build-yongbonge-v22-pending-files.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.22 sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v15-trace/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v22-pending-files/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v15-trace/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          Copy-Item "yongbongE-expanded-v20-trace-nodisk/TraceLog.cs" "src/TinyFtpDrive/TraceLog.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.22.0-PENDING-FILE" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Verify scope
+        shell: pwsh
+        run: |
+          $fs = Get-Content "src/TinyFtpDrive/FtpFileSystem.cs" -Raw
+          foreach ($required in @(
+            "Dictionary<string, FtpHandle> _pendingFiles",
+            "RegisterPending(h);",
+            "OpenPendingReadHandle(pendingOwner)",
+            "MovePending(h, oldPath, newPath);",
+            "host.NamedStreams = false;",
+            "AllocationSize is reserved capacity, not logical EOF"
+          )) {
+            if (!$fs.Contains($required)) { throw "Missing v0.22 invariant: $required" }
+          }
+          if ($fs.Contains("Directory.CreateDirectory(_adsDir);")) { throw "ADS sidecar creation returned" }
+
+      - name: Compile v0.22
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "v0.22 build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.22.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.22-PENDING-FILE")
+          [IO.File]::WriteAllText("yongbongE-v22-pending-files.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v22-pending-files.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.22-PENDING-FILE.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.22-PENDING-FILE
+          path: dist/yongbongE-Setup-v0.22-PENDING-FILE.exe
+          if-no-files-found: error
+          retention-days: 30
