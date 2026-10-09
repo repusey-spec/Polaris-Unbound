@@ -42,7 +42,7 @@ namespace TinyFtpDrive
             public bool StreamWriteEligible;
             public long ExpectedWriteSize;
             public bool IsZoneStream;
-            public bool IsPendingReader;
+            public bool IsPendingShadow;
         }
 
         private const int MinReadBlockSize = 32 * 1024;
@@ -152,7 +152,7 @@ namespace TinyFtpDrive
         private readonly SharedReadCache _sharedReadCache = new SharedReadCache();
         private readonly object _adsSync = new object();
         private readonly object _pendingSync = new object();
-        private readonly Dictionary<string, FtpHandle> _pendingFiles =
+        private readonly Dictionary<string, FtpHandle> _pendingWrites =
             new Dictionary<string, FtpHandle>(StringComparer.OrdinalIgnoreCase);
 
         public FtpFileSystem(AppConfig cfg)
@@ -279,8 +279,8 @@ namespace TinyFtpDrive
             FileName = StripDefaultDataStream(FileName);
             string path = ToRemotePath(FileName);
 
-            FtpHandle pendingSecurity;
-            if (TryGetPending(path, out pendingSecurity))
+            FtpHandle pending;
+            if (TryGetPendingWrite(path, out pending))
             {
                 FileAttributes = (uint)System.IO.FileAttributes.Archive;
                 SecurityDescriptor = null;
@@ -324,8 +324,8 @@ namespace TinyFtpDrive
             FileName = StripDefaultDataStream(FileName);
             string path = ToRemotePath(FileName);
             bool isDir = 0 != (CreateOptions & FILE_DIRECTORY_FILE);
-            FtpHandle existingPending;
-            if (TryGetPending(path, out existingPending) || _ftp.Stat(path) != null)
+            FtpHandle pendingExisting;
+            if (TryGetPendingWrite(path, out pendingExisting) || _ftp.Stat(path) != null)
             {
                 FileNode = null; FileDesc0 = null; FileInfo = default(FileInfo); NormalizedName = null;
                 return STATUS_OBJECT_NAME_COLLISION;
@@ -349,12 +349,11 @@ namespace TinyFtpDrive
             else
             {
                 EnsureLocal(h, createEmpty: true);
-                // AllocationSize is reserved capacity, not logical EOF. FTP does not expose
-                // allocation, so keep the file at size 0 until SetFileSize/Write grows it.
-                h.ExpectedWriteSize = 0;
+                if (AllocationSize > 0) h.Stream.SetLength((long)Math.Min(AllocationSize, (ulong)long.MaxValue));
+                h.ExpectedWriteSize = (long)Math.Min(AllocationSize, (ulong)long.MaxValue);
                 h.StreamWriteEligible = true;
                 h.Dirty = true;
-                RegisterPending(h);
+                RegisterPendingWrite(h);
             }
 
             FileNode = null;
@@ -396,21 +395,21 @@ namespace TinyFtpDrive
             FileName = StripDefaultDataStream(FileName);
             string path = ToRemotePath(FileName);
 
-            FtpHandle pendingOwner;
-            if (TryGetPending(path, out pendingOwner))
+            FtpHandle pending;
+            if (TryGetPendingWrite(path, out pending))
             {
-                FtpHandle pendingHandle = OpenPendingReadHandle(pendingOwner);
-                if (pendingHandle != null)
+                if (0 != (CreateOptions & FILE_DIRECTORY_FILE))
                 {
-                    if (0 != (CreateOptions & FILE_DIRECTORY_FILE))
-                    {
-                        try { pendingHandle.Stream?.Dispose(); } catch { }
-                        FileNode = null; FileDesc0 = null; FileInfo = default(FileInfo); NormalizedName = null;
-                        return STATUS_NOT_A_DIRECTORY;
-                    }
+                    FileNode = null; FileDesc0 = null; FileInfo = default(FileInfo); NormalizedName = null;
+                    return STATUS_NOT_A_DIRECTORY;
+                }
+
+                FtpHandle shadow = OpenPendingShadow(pending);
+                if (shadow != null)
+                {
                     FileNode = null;
-                    FileDesc0 = pendingHandle;
-                    FileInfo = MakeFileInfo(pendingHandle);
+                    FileDesc0 = shadow;
+                    FileInfo = MakeFileInfo(shadow);
                     NormalizedName = null;
                     return STATUS_SUCCESS;
                 }
@@ -472,7 +471,8 @@ namespace TinyFtpDrive
                 CloseWriteSession(h);
                 EnsureLocal(h, createEmpty: true);
                 h.Stream.SetLength(0);
-                h.ExpectedWriteSize = 0;
+                if (AllocationSize > 0) h.Stream.SetLength((long)Math.Min(AllocationSize, (ulong)long.MaxValue));
+                h.ExpectedWriteSize = (long)Math.Min(AllocationSize, (ulong)long.MaxValue);
                 h.StreamWriteEligible = true;
                 h.Dirty = true;
                 h.Entry.Size = h.Stream.Length;
@@ -486,6 +486,7 @@ namespace TinyFtpDrive
         {
             var h = FileDesc0 as FtpHandle;
             if (h == null) return;
+            if (h.IsPendingShadow) return;
             if (h.IsZoneStream)
             {
                 if (0 != (Flags & CleanupDelete))
@@ -505,7 +506,7 @@ namespace TinyFtpDrive
                 CloseReadSession(h);
                 CloseWriteSession(h);
                 h.DeletePending = true;
-                UnregisterPending(h);
+                UnregisterPendingWrite(h);
                 try { h.Stream?.Dispose(); } catch { }
                 h.Stream = null;
                 if (h.Uploaded)
@@ -524,6 +525,15 @@ namespace TinyFtpDrive
             var h = FileDesc0 as FtpHandle;
             if (h == null) return;
             TraceLog.Write("CB", "Close path=" + h.RemotePath + " dir=" + h.IsDirectory);
+            if (h.IsPendingShadow)
+            {
+                lock (h)
+                {
+                    try { h.Stream?.Dispose(); } catch { }
+                    h.Stream = null;
+                }
+                return;
+            }
             if (h.IsZoneStream)
             {
                 lock (h)
@@ -556,7 +566,6 @@ namespace TinyFtpDrive
                 }
                 finally
                 {
-                    UnregisterPending(h);
                     CloseReadSession(h);
                     CloseWriteSession(h);
                     try { h.Stream?.Dispose(); } catch { }
@@ -774,11 +783,6 @@ namespace TinyFtpDrive
                 FileInfo = default(FileInfo);
                 return STATUS_FILE_IS_A_DIRECTORY;
             }
-            if (h.IsPendingReader)
-            {
-                FileInfo = MakeFileInfo(h);
-                return STATUS_ACCESS_DENIED;
-            }
 
             lock (h)
             {
@@ -927,16 +931,12 @@ namespace TinyFtpDrive
                 FileInfo = default(FileInfo);
                 return STATUS_FILE_IS_A_DIRECTORY;
             }
-            if (h.IsPendingReader)
-            {
-                FileInfo = MakeFileInfo(h);
-                return STATUS_ACCESS_DENIED;
-            }
             lock (h)
             {
                 EnsureLocal(h, createEmpty: false);
                 long requested = (long)Math.Min(NewSize, (ulong)long.MaxValue);
                 if (!SetAllocationSize) h.ExpectedWriteSize = requested;
+                else if (h.ExpectedWriteSize == 0) h.ExpectedWriteSize = requested;
 
                 if (h.WriteSession != null && !SetAllocationSize && requested < h.WriteSession.Position)
                 {
@@ -986,7 +986,7 @@ namespace TinyFtpDrive
             if (!h.Uploaded)
             {
                 if (h.WriteSession != null) h.WriteSession.SetFinalPath(newPath);
-                MovePending(h, oldPath, newPath);
+                MovePendingWrite(h, oldPath, newPath);
                 MoveZoneMetadata(oldPath, newPath, h.IsDirectory);
                 h.RemotePath = newPath;
                 h.Entry.FullPath = newPath;
@@ -1148,95 +1148,85 @@ namespace TinyFtpDrive
             return true;
         }
 
-        private bool TryGetPending(string path, out FtpHandle handle)
+        private void RegisterPendingWrite(FtpHandle h)
         {
-            handle = null;
-            if (string.IsNullOrEmpty(path)) return false;
+            if (h == null || h.IsDirectory || string.IsNullOrEmpty(h.RemotePath)) return;
+            lock (_pendingSync)
+                _pendingWrites[h.RemotePath] = h;
+        }
+
+        private void UnregisterPendingWrite(FtpHandle h)
+        {
+            if (h == null || string.IsNullOrEmpty(h.RemotePath)) return;
             lock (_pendingSync)
             {
-                FtpHandle candidate;
-                if (!_pendingFiles.TryGetValue(path, out candidate) || candidate == null || candidate.DeletePending)
-                    return false;
-                handle = candidate;
-                return true;
+                FtpHandle current;
+                if (_pendingWrites.TryGetValue(h.RemotePath, out current) && object.ReferenceEquals(current, h))
+                    _pendingWrites.Remove(h.RemotePath);
             }
         }
 
-        private void RegisterPending(FtpHandle handle)
+        private void MovePendingWrite(FtpHandle h, string oldPath, string newPath)
         {
-            if (handle == null || handle.IsDirectory || string.IsNullOrEmpty(handle.RemotePath)) return;
-            lock (_pendingSync)
-                _pendingFiles[handle.RemotePath] = handle;
-        }
-
-        private void UnregisterPending(FtpHandle handle)
-        {
-            if (handle == null) return;
-            lock (_pendingSync)
-            {
-                var remove = new List<string>();
-                foreach (var pair in _pendingFiles)
-                    if (object.ReferenceEquals(pair.Value, handle)) remove.Add(pair.Key);
-                foreach (string key in remove) _pendingFiles.Remove(key);
-            }
-        }
-
-        private void MovePending(FtpHandle handle, string oldPath, string newPath)
-        {
-            if (handle == null || string.IsNullOrEmpty(newPath)) return;
+            if (h == null) return;
             lock (_pendingSync)
             {
                 FtpHandle current;
                 if (!string.IsNullOrEmpty(oldPath) &&
-                    _pendingFiles.TryGetValue(oldPath, out current) &&
-                    object.ReferenceEquals(current, handle))
-                    _pendingFiles.Remove(oldPath);
-                _pendingFiles[newPath] = handle;
+                    _pendingWrites.TryGetValue(oldPath, out current) &&
+                    object.ReferenceEquals(current, h))
+                    _pendingWrites.Remove(oldPath);
+
+                if (!string.IsNullOrEmpty(newPath))
+                    _pendingWrites[newPath] = h;
             }
         }
 
-        private FtpHandle OpenPendingReadHandle(FtpHandle owner)
+        private bool TryGetPendingWrite(string path, out FtpHandle h)
+        {
+            lock (_pendingSync)
+            {
+                if (_pendingWrites.TryGetValue(path, out h) &&
+                    h != null && !h.DeletePending)
+                    return true;
+            }
+            h = null;
+            return false;
+        }
+
+        private static FtpHandle OpenPendingShadow(FtpHandle owner)
         {
             if (owner == null) return null;
             lock (owner)
             {
-                if (owner.DeletePending || owner.IsDirectory ||
-                    string.IsNullOrEmpty(owner.TempPath) || !File.Exists(owner.TempPath))
+                if (owner.DeletePending || string.IsNullOrEmpty(owner.TempPath) || !File.Exists(owner.TempPath))
                     return null;
 
-                FileStream readStream;
-                try
-                {
-                    readStream = new FileStream(
-                        owner.TempPath, FileMode.Open, FileAccess.Read,
-                        FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.RandomAccess);
-                }
-                catch
-                {
-                    return null;
-                }
+                var stream = new FileStream(
+                    owner.TempPath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite, 65536, FileOptions.RandomAccess);
 
-                long size = 0;
-                try { size = readStream.Length; } catch { }
+                var entry = new RemoteEntry
+                {
+                    Name = owner.Entry == null ? LightweightFtpClient.LeafName(owner.RemotePath) : owner.Entry.Name,
+                    FullPath = owner.RemotePath,
+                    IsDirectory = false,
+                    Size = stream.Length,
+                    ModifiedUtc = owner.Entry == null ? DateTime.UtcNow : owner.Entry.ModifiedUtc
+                };
+
                 return new FtpHandle
                 {
                     RemotePath = owner.RemotePath,
                     IsDirectory = false,
-                    Entry = new RemoteEntry
-                    {
-                        Name = LightweightFtpClient.LeafName(owner.RemotePath),
-                        FullPath = owner.RemotePath,
-                        IsDirectory = false,
-                        Size = size,
-                        ModifiedUtc = owner.Entry == null ? DateTime.UtcNow : owner.Entry.ModifiedUtc
-                    },
+                    Entry = entry,
                     TempPath = owner.TempPath,
-                    Stream = readStream,
+                    Stream = stream,
                     LocalReady = true,
                     Dirty = false,
                     Created = false,
-                    Uploaded = false,
-                    IsPendingReader = true
+                    Uploaded = true,
+                    IsPendingShadow = true
                 };
             }
         }
@@ -1262,7 +1252,7 @@ namespace TinyFtpDrive
             h.Entry.Size = session.Position;
             h.Entry.ModifiedUtc = DateTime.UtcNow;
             _sharedReadCache.Invalidate(h.RemotePath);
-            UnregisterPending(h);
+            UnregisterPendingWrite(h);
         }
 
         private static void CloseReadSession(FtpHandle h)
@@ -1332,7 +1322,7 @@ namespace TinyFtpDrive
             h.Created = false;
             h.Entry.Size = h.Stream?.Length ?? new System.IO.FileInfo(h.TempPath).Length;
             h.Entry.ModifiedUtc = DateTime.UtcNow;
-            UnregisterPending(h);
+            UnregisterPendingWrite(h);
         }
 
         private static bool TryGetNamedStream(string fileName, out string baseName, out string streamName)
