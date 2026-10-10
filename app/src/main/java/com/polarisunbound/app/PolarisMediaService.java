@@ -55,12 +55,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private MediaSessionCompat session;
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
-    private final ExecutorService programExecutor=Executors.newSingleThreadExecutor();
+    private final ExecutorService programExecutor=Executors.newFixedThreadPool(3);
     private final ExecutorService ftpExecutor=Executors.newFixedThreadPool(2);
     private final android.os.Handler retryHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler resolverRefreshHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler radioBufferingHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable radioBrowseNotifyRunnable=() -> notifyChildrenChanged("radio");
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private String currentRadioId=null;
@@ -872,6 +873,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         },60L*1000L);
     }
 
+    private void scheduleRadioBrowseNotify(){
+        programHandler.removeCallbacks(radioBrowseNotifyRunnable);
+        programHandler.postDelayed(radioBrowseNotifyRunnable,750L);
+    }
+
     private void startProgramRefreshLoop(){
         long stagger=0L;
         for(String id:RADIO_ORDER){
@@ -893,21 +899,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 boolean changed=oldTitle==null || !oldTitle.equals(r.aaTitle());
                 programHandler.post(() -> {
                     trace("PROGRAM "+id+" -> "+r.aaTitle()+(changed?" [changed]":""));
-                    if(changed) notifyChildrenChanged("radio");
+                    if(changed) scheduleRadioBrowseNotify();
                     if(changed && id.equals(currentRadioId)) applyCurrentRadioMetadata(id);
                     long delay=CurrentProgramResolver.nextRefreshDelay(id,r);
                     programHandler.postDelayed(() -> refreshProgramAsync(id),delay);
                 });
             }catch(Exception e){
                 trace("PROGRAM resolver error: "+id+" / "+e);
-                programHandler.postDelayed(() -> refreshProgramAsync(id),10L*60L*1000L);
+                // A failed boundary refresh must not leave the previous programme
+                // visible for ten minutes. Retry independently after a short backoff.
+                programHandler.postDelayed(() -> refreshProgramAsync(id),90L*1000L);
             }
         });
     }
 
     private String radioProgramTitle(String id){
         CurrentProgramResolver.Result r=CurrentProgramResolver.cached(this,id);
-        if(r==null) return TITLES.get(id);
+        if(!CurrentProgramResolver.isCurrentNow(id,r)) return TITLES.get(id);
         String title=r.aaTitle(id);
         return title==null||title.trim().isEmpty()?TITLES.get(id):title;
     }
@@ -1360,7 +1368,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             .setActions(actions)
             .setState(PlaybackStateCompat.STATE_BUFFERING,currentPlayerPosition(),0f,
                 android.os.SystemClock.elapsedRealtime())
-            .setErrorMessage(message)
             .build());
     }
 
@@ -2718,6 +2725,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
         radioBufferingHandler.removeCallbacksAndMessages(null);
+        programHandler.removeCallbacks(radioBrowseNotifyRunnable);
         programHandler.removeCallbacksAndMessages(null);
         positionHandler.removeCallbacksAndMessages(null);
         restoreHandler.removeCallbacksAndMessages(null);
