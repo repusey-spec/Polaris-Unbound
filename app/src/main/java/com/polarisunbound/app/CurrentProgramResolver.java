@@ -617,11 +617,31 @@ public final class CurrentProgramResolver {
         return r!=null && System.currentTimeMillis()-r.updatedAt<CACHE_MAX_AGE_MS;
     }
 
+    public static boolean isCurrentNow(String id,Result r){
+        if(r==null) return false;
+
+        // If a source has no usable schedule boundaries (for example a now-playing
+        // page), fall back to the existing age limit. Scheduled radio must satisfy
+        // its real start -> next-start window so an old title can never linger.
+        if(r.startMinutes<0 || r.nextStartMinutes<0 || r.startMinutes==r.nextStartMinutes)
+            return cacheFresh(r);
+
+        Calendar c=Calendar.getInstance(timeZoneFor(id));
+        int now=c.get(Calendar.HOUR_OF_DAY)*60+c.get(Calendar.MINUTE);
+
+        if(r.nextStartMinutes>r.startMinutes)
+            return now>=r.startMinutes && now<r.nextStartMinutes;
+
+        // Interval crosses midnight.
+        return now>=r.startMinutes || now<r.nextStartMinutes;
+    }
+
     public static long nextRefreshDelay(String id,Result r){
         Calendar c=Calendar.getInstance(timeZoneFor(id));
         int minute=c.get(Calendar.MINUTE);
         int second=c.get(Calendar.SECOND);
         int milli=c.get(Calendar.MILLISECOND);
+        int now=c.get(Calendar.HOUR_OF_DAY)*60+minute;
         int[] marks={0,5,10,30,35};
 
         int nextHourOffset=0;
@@ -638,7 +658,18 @@ public final class CurrentProgramResolver {
         }
 
         int deltaMinutes=(nextHourOffset*60)+target-minute;
-        long delay=deltaMinutes*60L*1000L-second*1000L-milli+1500L;
+        long markDelay=deltaMinutes*60L*1000L-second*1000L-milli+1500L;
+        long delay=markDelay;
+
+        // Also refresh just after the actual next programme boundary. The fixed
+        // marks remain as a health check for schedule-source changes/failures.
+        if(r!=null && r.nextStartMinutes>=0){
+            int boundaryDelta=r.nextStartMinutes-now;
+            if(boundaryDelta<=0) boundaryDelta+=24*60;
+            long boundaryDelay=boundaryDelta*60L*1000L-second*1000L-milli+1500L;
+            delay=Math.min(delay,boundaryDelay);
+        }
+
         return Math.max(1000L,delay);
     }
 }
