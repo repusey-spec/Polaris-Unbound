@@ -2341,8 +2341,10 @@ public class MainActivity extends AppCompatActivity {
         if(target==null) return;
 
         CurrentProgramResolver.Result cached=CurrentProgramResolver.cached(this,id);
-        if(cached!=null) target.setText(cached.phoneText(id));
-        else target.setText("편성정보 불러오는 중…");
+        if(CurrentProgramResolver.isCurrentNow(id,cached))
+            target.setText(cached.phoneText(id));
+        else
+            target.setText(CurrentProgramResolver.stationName(id)+"\n편성정보 갱신 중…");
 
         if("kr5".equals(id)){
             target.setText(CurrentProgramResolver.stationName(id));
@@ -2358,7 +2360,9 @@ public class MainActivity extends AppCompatActivity {
                 out=result.phoneText(id);
             }catch(Exception e){
                 CurrentProgramResolver.Result fallback=CurrentProgramResolver.cached(MainActivity.this,id);
-                out=fallback!=null ? fallback.phoneText(id) : "편성정보를 불러오지 못했습니다";
+                out=CurrentProgramResolver.isCurrentNow(id,fallback)
+                    ? fallback.phoneText(id)
+                    : CurrentProgramResolver.stationName(id)+"\n편성정보 갱신 대기";
             }
 
             final CurrentProgramResolver.Result finalResult=result;
