@@ -7,13 +7,22 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class StationArt {
+    private static final Map<String,Bitmap> CACHE=new HashMap<>();
     private StationArt(){}
 
     public static Bitmap bitmap(Context context,String id){ return bitmap(context,id,512); }
 
     public static Bitmap bitmap(Context context,String id,int size){
+        String key=String.valueOf(id)+"@"+size;
+        synchronized(CACHE){
+            Bitmap cached=CACHE.get(key);
+            if(cached!=null && !cached.isRecycled()) return cached;
+        }
+
         Bitmap out=Bitmap.createBitmap(512,512,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out);
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -42,10 +51,22 @@ public final class StationArt {
         p.setStrokeWidth(4f);
         p.setColor(0x55FFFFFF);
         c.drawLine(100,430,412,430,p);
-        if(size==512) return out;
-        Bitmap scaled=Bitmap.createScaledBitmap(out,size,size,true);
-        out.recycle();
-        return scaled;
+
+        Bitmap result=out;
+        if(size!=512){
+            result=Bitmap.createScaledBitmap(out,size,size,true);
+            out.recycle();
+        }
+
+        synchronized(CACHE){
+            Bitmap existing=CACHE.get(key);
+            if(existing!=null && !existing.isRecycled()){
+                if(result!=existing && !result.isRecycled()) result.recycle();
+                return existing;
+            }
+            CACHE.put(key,result);
+        }
+        return result;
     }
 
     private static Spec spec(String id){
