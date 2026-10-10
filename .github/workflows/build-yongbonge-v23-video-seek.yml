@@ -1,0 +1,78 @@
+name: Build yongbongE v0.23 VIDEO-SEEK
+
+on:
+  push:
+    branches:
+      - yongbonge-v23-video-seek
+    paths:
+      - .github/workflows/build-yongbonge-v23-video-seek.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.23 video-seek sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v15-trace/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v23-video-seek/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v15-trace/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          Copy-Item "yongbongE-expanded-v20-trace-nodisk/TraceLog.cs" "src/TinyFtpDrive/TraceLog.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.23.0-VIDEO-SEEK" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Verify bounded video seek patch
+        shell: pwsh
+        run: |
+          $fs = Get-Content "src/TinyFtpDrive/FtpFileSystem.cs" -Raw
+          foreach ($required in @(
+            "VideoSeekReadAheadSize = 4 * 1024 * 1024",
+            "VideoSeekMinFileSize = 128L * 1024 * 1024",
+            "VideoSeekMinJump = 8L * 1024 * 1024",
+            "IsVideoPath(h.RemotePath)",
+            "bool preferSession = videoSeek ||",
+            "host.NamedStreams = false;",
+            "Dictionary<string, FtpHandle> _pendingWrites"
+          )) {
+            if (!$fs.Contains($required)) { throw "Missing requirement: $required" }
+          }
+
+      - name: Compile v0.23 VIDEO-SEEK
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "VIDEO-SEEK build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.23.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.23-VIDEO-SEEK")
+          [IO.File]::WriteAllText("yongbongE-v23-video-seek.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v23-video-seek.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.23-VIDEO-SEEK.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.23-VIDEO-SEEK
+          path: dist/yongbongE-Setup-v0.23-VIDEO-SEEK.exe
+          if-no-files-found: error
+          retention-days: 30
