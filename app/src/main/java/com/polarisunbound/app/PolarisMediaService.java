@@ -33,6 +33,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy;
 import java.util.*;
 import java.io.*;
 import java.net.*;
@@ -66,8 +67,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private String currentRadioId=null;
     private volatile String currentResolvedRadioUrl=null;
-    private final Map<String,String> standbyResolvedUrls=new ConcurrentHashMap<>();
-    private final Map<String,Long> standbyResolvedAt=new ConcurrentHashMap<>();
     private int retryCount=0;
     private int radioSoftRetryCount=0;
     private boolean radioHasPlayed=false;
@@ -116,10 +115,17 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private boolean sessionRestoreConsumed=false;
     private volatile String canFtpStatus="Synology FTP";
     private volatile String mp3FtpStatus="Synology FTP";
+    // RadioTalk 1.2.9 decompile: ordinary stream load failures are retried
+    // on the same MediaSource at ~100 ms intervals for a ~10 s window.
+    // Keep auth/expired URL failures fast so resolver-backed stations can
+    // obtain a fresh playable URL immediately.
+    private static final long RADIOTALK_RETRY_DELAY_MS=100L;
+    private static final long RADIOTALK_RETRY_WINDOW_MS=10000L;
+    private static final int RADIOTALK_RETRY_COUNT=
+        (int)(RADIOTALK_RETRY_WINDOW_MS/RADIOTALK_RETRY_DELAY_MS)+1;
     private final DefaultLoadErrorHandlingPolicy radioLoadErrorPolicy=
-        new DefaultLoadErrorHandlingPolicy(8);
+        new RadioTalkLoadErrorPolicy();
     private static final long RADIO_HLS_TARGET_OFFSET_MS=20000L;
-    private static final long RADIO_RESOLVER_PREFETCH_MS=120000L;
     private AudioManager audioManager;
     private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
@@ -146,6 +152,38 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         TITLES.put("kr6","107.7 SBS PowerFM");
         TITLES.put("kiis","102.7 KIIS-FM");
         TITLES.put("gallery","Jazz from Gallery 41");
+    }
+
+    private final class RadioTalkLoadErrorPolicy extends DefaultLoadErrorHandlingPolicy {
+        @Override public long getRetryDelayMsFor(LoadErrorHandlingPolicy.LoadErrorInfo info){
+            if(currentRadioId==null) return super.getRetryDelayMsFor(info);
+
+            IOException error=info.exception;
+            if(error instanceof HttpDataSource.InvalidResponseCodeException){
+                int response=((HttpDataSource.InvalidResponseCodeException)error).responseCode;
+                if(response==401 || response==403){
+                    trace("RADIOTALK LOAD auth failure HTTP "+response+
+                        " -> fresh resolver path");
+                    return C.TIME_UNSET;
+                }
+            }
+
+            long defaultDelay=super.getRetryDelayMsFor(info);
+            if(defaultDelay==C.TIME_UNSET) return C.TIME_UNSET;
+
+            if(info.errorCount==1 || info.errorCount==10 ||
+               info.errorCount==50 || info.errorCount==RADIOTALK_RETRY_COUNT){
+                trace("RADIOTALK LOAD retry #"+info.errorCount+
+                    " in "+RADIOTALK_RETRY_DELAY_MS+"ms / "+
+                    error.getClass().getSimpleName());
+            }
+            return RADIOTALK_RETRY_DELAY_MS;
+        }
+
+        @Override public int getMinimumLoadableRetryCount(int dataType){
+            if(currentRadioId==null) return super.getMinimumLoadableRetryCount(dataType);
+            return RADIOTALK_RETRY_COUNT;
+        }
     }
 
     @Override public void onCreate(){
@@ -368,8 +406,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onPlaybackStateChanged(int state){
                 if(currentRadioId!=null){
                     if(state==Player.STATE_BUFFERING){
-                        traceRadioHealth("BUFFERING");
-                        scheduleRadioBufferHandoff();
+                        traceRadioHealth("BUFFERING-RADIOTALK-RETRY");
+                        radioBufferingHandler.removeCallbacksAndMessages(null);
                     }else if(state==Player.STATE_READY){
                         radioBufferingHandler.removeCallbacksAndMessages(null);
                     }
@@ -1376,9 +1414,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(url==null || userStopped) return;
         radioBufferingHandler.removeCallbacksAndMessages(null);
         radioHasPlayed=false;
-        // A manual/new tune must not inherit an old standby token for the same station.
-        standbyResolvedUrls.remove(id);
-        standbyResolvedAt.remove(id);
         trace("STREAM selected: "+id);
         if("gallery".equals(id)){
             currentResolvedRadioUrl=null;
@@ -1394,93 +1429,42 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
     }
 
-    private boolean hasFreshStandby(String id){
-        if(id==null) return false;
-        String standby=standbyResolvedUrls.get(id);
-        Long at=standbyResolvedAt.get(id);
-        if(standby==null||at==null) return false;
-        long age=System.currentTimeMillis()-at;
-        return age>=0L && age<4L*60L*1000L &&
-            !standby.equals(currentResolvedRadioUrl);
-    }
-
     private void scheduleRadioBufferHandoff(){
-        if(userStopped||currentRadioId==null||player==null) return;
-        if(!radioHasPlayed||!isResolverRadio(currentRadioId)) return;
-
-        final String id=currentRadioId;
+        // v0.49: deliberately no forced handoff while BUFFERING.
+        // RadioTalk keeps the same HLS MediaSource alive and lets the load-error
+        // policy retry short transient failures before replacing the source.
         radioBufferingHandler.removeCallbacksAndMessages(null);
-        radioBufferingHandler.postDelayed(() -> {
-            if(userStopped||!id.equals(currentRadioId)||player==null) return;
-            if(player.getPlaybackState()!=Player.STATE_BUFFERING) return;
-
-            traceRadioHealth("BUFFERING-HANDOFF");
-            publishRadioRecovering("라이브 스트림 연결 전환 중");
-            retryHandler.removeCallbacksAndMessages(null);
-            radioSoftRetryCount=0;
-            // Prefer the pre-resolved source. If it is unavailable, resolve a fresh
-            // source immediately instead of waiting for a long rebuffer window.
-            recoverResolverRadio(id);
-        },1200L);
     }
 
     private void recoverRadioAfterError(PlaybackException error){
         if(userStopped||currentRadioId==null) return;
+
         int http=httpCodeFromError(error);
-        boolean staleSource=(http==401||http==403||isPlaylistLifecycleError(error));
-
-        if(isResolverRadio(currentRadioId)){
-            if(hasFreshStandby(currentRadioId)){
-                trace("RADIO error -> immediate standby handoff: http="+http);
-                radioSoftRetryCount=0;
-                recoverResolverRadio(currentRadioId);
-                return;
-            }
-            if(staleSource){
-                trace("RADIO stale source -> immediate fresh resolver: http="+http+
-                    " playlist="+isPlaylistLifecycleError(error));
-                radioSoftRetryCount=0;
-                recoverResolverRadio(currentRadioId);
-                return;
-            }
-        }
-        scheduleSoftRadioRetry();
-    }
-
-    private void scheduleSoftRadioRetry(){
-        if(userStopped || currentRadioId==null || player==null) return;
-
+        boolean expiredOrAuth=(http==401||http==403||isPlaylistLifecycleError(error));
         final String id=currentRadioId;
-        radioSoftRetryCount++;
-        int maxAttempts=isResolverRadio(id)?1:2;
-        if(radioSoftRetryCount>maxAttempts){
-            trace("RADIO soft retry exhausted -> fresh/hard source");
-            radioSoftRetryCount=0;
-            scheduleHardRadioRetry(isResolverRadio(id)?100L:250L);
+
+        radioSoftRetryCount=0;
+        retryHandler.removeCallbacksAndMessages(null);
+
+        if(isResolverRadio(id)){
+            trace("RADIOTALK terminal player error -> fresh resolver: "+id+
+                " http="+http+" lifecycle="+isPlaylistLifecycleError(error)+
+                " auth="+expiredOrAuth);
+            scheduleHardRadioRetry(expiredOrAuth?0L:RADIOTALK_RETRY_DELAY_MS);
             return;
         }
 
-        final int attempt=radioSoftRetryCount;
-        final long failedPosition=currentPlayerPosition();
-        final boolean seekable=player.isCurrentMediaItemSeekable();
-        long delay=isResolverRadio(id) ? 300L : (attempt==1 ? 500L : 1500L);
+        trace("RADIOTALK terminal player error -> restart direct source: "+id+
+            " http="+http);
+        scheduleHardRadioRetry(RADIOTALK_RETRY_DELAY_MS);
+    }
 
-        trace("RADIO soft retry #"+attempt+" same source in "+delay+
-            "ms pos="+failedPosition+" seekable="+seekable);
-        retryHandler.removeCallbacksAndMessages(null);
-        retryHandler.postDelayed(() -> {
-            if(userStopped || !id.equals(currentRadioId)) return;
-            try{
-                if(seekable && failedPosition>0L) player.seekTo(failedPosition);
-                player.prepare();
-                if(requestPlaybackFocus()) player.play();
-                publishState();
-                traceRadioHealth("SOFT-RETRY");
-            }catch(Throwable e){
-                trace("RADIO soft retry exception: "+e);
-                scheduleSoftRadioRetry();
-            }
-        },delay);
+    private void scheduleSoftRadioRetry(){
+        // Retained as a compatibility entry point for older call sites.
+        // Media3 load retries now happen inside RadioTalkLoadErrorPolicy without
+        // re-preparing/replacing the live MediaSource.
+        if(userStopped||currentRadioId==null) return;
+        scheduleHardRadioRetry(RADIOTALK_RETRY_DELAY_MS);
     }
 
     private void scheduleHardRadioRetry(long delay){
@@ -1508,44 +1492,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void recoverResolverRadio(String id){
         radioBufferingHandler.removeCallbacksAndMessages(null);
-        String standby=standbyResolvedUrls.remove(id);
-        Long at=standbyResolvedAt.remove(id);
-        long age=at==null?Long.MAX_VALUE:(System.currentTimeMillis()-at);
-        if(standby!=null && age<4L*60L*1000L &&
-           !standby.equals(currentResolvedRadioUrl)){
-            trace("RADIO standby source -> "+id+" age="+age+"ms");
-            currentResolvedRadioUrl=standby;
-            playUrl(standby,TITLES.get(id),"Live");
-            return;
-        }
-        trace("RADIO standby unavailable -> resolver now: "+id);
+        trace("RADIOTALK fresh resolver -> "+id);
         resolveAndPlay(id,STREAMS.get(id));
-    }
-
-    private void scheduleResolverPrefetch(String id){
-        if(!isResolverRadio(id)) return;
-        resolverRefreshHandler.removeCallbacksAndMessages(null);
-        resolverRefreshHandler.postDelayed(() -> {
-            if(userStopped||!id.equals(currentRadioId)) return;
-            final String lookup=STREAMS.get(id);
-            resolver.execute(() -> {
-                try{
-                    String fresh=resolveStreamUrl(id,lookup);
-                    if(fresh!=null && id.equals(currentRadioId)){
-                        standbyResolvedUrls.put(id,fresh);
-                        standbyResolvedAt.put(id,System.currentTimeMillis());
-                        trace("RADIO standby refreshed: "+id+" -> "+radioUrlLabel(fresh));
-                    }
-                }catch(Exception e){
-                    trace("RADIO standby refresh error: "+id+" / "+e);
-                }finally{
-                    runOnPlayerThread(() -> {
-                        if(!userStopped&&id.equals(currentRadioId))
-                            scheduleResolverPrefetch(id);
-                    });
-                }
-            });
-        },RADIO_RESOLVER_PREFETCH_MS);
     }
 
     private void playFtpAudio(String id){
@@ -2424,7 +2372,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             if(requestPlaybackFocus()) player.play();
             else trace("PLAYER audio focus denied");
             publishState();
-            if(currentRadioId!=null) scheduleResolverPrefetch(currentRadioId);
         }catch(Throwable e){
             trace("PLAYER ERROR: "+e);
             publishError("player: "+e);
