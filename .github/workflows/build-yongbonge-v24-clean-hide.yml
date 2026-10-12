@@ -1,0 +1,80 @@
+name: Build yongbongE v0.24 CLEAN-HIDE
+
+on:
+  push:
+    branches:
+      - yongbonge-v24-clean-hide
+    paths:
+      - .github/workflows/build-yongbonge-v24-clean-hide.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified v0.11 base
+        shell: pwsh
+        run: |
+          ./yongbongE-build/build-v11.ps1
+
+      - name: Apply v0.24 clean-hide sources
+        shell: pwsh
+        run: |
+          Copy-Item "yongbongE-expanded-v15-trace/FtpClient.cs" "src/TinyFtpDrive/FtpClient.cs" -Force
+          Copy-Item "yongbongE-expanded-v24-clean-hide/FtpFileSystem.cs" "src/TinyFtpDrive/FtpFileSystem.cs" -Force
+          Copy-Item "yongbongE-expanded-v15-trace/Program.cs" "src/TinyFtpDrive/Program.cs" -Force
+          Copy-Item "yongbongE-expanded-v20-trace-nodisk/TraceLog.cs" "src/TinyFtpDrive/TraceLog.cs" -Force
+          [IO.File]::WriteAllText("src/TinyFtpDrive/VERSION.txt", "0.24.0-CLEAN-HIDE" + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Verify bounded video seek patch
+        shell: pwsh
+        run: |
+          $fs = Get-Content "src/TinyFtpDrive/FtpFileSystem.cs" -Raw
+          foreach ($required in @(
+            "VideoSeekReadAheadSize = 4 * 1024 * 1024",
+            "VideoSeekMinFileSize = 128L * 1024 * 1024",
+            "VideoSeekMinJump = 8L * 1024 * 1024",
+            "IsVideoPath(h.RemotePath)",
+            "bool preferSession = videoSeek ||",
+            "host.NamedStreams = false;",
+            "Dictionary<string, FtpHandle> _pendingWrites",
+            "QueueStaleUploadCleanup",
+            "IsHiddenRootPath"
+          )) {
+            if (!$fs.Contains($required)) { throw "Missing requirement: $required" }
+          }
+
+      - name: Compile v0.24 CLEAN-HIDE
+        shell: pwsh
+        run: |
+          dotnet build "src/TinyFtpDrive/TinyFtpDrive.csproj" -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "VIDEO-SEEK build failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iss = [IO.File]::ReadAllText("yongbongE.iss")
+          $iss = $iss.Replace("AppVersion=0.11.0", "AppVersion=0.24.0")
+          $iss = $iss.Replace("OutputBaseFilename=yongbongE-Setup-v0.11", "OutputBaseFilename=yongbongE-Setup-v0.24-CLEAN-HIDE")
+          [IO.File]::WriteAllText("yongbongE-v24-clean-hide.iss", $iss, (New-Object System.Text.UTF8Encoding($false)))
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "yongbongE-v24-clean-hide.iss"
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          $exe = "dist/yongbongE-Setup-v0.24-CLEAN-HIDE.exe"
+          if (!(Test-Path $exe)) { throw "installer missing" }
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Get-FileHash $exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yongbongE-v0.24-CLEAN-HIDE
+          path: dist/yongbongE-Setup-v0.24-CLEAN-HIDE.exe
+          if-no-files-found: error
+          retention-days: 30
