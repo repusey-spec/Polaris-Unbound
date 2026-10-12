@@ -155,6 +155,9 @@ namespace TinyFtpDrive
         private readonly SharedReadCache _sharedReadCache = new SharedReadCache();
         private readonly object _adsSync = new object();
         private readonly object _pendingSync = new object();
+        private readonly object _staleUploadSync = new object();
+        private readonly HashSet<string> _staleUploadScanned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan StaleUploadAge = TimeSpan.FromDays(7);
         private readonly Dictionary<string, FtpHandle> _pendingWrites =
             new Dictionary<string, FtpHandle>(StringComparer.OrdinalIgnoreCase);
 
@@ -1132,6 +1135,8 @@ namespace TinyFtpDrive
                 TraceLog.Write("ENUM", "FETCH_BEGIN path=" + h.RemotePath + " marker=" + (Marker ?? "<null>"));
                 Stopwatch enumSw = Stopwatch.StartNew();
                 List<RemoteEntry> entries = _ftp.List(h.RemotePath);
+                QueueStaleUploadCleanup(h.RemotePath, entries);
+                entries.RemoveAll(e => IsStaleUploadTempName(e.Name));
                 if (h.RemotePath == "/")
                     entries.RemoveAll(e => IsHiddenRootPath("/" + e.Name));
                 entries.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
@@ -1496,6 +1501,49 @@ namespace TinyFtpDrive
         private void MoveZoneMetadata(string oldPath, string newPath, bool isDirectory)
         {
             // ADS disabled in v0.21.
+        }
+
+        private static bool IsStaleUploadTempName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || !name.StartsWith(".yongbonge-stream-", StringComparison.OrdinalIgnoreCase) ||
+                !name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) return false;
+            string id = name.Substring(".yongbonge-stream-".Length,
+                name.Length - ".yongbonge-stream-".Length - ".tmp".Length);
+            Guid parsed;
+            return id.Length == 32 && Guid.TryParseExact(id, "N", out parsed);
+        }
+
+        private void QueueStaleUploadCleanup(string directory, List<RemoteEntry> entries)
+        {
+            List<string> candidates = new List<string>();
+            DateTime cutoff = DateTime.UtcNow - StaleUploadAge;
+            foreach (RemoteEntry entry in entries)
+            {
+                if (!entry.IsDirectory && IsStaleUploadTempName(entry.Name) &&
+                    entry.ModifiedUtc != default(DateTime) && entry.ModifiedUtc.ToUniversalTime() < cutoff)
+                    candidates.Add(entry.FullPath);
+            }
+            if (candidates.Count == 0) return;
+            lock (_staleUploadSync)
+            {
+                if (!_staleUploadScanned.Add(directory)) return;
+            }
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                foreach (string path in candidates)
+                {
+                    try
+                    {
+                        RemoteEntry current = _ftp.Stat(path);
+                        if (current == null || current.IsDirectory ||
+                            current.ModifiedUtc == default(DateTime) ||
+                            current.ModifiedUtc.ToUniversalTime() >= DateTime.UtcNow - StaleUploadAge)
+                            continue;
+                        _ftp.DeleteFile(path);
+                    }
+                    catch (Exception ex) { TraceLog.Write("CLEANUP", ex.Message); }
+                }
+            });
         }
 
         private static bool IsHiddenRootPath(string path)
