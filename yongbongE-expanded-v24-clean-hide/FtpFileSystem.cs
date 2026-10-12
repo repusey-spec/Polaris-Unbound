@@ -284,7 +284,7 @@ namespace TinyFtpDrive
 
             FileName = StripDefaultDataStream(FileName);
             string path = ToRemotePath(FileName);
-            if (IsHiddenRootPath(path)) return STATUS_OBJECT_NAME_NOT_FOUND;
+            if (IsHiddenRootPath(path)) { FileAttributes = 0; return STATUS_OBJECT_NAME_NOT_FOUND; }
 
             FtpHandle pending;
             if (TryGetPendingWrite(path, out pending))
@@ -330,7 +330,7 @@ namespace TinyFtpDrive
 
             FileName = StripDefaultDataStream(FileName);
             string path = ToRemotePath(FileName);
-            if (IsHiddenRootPath(path)) return STATUS_ACCESS_DENIED;
+            if (IsHiddenRootPath(path)) { FileNode = null; FileDesc0 = null; FileInfo = default(FileInfo); NormalizedName = null; return STATUS_ACCESS_DENIED; }
             bool isDir = 0 != (CreateOptions & FILE_DIRECTORY_FILE);
             FtpHandle pendingExisting;
             if (TryGetPendingWrite(path, out pendingExisting) || _ftp.Stat(path) != null)
