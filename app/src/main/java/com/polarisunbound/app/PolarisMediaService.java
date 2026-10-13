@@ -613,7 +613,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
         android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
         if(!isResumeAllowed(p)){
-            trace("AA restore skipped: manual pause/stop");
+            trace("AA restore skipped: resume not allowed");
             return;
         }
         if(currentRadioId!=null || currentMp3Id>=0 || currentFtpMp3Path!=null ||
