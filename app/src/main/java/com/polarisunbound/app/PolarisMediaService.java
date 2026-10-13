@@ -525,7 +525,14 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void saveLastPlaybackPosition(){
         if(player==null) return;
         if(currentFtpMp3Path!=null){
-            rememberFtpForResume(currentFtpMp3Path,currentPlayerPosition());
+            // Save only source/path/position. Do not change PREF_RESUME_ALLOWED:
+            // eligibility is owned by explicit playback/focus state, not by the
+            // periodic position saver or AA disconnect bookkeeping.
+            getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+                .putString(PREF_LAST_SOURCE,SOURCE_FTP)
+                .putString(PREF_LAST_FTP_PATH,currentFtpMp3Path)
+                .putLong(PREF_LAST_FTP_POSITION,currentPlayerPosition())
+                .apply();
             return;
         }
         if(currentMp3Id>=0){
@@ -606,7 +613,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
         android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
         if(!isResumeAllowed(p)){
-            trace("AA restore skipped: manual pause/stop");
+            trace("AA restore skipped: resume not allowed");
             return;
         }
         if(currentRadioId!=null || currentMp3Id>=0 || currentFtpMp3Path!=null ||
@@ -1316,8 +1323,17 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             if(change==AudioManager.AUDIOFOCUS_LOSS){
                 resumeAfterTransientFocusLoss=false;
                 retryHandler.removeCallbacksAndMessages(null);
+                resolverRefreshHandler.removeCallbacksAndMessages(null);
+                radioBufferingHandler.removeCallbacksAndMessages(null);
+
+                // Permanent focus loss means another media app/source has taken over.
+                // Revoke automatic AA-session restore until Polaris receives an
+                // explicit play/play-from-media-id action again.
+                setResumeAllowed(false);
+
                 if(player!=null) player.pause();
                 publishState();
+                trace("AUDIO FOCUS permanent loss -> AA auto-restore disabled");
                 return;
             }
 
