@@ -281,14 +281,40 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     publishState();
                     return;
                 }
+
                 setResumeAllowed(true);
-                if(currentRadioId==null && currentMp3Id<0){
+
+                // Radio must never resume an old HLS timeline after Android Auto
+                // reconnect/play. Rebuild the radio source so resolver-backed
+                // stations fetch a fresh playable URL and direct stations create
+                // a fresh live MediaItem.
+                if(currentRadioId!=null){
+                    final String id=currentRadioId;
+                    trace("AA/MediaSession play -> fresh live radio: "+id);
+                    rememberRadioForResume(id);
+                    retryCount=0;
+                    radioSoftRetryCount=0;
+                    radioHasPlayed=false;
+                    resumeAfterTransientFocusLoss=false;
+                    retryHandler.removeCallbacksAndMessages(null);
+                    resolverRefreshHandler.removeCallbacksAndMessages(null);
+                    radioBufferingHandler.removeCallbacksAndMessages(null);
+                    currentResolvedRadioUrl=null;
+                    try{
+                        player.stop();
+                        player.clearMediaItems();
+                    }catch(Exception ignored){}
+                    startRadio(id);
+                    return;
+                }
+
+                if(currentMp3Id<0){
                     sessionRestoreConsumed=false;
                     restoreLastSourceIfAllowed();
                     return;
                 }
-                if(currentRadioId!=null) rememberRadioForResume(currentRadioId);
-                else if(currentMp3Id>=0) rememberMp3ForResume(currentMp3Id,currentPlayerPosition());
+
+                rememberMp3ForResume(currentMp3Id,currentPlayerPosition());
                 if(requestPlaybackFocus()) player.play();
                 publishState();
             }
@@ -558,7 +584,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             if(player!=null){
                 try{ player.pause(); }catch(Exception ignored){}
                 try{ player.stop(); }catch(Exception ignored){}
+                try{ player.clearMediaItems(); }catch(Exception ignored){}
             }
+            currentResolvedRadioUrl=null;
             currentRadioId=null;
             currentMp3Id=-1L;
             currentFtpMp3Path=null;
