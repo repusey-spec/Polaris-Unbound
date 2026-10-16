@@ -1,0 +1,405 @@
+package com.polarisunbound.ytminspector;
+
+import android.app.NotificationManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.media.MediaMetadata;
+import android.media.Rating;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.support.v4.media.MediaBrowserCompat;
+import android.support.v4.media.MediaDescriptionCompat;
+import android.support.v4.media.MediaMetadataCompat;
+import android.support.v4.media.RatingCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
+import android.text.TextUtils;
+
+import androidx.media.MediaBrowserServiceCompat;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * 1.b01 phone-only experimental MediaBrowser/MediaSession bridge.
+ * No audio player, no focus requests, no foreground media notification.
+ * Not exported: AA and other apps cannot bind in this experimental version.
+ * Starts only while the Inspector Activity's MediaBrowser is connected.
+ */
+public final class YtmRelayService extends MediaBrowserServiceCompat {
+    public static final String PREFS="ytm_bridge_b01";
+    public static final String EVENTS="events";
+    public static final String STATUS="status";
+    private static final String YTM="com.google.android.apps.youtube.music";
+    private static final String ROOT="ytm:bridge:root";
+    private static final String CURRENT="ytm:bridge:current";
+    private static final long POLL_MS=1250L;
+
+    private final Handler handler=new Handler(Looper.getMainLooper());
+    private MediaSessionManager manager;
+    private ComponentName permissionComponent;
+    private MediaSessionCompat session;
+    private MediaController ytController;
+    private boolean listenerAdded=false;
+    private String lastSnapshot="";
+    private String lastStatus="중계 시작 전";
+    private MediaMetadataCompat currentMetadata;
+
+    private final MediaController.Callback ytCallback=new MediaController.Callback(){
+        @Override public void onMetadataChanged(MediaMetadata m){handler.post(()->refresh());}
+        @Override public void onPlaybackStateChanged(PlaybackState s){handler.post(()->refresh());}
+        @Override public void onSessionDestroyed(){handler.post(()->refresh());}
+    };
+
+    private final MediaSessionManager.OnActiveSessionsChangedListener listChanged=
+        controllers -> handler.post(()->refresh());
+
+    private final Runnable poll=new Runnable(){
+        @Override public void run(){
+            refresh();
+            handler.postDelayed(this,POLL_MS);
+        }
+    };
+
+    private final MediaSessionCompat.Callback bridgeCallback=new MediaSessionCompat.Callback(){
+        @Override public void onPlay(){
+            forward("PLAY",PlaybackState.ACTION_PLAY,t->t.play());
+        }
+        @Override public void onPause(){
+            forward("PAUSE",PlaybackState.ACTION_PAUSE,t->t.pause());
+        }
+        @Override public void onSkipToNext(){
+            forward("NEXT",PlaybackState.ACTION_SKIP_TO_NEXT,t->t.skipToNext());
+        }
+        @Override public void onSkipToPrevious(){
+            forward("PREVIOUS",PlaybackState.ACTION_SKIP_TO_PREVIOUS,t->t.skipToPrevious());
+        }
+        @Override public void onSeekTo(long pos){
+            forward("SEEK "+pos+"ms",PlaybackState.ACTION_SEEK_TO,t->t.seekTo(Math.max(0,pos)));
+        }
+        @Override public void onPlayFromMediaId(String id,Bundle extras){
+            if(CURRENT.equals(id)){
+                forward("PLAY_FROM_MEDIA_ID",PlaybackState.ACTION_PLAY,t->t.play());
+            }else record("BRIDGE rejected mediaId="+id);
+        }
+        @Override public void onSetRating(RatingCompat rating){
+            if(rating==null || rating.getRatingStyle()!=RatingCompat.RATING_THUMB_UP_DOWN||
+                !rating.isRated()){
+                record("BRIDGE rating ignored: unsupported style");
+                return;
+            }
+            MediaController target=commandTarget(PlaybackState.ACTION_SET_RATING);
+            if(target==null)return;
+            try{
+                boolean up=rating.isThumbUp();
+                target.getTransportControls().setRating(Rating.newThumbRating(up));
+                record("BRIDGE FORWARDED SET_RATING "+(up?"UP":"DOWN")+
+                    " · 계정 반영은 YTM에서 확인");
+                refresh();
+            }catch(Exception e){record("BRIDGE ERROR RATING "+e.getClass().getSimpleName());}
+        }
+        @Override public void onCustomAction(String id,Bundle extras){
+            if(!("thumbs_up_action".equals(id)||"thumbs_down_action".equals(id)||
+                "shuffle_action".equals(id)||"loop_mode_action".equals(id))){
+                record("BRIDGE rejected unknown custom action="+id);
+                return;
+            }
+            MediaController target=commandTarget(0L);
+            if(target==null)return;
+            PlaybackState state=target.getPlaybackState();
+            boolean found=false;
+            if(state!=null&&state.getCustomActions()!=null){
+                for(PlaybackState.CustomAction action:state.getCustomActions()){
+                    if(id.equals(action.getAction())){found=true;break;}
+                }
+            }
+            if(!found){
+                record("BRIDGE rejected unavailable custom action="+id);
+                return;
+            }
+            try{
+                target.getTransportControls().sendCustomAction(id,Bundle.EMPTY);
+                record("BRIDGE FORWARDED CUSTOM "+id);
+                refresh();
+            }catch(Exception e){record("BRIDGE ERROR CUSTOM "+e.getClass().getSimpleName());}
+        }
+    };
+
+    private interface Command{
+        void run(MediaController.TransportControls t);
+    }
+
+    @Override public void onCreate(){
+        super.onCreate();
+        manager=(MediaSessionManager)getSystemService(Context.MEDIA_SESSION_SERVICE);
+        permissionComponent=new ComponentName(this,SessionAccessListener.class);
+        session=new MediaSessionCompat(this,"PolarisYTMRelay1b01");
+        session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|
+            MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        session.setCallback(bridgeCallback,handler);
+        session.setPlaybackState(new PlaybackStateCompat.Builder()
+            .setState(PlaybackStateCompat.STATE_NONE,0,0f).setActions(0).build());
+        session.setActive(true);
+        setSessionToken(session.getSessionToken());
+        record("BRIDGE START · 자체 오디오 재생 없음 / YTM 전용 / 외부 비공개");
+        if(allowed()&&manager!=null){
+            try{
+                manager.addOnActiveSessionsChangedListener(listChanged,permissionComponent,handler);
+                listenerAdded=true;
+            }catch(Exception e){record("BRIDGE listener unavailable "+e.getClass().getSimpleName());}
+        }
+        handler.post(poll);
+    }
+
+    @Override public void onDestroy(){
+        handler.removeCallbacks(poll);
+        if(listenerAdded&&manager!=null){
+            try{manager.removeOnActiveSessionsChangedListener(listChanged);}
+            catch(Exception ignored){}
+        }
+        detach();
+        if(session!=null){
+            session.setActive(false);
+            session.release();
+            session=null;
+        }
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(STATUS,"중계 종료").apply();
+        super.onDestroy();
+    }
+
+    private boolean allowed(){
+        try{
+            NotificationManager nm=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+            return nm!=null&&nm.isNotificationListenerAccessGranted(permissionComponent);
+        }catch(Exception e){return false;}
+    }
+
+    private void detach(){
+        if(ytController!=null){
+            try{ytController.unregisterCallback(ytCallback);}catch(Exception ignored){}
+            ytController=null;
+        }
+    }
+
+    /** Each command independently resolves a LIVE YouTube Music session. */
+    private MediaController bestController(){
+        if(!allowed()||manager==null)return null;
+        try{
+            List<MediaController> items=manager.getActiveSessions(permissionComponent);
+            MediaController best=null;
+            int bestScore=Integer.MIN_VALUE;
+            if(items==null)return null;
+            for(MediaController item:items){
+                if(item==null || !YTM.equals(item.getPackageName()))continue;
+                PlaybackState state=item.getPlaybackState();
+                int code=state==null?PlaybackState.STATE_NONE:state.getState();
+                int score=code==PlaybackState.STATE_PLAYING?6000:
+                    code==PlaybackState.STATE_BUFFERING?5000:
+                    code==PlaybackState.STATE_PAUSED?4000:1000;
+                if(ytController!=null&&
+                   ytController.getSessionToken().equals(item.getSessionToken()))score+=100;
+                if(score>bestScore){best=item;bestScore=score;}
+            }
+            return best;
+        }catch(Exception e){
+            record("BRIDGE session read error "+e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    private MediaController commandTarget(long requiredAction){
+        MediaController target=bestController();
+        if(target==null){record("BRIDGE command rejected: active YTM session unavailable");return null;}
+        PlaybackState state=target.getPlaybackState();
+        if(requiredAction!=0L &&(state==null||(state.getActions()&requiredAction)==0L)){
+            record("BRIDGE command rejected: source action not advertised 0x"+
+                Long.toHexString(requiredAction));
+            return null;
+        }
+        return target;
+    }
+
+    private void forward(String name,long required,Command command){
+        MediaController target=commandTarget(required);
+        if(target==null)return;
+        try{
+            command.run(target.getTransportControls());
+            record("BRIDGE FORWARDED "+name+" → "+YTM);
+            refresh();
+        }catch(Exception e){
+            record("BRIDGE ERROR "+name+" "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void refresh(){
+        if(session==null)return;
+        MediaController found=bestController();
+        if(found==null){
+            detach();
+            lastSnapshot="";
+            lastStatus=allowed()?"YT Music 활성 세션 없음":"알림 접근 권한 없음";
+            getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(STATUS,lastStatus).apply();
+            session.setMetadata(new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE,"YT Music 연결 대기").build());
+            session.setPlaybackState(new PlaybackStateCompat.Builder()
+                .setState(PlaybackStateCompat.STATE_NONE,0L,0f).setActions(0L).build());
+            currentMetadata=null;
+            return;
+        }
+        boolean replaced=ytController==null;
+        if(!replaced){
+            try{replaced=!ytController.getSessionToken().equals(found.getSessionToken());}
+            catch(Exception e){replaced=true;}
+        }
+        if(replaced){
+            detach();
+            ytController=found;
+            try{ytController.registerCallback(ytCallback,handler);}catch(Exception ignored){}
+            record("BRIDGE attached YT Music session");
+        }
+
+        MediaMetadata metadata=null;
+        PlaybackState playback=null;
+        try{metadata=found.getMetadata();playback=found.getPlaybackState();}
+        catch(Exception e){record("BRIDGE metadata read "+e.getClass().getSimpleName());}
+        String title=metadata==null?null:metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
+        String artist=metadata==null?null:metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
+        String album=metadata==null?null:metadata.getString(MediaMetadata.METADATA_KEY_ALBUM);
+        long duration=metadata==null?0L:metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+        int state=playback==null?PlaybackState.STATE_NONE:playback.getState();
+        long actions=playback==null?0L:playback.getActions();
+        String snapshot=String.valueOf(title)+"|"+artist+"|"+album+"|"+duration+"|"+
+            state+"|"+actions+customSignature(playback);
+        if(!snapshot.equals(lastSnapshot)){
+            lastSnapshot=snapshot;
+            record("BRIDGE MIRROR "+safe(title)+" / "+safe(artist)+
+                " / "+stateName(state)+" / actions=0x"+Long.toHexString(actions));
+            notifyChildrenChanged(ROOT);
+        }
+
+        MediaMetadataCompat.Builder md=new MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,CURRENT)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE,safe(title))
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,safe(artist))
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM,safe(album))
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION,Math.max(0L,duration));
+        if(metadata!=null){
+            Bitmap art=metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+            if(art==null)art=metadata.getBitmap(MediaMetadata.METADATA_KEY_ART);
+            if(art!=null){
+                try{
+                    int w=art.getWidth(),h=art.getHeight();
+                    if(w>256||h>256){
+                        double scale=Math.min(256.0/w,256.0/h);
+                        art=Bitmap.createScaledBitmap(art,Math.max(1,(int)(w*scale)),
+                            Math.max(1,(int)(h*scale)),true);
+                    }
+                    md.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,art);
+                }catch(Exception ignored){}
+            }
+        }
+        currentMetadata=md.build();
+        session.setMetadata(currentMetadata);
+
+        PlaybackStateCompat.Builder ps=new PlaybackStateCompat.Builder();
+        long exposed=0L;
+        if((actions&PlaybackState.ACTION_PLAY)!=0)exposed|=PlaybackStateCompat.ACTION_PLAY;
+        if((actions&PlaybackState.ACTION_PAUSE)!=0)exposed|=PlaybackStateCompat.ACTION_PAUSE;
+        if((actions&PlaybackState.ACTION_SKIP_TO_NEXT)!=0)
+            exposed|=PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
+        if((actions&PlaybackState.ACTION_SKIP_TO_PREVIOUS)!=0)
+            exposed|=PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS;
+        if((actions&PlaybackState.ACTION_SEEK_TO)!=0)exposed|=PlaybackStateCompat.ACTION_SEEK_TO;
+        if((actions&PlaybackState.ACTION_SET_RATING)!=0)
+            exposed|=PlaybackStateCompat.ACTION_SET_RATING;
+        ps.setActions(exposed);
+        int mapped=state==PlaybackState.STATE_PLAYING?PlaybackStateCompat.STATE_PLAYING:
+            state==PlaybackState.STATE_PAUSED?PlaybackStateCompat.STATE_PAUSED:
+            state==PlaybackState.STATE_BUFFERING?PlaybackStateCompat.STATE_BUFFERING:
+            state==PlaybackState.STATE_CONNECTING?PlaybackStateCompat.STATE_CONNECTING:
+            state==PlaybackState.STATE_STOPPED?PlaybackStateCompat.STATE_STOPPED:
+            state==PlaybackState.STATE_ERROR?PlaybackStateCompat.STATE_ERROR:
+            PlaybackStateCompat.STATE_NONE;
+        long position=playback==null?0L:Math.max(0L,playback.getPosition());
+        float speed=playback==null?0f:playback.getPlaybackSpeed();
+        ps.setState(mapped,position,speed,SystemClock.elapsedRealtime());
+        if(state==PlaybackState.STATE_ERROR && playback!=null){
+            CharSequence error=playback.getErrorMessage();
+            if(error!=null)ps.setErrorMessage(error);
+        }
+        if(playback!=null&&playback.getCustomActions()!=null){
+            for(PlaybackState.CustomAction action:playback.getCustomActions()){
+                String id=action.getAction();
+                if("thumbs_up_action".equals(id)||"thumbs_down_action".equals(id)||
+                   "shuffle_action".equals(id)||"loop_mode_action".equals(id)){
+                    try{
+                        ps.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                            id,action.getName(),android.R.drawable.ic_media_play).build());
+                    }catch(Exception ignored){}
+                }
+            }
+        }
+        session.setPlaybackState(ps.build());
+        lastStatus="YTM "+safe(title)+" / "+stateName(state)+
+            " / relay actions 0x"+Long.toHexString(exposed);
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(STATUS,lastStatus).apply();
+    }
+
+    private static String customSignature(PlaybackState state){
+        if(state==null||state.getCustomActions()==null)return "";
+        List<String> x=new ArrayList<>();
+        for(PlaybackState.CustomAction action:state.getCustomActions())
+            x.add(action.getAction()+"="+action.getName());
+        return TextUtils.join("|",x);
+    }
+
+    private static String safe(String x){return x==null||x.trim().isEmpty()?"(정보 없음)":x;}
+    private static String stateName(int s){
+        switch(s){
+            case PlaybackState.STATE_PLAYING:return "재생 중";
+            case PlaybackState.STATE_PAUSED:return "일시정지";
+            case PlaybackState.STATE_BUFFERING:return "버퍼링";
+            case PlaybackState.STATE_STOPPED:return "정지";
+            case PlaybackState.STATE_ERROR:return "오류";
+            default:return "상태 "+s;
+        }
+    }
+
+    private void record(String message){
+        String time=new SimpleDateFormat("MM-dd HH:mm:ss",Locale.KOREA).format(new Date());
+        String line=time+"  "+message+"\n";
+        String history=getSharedPreferences(PREFS,MODE_PRIVATE).getString(EVENTS,"")+line;
+        if(history.length()>12500)history=history.substring(history.length()-12500);
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(EVENTS,history).apply();
+    }
+
+    @Override public BrowserRoot onGetRoot(String clientPackageName,int clientUid,Bundle rootHints){
+        // This experimental service is explicitly non-exported; double-check client identity.
+        if(!getPackageName().equals(clientPackageName))return null;
+        return new BrowserRoot(ROOT,null);
+    }
+
+    @Override public void onLoadChildren(String parentId,
+            Result<List<MediaBrowserCompat.MediaItem>> result){
+        List<MediaBrowserCompat.MediaItem> items=new ArrayList<>();
+        if(ROOT.equals(parentId)&&currentMetadata!=null){
+            MediaDescriptionCompat description=new MediaDescriptionCompat.Builder()
+                .setMediaId(CURRENT)
+                .setTitle(currentMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE))
+                .setSubtitle(currentMetadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST))
+                .build();
+            items.add(new MediaBrowserCompat.MediaItem(description,
+                MediaBrowserCompat.MediaItem.FLAG_PLAYABLE));
+        }
+        result.sendResult(items);
+    }
+}
