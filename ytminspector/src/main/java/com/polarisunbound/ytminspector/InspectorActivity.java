@@ -15,6 +15,10 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadata;
 import android.media.Rating;
+import android.support.v4.media.MediaBrowserCompat;
+import android.support.v4.media.MediaMetadataCompat;
+import android.support.v4.media.session.MediaControllerCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
@@ -45,7 +49,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Polaris YTM 1.a03 — PHONE-ONLY MediaSession search command diagnostics.
+ * Polaris YTM 1.b01 — PHONE-ONLY MediaSession proxy + search diagnostics.
  *
  * Uses the Android MediaSessionManager / NotificationListener access foundation
  * studied in MQ Player without copying its GPL implementation.
@@ -89,6 +93,11 @@ public final class InspectorActivity extends Activity {
     private TextView lastCommandText;
     private TextView searchErrorText;
     private EditText artistQueryInput;
+    private TextView relayInfo;
+    private TextView relayHistory;
+    private MediaBrowserCompat relayBrowser;
+    private MediaControllerCompat relayController;
+    private boolean relayConnecting=false;
     private String lastSearchError="검색 오류 미발생";
 
     private final MediaController.Callback selectedCallback=new MediaController.Callback(){
@@ -116,6 +125,7 @@ public final class InspectorActivity extends Activity {
         @Override public void run(){
             if(!watching) return;
             scan(false);
+            showRelay();
             handler.postDelayed(this,POLL_MS);
         }
     };
@@ -126,6 +136,16 @@ public final class InspectorActivity extends Activity {
         listenerComponent=new ComponentName(this,SessionAccessListener.class);
         constructUi();
         scan(false);
+    }
+
+    @Override protected void onStart(){
+        super.onStart();
+        connectRelay();
+    }
+
+    @Override protected void onStop(){
+        disconnectRelay();
+        super.onStop();
     }
 
     @Override protected void onResume(){
@@ -197,12 +217,12 @@ public final class InspectorActivity extends Activity {
 
         root.addView(text("Polaris YTM Inspector",25,WHITE,true));
         addSpace(root,4);
-        root.addView(text("1.a03 · 폰 전용 · 검색 오류 진단",14,ACCENT,true));
+        root.addView(text("1.b01 · 폰 전용 · MediaSession 중계 검증",14,ACCENT,true));
         addSpace(root,8);
         root.addView(text(
-            "1.a02의 정상 리모컨 기능을 유지합니다. "
-            +"곡명 검색은 명령 형식별로 수신 앱 반응과 오류를 기록합니다. "
-            +"검색은 버튼을 눌렀을 때만 실제로 실행합니다.",14,MUTED,false));
+            "YT Music 원래 세션은 그대로 두고, 별도 중계 MediaSession에 곡 정보와 "
+            +"재생 상태를 복제합니다. 중계 버튼은 YT Music에만 전달되며 "
+            +"이 앱 자체는 음악을 재생하거나 오디오 포커스를 요청하지 않습니다.",14,MUTED,false));
         addSpace(root,14);
 
         LinearLayout permissions=card(root);
@@ -248,6 +268,7 @@ public final class InspectorActivity extends Activity {
         sessionText=text("실행 중인 미디어 세션 검색 중…",13,MUTED,false);
         now.addView(sessionText);
 
+        addRelayPanel(root);
         addRemoteControls(root);
 
         LinearLayout details=card(root);
@@ -693,6 +714,166 @@ public final class InspectorActivity extends Activity {
 
 
 
+
+    private final MediaControllerCompat.Callback relayCallback=new MediaControllerCompat.Callback(){
+        @Override public void onMetadataChanged(MediaMetadataCompat metadata){
+            handler.post(()->showRelay());
+        }
+        @Override public void onPlaybackStateChanged(PlaybackStateCompat state){
+            handler.post(()->showRelay());
+        }
+        @Override public void onSessionDestroyed(){
+            handler.post(()->{
+                relayController=null;
+                showRelay();
+            });
+        }
+    };
+
+    private void connectRelay(){
+        if(relayBrowser!=null || relayConnecting)return;
+        relayConnecting=true;
+        relayInfoText("중계 서비스 연결 중…");
+        relayBrowser=new MediaBrowserCompat(this,
+            new ComponentName(this,YtmRelayService.class),
+            new MediaBrowserCompat.ConnectionCallback(){
+                @Override public void onConnected(){
+                    relayConnecting=false;
+                    try{
+                        if(relayBrowser==null || !relayBrowser.isConnected())return;
+                        relayController=new MediaControllerCompat(InspectorActivity.this,
+                            relayBrowser.getSessionToken());
+                        relayController.registerCallback(relayCallback,handler);
+                        log("중계 MediaBrowser 연결 완료");
+                        showRelay();
+                    }catch(Exception e){
+                        relayInfoText("중계 컨트롤러 연결 실패 · "+e.getClass().getSimpleName());
+                        log("중계 연결 오류 · "+e.getClass().getSimpleName());
+                    }
+                }
+                @Override public void onConnectionSuspended(){
+                    relayController=null;
+                    relayConnecting=false;
+                    relayInfoText("중계 연결 일시 중단");
+                }
+                @Override public void onConnectionFailed(){
+                    relayController=null;
+                    relayConnecting=false;
+                    relayInfoText("중계 연결 실패");
+                    log("중계 MediaBrowser 접속 실패");
+                }
+            },null);
+        try{relayBrowser.connect();}
+        catch(Exception e){
+            relayInfoText("중계 서비스 실행 실패: "+e.getClass().getSimpleName());
+            relayBrowser=null;
+            relayConnecting=false;
+        }
+    }
+
+    private void disconnectRelay(){
+        if(relayController!=null){
+            try{relayController.unregisterCallback(relayCallback);}
+            catch(Exception ignored){}
+            relayController=null;
+        }
+        if(relayBrowser!=null){
+            try{relayBrowser.disconnect();}catch(Exception ignored){}
+            relayBrowser=null;
+        }
+        relayConnecting=false;
+    }
+
+    private void relayInfoText(String message){
+        if(relayInfo!=null)relayInfo.setText(message);
+    }
+
+    private void relayCommand(String label,Runnable send){
+        if(relayController==null){
+            noteCommand("중계 세션 미연결: "+label);
+            return;
+        }
+        try{
+            send.run();
+            log("중계 버튼 → "+label+" · 중계 콜백을 통해 YTM으로 전달 요청");
+            handler.postDelayed(this::showRelay,1500L);
+        }catch(Exception e){log("중계 버튼 예외 "+label+" / "+e.getClass().getSimpleName());}
+    }
+
+    private void addRelayPanel(LinearLayout root){
+        LinearLayout panel=card(root);
+        panel.addView(text("1.b01 · Polaris 중계 MediaSession",17,WHITE,true));
+        addSpace(panel,5);
+        panel.addView(text("이 중계는 실험 앱 내부에서만 접근 가능합니다. "
+            +"아직 Android Auto에 노출하지 않습니다. 아래 중계 버튼은 "
+            +"기존 YT Music 버튼과 다르게 중간 MediaSession을 경유합니다.",12,MUTED,false));
+        addSpace(panel,9);
+        relayInfo=text("중계 연결 대기",14,ACCENT,false);
+        panel.addView(relayInfo);
+        addSpace(panel,8);
+        addButtons(panel,new String[]{"중계 ▶","중계 Ⅱ","중계 ◀","중계 ▶▶"},
+            new Runnable[]{
+                ()->relayCommand("PLAY",()->relayController.getTransportControls().play()),
+                ()->relayCommand("PAUSE",()->relayController.getTransportControls().pause()),
+                ()->relayCommand("PREVIOUS",()->relayController.getTransportControls().skipToPrevious()),
+                ()->relayCommand("NEXT",()->relayController.getTransportControls().skipToNext())
+            });
+        addButtons(panel,new String[]{"중계 👍","중계 👎"},
+            new Runnable[]{
+                ()->relayCommand("CUSTOM thumbs_up_action",
+                    ()->relayController.getTransportControls()
+                        .sendCustomAction("thumbs_up_action",Bundle.EMPTY)),
+                ()->relayCommand("CUSTOM thumbs_down_action",
+                    ()->relayController.getTransportControls()
+                        .sendCustomAction("thumbs_down_action",Bundle.EMPTY))
+            });
+        addButtons(panel,new String[]{"중계 셔플","중계 반복"},
+            new Runnable[]{
+                ()->relayCommand("CUSTOM shuffle_action",
+                    ()->relayController.getTransportControls()
+                        .sendCustomAction("shuffle_action",Bundle.EMPTY)),
+                ()->relayCommand("CUSTOM loop_mode_action",
+                    ()->relayController.getTransportControls()
+                        .sendCustomAction("loop_mode_action",Bundle.EMPTY))
+            });
+        panel.addView(text("중계 서비스 최근 진단 로그",12,MUTED,true));
+        relayHistory=text("아직 중계 이벤트 없음",12,MUTED,false);
+        panel.addView(relayHistory);
+    }
+
+    private void showRelay(){
+        String details=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
+            .getString(YtmRelayService.STATUS,"중계 상태 없음");
+        MediaControllerCompat bridge=relayController;
+        if(bridge==null){
+            relayInfoText("중계 연결 대기 · "+details);
+        }else{
+            try{
+                MediaMetadataCompat md=bridge.getMetadata();
+                PlaybackStateCompat playback=bridge.getPlaybackState();
+                String title=md==null?"곡 정보 없음":
+                    md.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+                String artist=md==null?"":md.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+                long actions=playback==null?0:playback.getActions();
+                String state=playback==null?"NONE":
+                    String.valueOf(playback.getState());
+                relayInfoText("중계 연결됨 · "+title+" / "+artist+
+                    "\n중계 state="+state+" / actions=0x"+Long.toHexString(actions)+
+                    "\n"+details);
+            }catch(Exception e){relayInfoText("중계 상태 읽기 오류: "+e.getClass().getSimpleName());}
+        }
+        if(relayHistory!=null){
+            String all=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
+                .getString(YtmRelayService.EVENTS,"");
+            String[] rows=all.split("\n");
+            StringBuilder recent=new StringBuilder();
+            for(int i=Math.max(0,rows.length-9);i<rows.length;i++){
+                if(!rows[i].isEmpty())recent.append(rows[i]).append('\n');
+            }
+            relayHistory.setText(recent.length()==0?"아직 중계 이벤트 없음":recent.toString());
+        }
+    }
+
     private boolean permitted(){
         try{
             NotificationManager notifications=(NotificationManager)
@@ -970,8 +1151,11 @@ public final class InspectorActivity extends Activity {
 
     private void copyDiagnostics(){
         String history=getSharedPreferences(STORE,MODE_PRIVATE).getString(HISTORY,"");
-        String payload="Polaris YTM Inspector v1.a03\nAndroid API "+Build.VERSION.SDK_INT+
-            "\n\n"+latestDiagnostic+"\n\n검색 오류: "+lastSearchError+"\n\n세션 변경 로그:\n"+history;
+        String payload="Polaris YTM Inspector v1.b01\nAndroid API "+Build.VERSION.SDK_INT+
+            "\n\n"+latestDiagnostic+"\n\n검색 오류: "+lastSearchError+
+            "\n\n중계 세션 기록:\n"+
+            getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE).getString(YtmRelayService.EVENTS,"")+
+            "\n\n세션 변경 로그:\n"+history;
         ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
         if(clipboard==null)return;
         clipboard.setPrimaryClip(ClipData.newPlainText("Polaris YTM diagnostic",payload));
