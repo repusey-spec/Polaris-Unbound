@@ -5,10 +5,13 @@
     </queries>
     <application
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:label="Polaris YTM Bridge"
+        android:label="Polaris YTM AA Test"
         android:icon="@android:drawable/ic_media_play"
         android:allowBackup="false"
         android:usesCleartextTraffic="false">
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc"/>
         <activity
             android:name=".InspectorActivity"
             android:exported="true">
@@ -19,7 +22,7 @@
         </activity>
         <service
             android:name=".YtmRelayService"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService"/>
             </intent-filter>
