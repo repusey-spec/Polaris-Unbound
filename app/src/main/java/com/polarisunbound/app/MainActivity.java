@@ -231,6 +231,7 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
                                 updateRadioScheduleFromMetadata();
+                                updateRadioPlaybackButton(lastPlaybackState);
                                 updateMiniPlayerMetadata();
                                 updateNowPlayingMetadata();
                                 updateNowPlayingModes();
@@ -437,9 +438,10 @@ public class MainActivity extends AppCompatActivity {
     private void updateRadioPlaybackButton(PlaybackStateCompat s){
         if(radioPlaybackButton==null) return;
         int state=s==null?PlaybackStateCompat.STATE_NONE:s.getState();
-        if(state==PlaybackStateCompat.STATE_PLAYING){
+        boolean radioActive=radioIdFromMetadata(lastMetadata)!=null;
+        if(radioActive && state==PlaybackStateCompat.STATE_PLAYING){
             radioPlaybackButton.setText("■  정지");
-        }else if(state==PlaybackStateCompat.STATE_BUFFERING){
+        }else if(radioActive && state==PlaybackStateCompat.STATE_BUFFERING){
             radioPlaybackButton.setText("◌  연결 중…");
         }else{
             radioPlaybackButton.setText("▶  재생");
@@ -451,7 +453,9 @@ public class MainActivity extends AppCompatActivity {
         if(controller==null) return;
         int state=lastPlaybackState==null?PlaybackStateCompat.STATE_NONE:lastPlaybackState.getState();
         MediaControllerCompat.TransportControls transport=controller.getTransportControls();
-        if(state==PlaybackStateCompat.STATE_PLAYING||state==PlaybackStateCompat.STATE_BUFFERING){
+        boolean radioActive=radioIdFromMetadata(lastMetadata)!=null;
+        if(radioActive && (state==PlaybackStateCompat.STATE_PLAYING||
+                           state==PlaybackStateCompat.STATE_BUFFERING)){
             transport.stop();
         }else{
             String id=selectedRadioId;
