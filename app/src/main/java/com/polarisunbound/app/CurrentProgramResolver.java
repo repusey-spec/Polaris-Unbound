@@ -133,6 +133,11 @@ public final class CurrentProgramResolver {
         if("kr4".equals(id)) return "https://namu.wiki/edit/MBC%20%EB%9D%BC%EB%94%94%EC%98%A4/%ED%8E%B8%EC%84%B1%ED%91%9C?section=2";
         if("kr6".equals(id)) return "https://namu.wiki/w/SBS%20%ED%8C%8C%EC%9B%8CFM";
         if("kiis".equals(id)) return "https://kiisfm.iheart.com/schedule/";
+        if("wild949".equals(id)) return "https://wild949.iheart.com/schedule/";
+        if("alt987".equals(id)) return "https://alt987fm.iheart.com/schedule/";
+        if("myfm1043".equals(id)) return "https://1043myfm.iheart.com/schedule/";
+        if("z100".equals(id)) return "https://z100.iheart.com/schedule/";
+        if("power1051".equals(id)) return "https://power1051.iheart.com/schedule/";
         if("gallery".equals(id)) return "https://live365.com/station/Jazz-from-Gallery-41-a94394";
         return null;
     }
@@ -306,7 +311,9 @@ public final class CurrentProgramResolver {
         }
 
         if("gallery".equals(id)) return parseGallery(id,b.toString());
-        if("kiis".equals(id)) return parseKiis(id,b.toString());
+        if("kiis".equals(id)||"wild949".equals(id)||"alt987".equals(id)||
+           "myfm1043".equals(id)||"z100".equals(id)||"power1051".equals(id))
+            return parseKiis(id,b.toString());
         if("kr4".equals(id)) return parseMbcStandardEdit(id,b.toString());
         return parseNamu(id,b.toString());
     }
@@ -418,7 +425,7 @@ public final class CurrentProgramResolver {
                 previous=line;
         }
 
-        if(byStart.isEmpty()) throw new IllegalStateException("No KIIS schedule entries");
+        if(byStart.isEmpty()) throw new IllegalStateException("No iHeart schedule entries for "+id);
         return selectCurrent(id,station,byStart);
     }
 
