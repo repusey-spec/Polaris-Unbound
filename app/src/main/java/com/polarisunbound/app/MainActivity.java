@@ -392,6 +392,13 @@ public class MainActivity extends AppCompatActivity {
             status.setTextColor(0xDDFFFFFF);
             status.setPadding(0,0,0,12);
             body.addView(status);
+            // Preserve the old stop control on the legacy home page.
+            TextView stop=radioControlButton();
+            stop.setText("■  정지");
+            stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); });
+            LinearLayout.LayoutParams stopLp=new LinearLayout.LayoutParams(-1,-2);
+            stopLp.setMargins(0,2,0,16);
+            body.addView(stop,stopLp);
         }
         updateMiniPlayerVisibility();
         sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
