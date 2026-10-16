@@ -1,4 +1,4 @@
-name: YTM 1.b Bridge APK
+name: YTM 1.c Android Auto Test APK
 
 on:
   pull_request:
@@ -25,7 +25,7 @@ jobs:
         run: |
           base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
           keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
-      - name: Build only 1.b03 streamlined bridge app
+      - name: Build only 1.c01 AA experimental app
         run: gradle :ytminspector:assembleDebug
       - name: Verify inspector APK signature
         run: |
@@ -35,7 +35,7 @@ jobs:
           "$APKSIGNER" verify --print-certs "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-YTM-Bridge-1.b03
+          name: Polaris-YTM-AA-1.c01
           path: ytminspector/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
