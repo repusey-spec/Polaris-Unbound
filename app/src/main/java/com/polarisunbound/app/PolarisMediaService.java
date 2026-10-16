@@ -66,7 +66,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final Runnable radioBrowseNotifyRunnable=() -> notifyChildrenChanged("radio");
     private final SharedPreferences.OnSharedPreferenceChangeListener radioPresetListener=
         (prefs,key)->{
-            if(key!=null && key.startsWith("slot")) scheduleRadioBrowseNotify();
+            if(key!=null && (key.startsWith("slot")||key.startsWith("layout_slot")))
+                scheduleRadioBrowseNotify();
         };
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
