@@ -1003,7 +1003,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private String radioProgramTitle(String id){
         CurrentProgramResolver.Result r=CurrentProgramResolver.cached(this,id);
-        if(!CurrentProgramResolver.isCurrentNow(id,r)) return TITLES.get(id);
+        if(!CurrentProgramResolver.isCurrentNow(id,r)){
+            String station=TITLES.get(id);
+            return CurrentProgramResolver.hasLocalClock(id)
+                ? station+"  |  "+CurrentProgramResolver.localClockLabel(id) : station;
+        }
         String title=r.aaTitle(id);
         return title==null||title.trim().isEmpty()?TITLES.get(id):title;
     }
@@ -1011,6 +1015,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void applyCurrentRadioMetadata(String id){
         if(id==null||!id.equals(currentRadioId)||!STREAMS.containsKey(id)) return;
         MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,id)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE,radioProgramTitle(id))
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,TITLES.get(id))
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,id,256));
@@ -2292,6 +2297,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("Gallery player enter: "+url);
         try{
             MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,"gallery")
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE,radioProgramTitle("gallery"))
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,TITLES.get("gallery"))
                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,"gallery",256));
@@ -2409,6 +2415,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 metaArtist=TITLES.get(currentRadioId);
             }
             MediaMetadataCompat.Builder mb=new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,currentRadioId==null?"":currentRadioId)
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE,metaTitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,metaArtist);
             if(currentRadioId!=null && STREAMS.containsKey(currentRadioId))
