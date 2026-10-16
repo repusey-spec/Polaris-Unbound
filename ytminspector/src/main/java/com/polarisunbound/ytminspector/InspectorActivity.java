@@ -17,6 +17,7 @@ import android.media.Rating;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -351,8 +352,7 @@ public final class InspectorActivity extends Activity {
         flag(x,actions,PlaybackState.ACTION_SEEK_TO,"탐색(Seek)");
         flag(x,actions,PlaybackState.ACTION_PLAY_FROM_SEARCH,"곡 검색 PlayFromSearch");
         flag(x,actions,PlaybackState.ACTION_SET_RATING,"평가 SetRating");
-        flag(x,actions,PlaybackState.ACTION_SET_REPEAT_MODE,"반복 모드");
-        flag(x,actions,PlaybackState.ACTION_SET_SHUFFLE_MODE,"셔플 모드");
+        x.add("반복·셔플: 기본 PlaybackState에는 지원 플래그가 없어 별도 검증 필요");
         x.add("원본 actions 비트값: 0x"+Long.toHexString(actions));
         return android.text.TextUtils.join("\n",x);
     }
