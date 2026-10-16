@@ -2,6 +2,7 @@ package com.polarisunbound.ytminspector;
 
 import android.app.Activity;
 import android.app.NotificationManager;
+import android.app.SearchManager;
 import android.content.ClipboardManager;
 import android.content.ClipData;
 import android.content.ComponentName;
@@ -25,6 +26,8 @@ import android.os.SystemClock;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
 import android.provider.Settings;
+import android.provider.MediaStore;
+import android.content.ActivityNotFoundException;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -42,7 +45,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Polaris YTM 1.a02 — PHONE-ONLY MediaSession remote control diagnostics.
+ * Polaris YTM 1.a03 — PHONE-ONLY MediaSession search command diagnostics.
  *
  * Uses the Android MediaSessionManager / NotificationListener access foundation
  * studied in MQ Player without copying its GPL implementation.
@@ -84,10 +87,25 @@ public final class InspectorActivity extends Activity {
     private ImageView artwork;
     private EditText songQueryInput;
     private TextView lastCommandText;
+    private TextView searchErrorText;
+    private EditText artistQueryInput;
+    private String lastSearchError="검색 오류 미발생";
 
     private final MediaController.Callback selectedCallback=new MediaController.Callback(){
         @Override public void onMetadataChanged(MediaMetadata metadata){ handler.post(()->scan(false)); }
-        @Override public void onPlaybackStateChanged(PlaybackState state){handler.post(()->scan(false));}
+        @Override public void onPlaybackStateChanged(PlaybackState state){
+            if(state!=null&&state.getState()==PlaybackState.STATE_ERROR){
+                CharSequence msg=state.getErrorMessage();
+                final String details="YT Music STATE_ERROR"+(msg==null?" (메시지 없음)":
+                    " · "+msg.toString());
+                handler.post(()->{
+                    lastSearchError=details;
+                    if(searchErrorText!=null)searchErrorText.setText(details);
+                    log("MediaSession 오류 이벤트 · "+details);
+                    scan(false);
+                });
+            }else handler.post(()->scan(false));
+        }
         @Override public void onSessionDestroyed(){handler.post(()->scan(true));}
     };
 
@@ -179,12 +197,12 @@ public final class InspectorActivity extends Activity {
 
         root.addView(text("Polaris YTM Inspector",25,WHITE,true));
         addSpace(root,4);
-        root.addView(text("1.a02 · 폰 전용 · YT Music 리모컨 테스트",14,ACCENT,true));
+        root.addView(text("1.a03 · 폰 전용 · 검색 오류 진단",14,ACCENT,true));
         addSpace(root,8);
         root.addView(text(
-            "YT Music 세션에서 광고한 명령을 실제로 전송합니다. "
-            +"좋아요·싫어요는 계정에 반영될 수 있습니다. "
-            +"명령 전송과 실제 처리 성공은 구분해 기록합니다.",14,MUTED,false));
+            "1.a02의 정상 리모컨 기능을 유지합니다. "
+            +"곡명 검색은 명령 형식별로 수신 앱 반응과 오류를 기록합니다. "
+            +"검색은 버튼을 눌렀을 때만 실제로 실행합니다.",14,MUTED,false));
         addSpace(root,14);
 
         LinearLayout permissions=card(root);
@@ -341,29 +359,45 @@ public final class InspectorActivity extends Activity {
                 ()->sendThumbRating(false)
             });
 
-        controls.addView(text("곡명 검색 / PlayFromSearch",13,ACCENT,true));
+        controls.addView(text("곡명 검색 검증 · 모드별 개별 실행",14,ACCENT,true));
         addSpace(controls,6);
-        LinearLayout queryRow=new LinearLayout(this);
-        queryRow.setOrientation(LinearLayout.HORIZONTAL);
         songQueryInput=new EditText(this);
         songQueryInput.setSingleLine(true);
         songQueryInput.setTextColor(WHITE);
         songQueryInput.setHintTextColor(MUTED);
         songQueryInput.setTextSize(15);
-        songQueryInput.setHint("곡명 또는 가수 + 곡명");
+        songQueryInput.setHint("곡명 (예: Smells Like Teen Spirit)");
         songQueryInput.setInputType(InputType.TYPE_CLASS_TEXT);
         songQueryInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         songQueryInput.setOnEditorActionListener((v,action,event)->{
             if(action==EditorInfo.IME_ACTION_SEARCH){
-                sendSearch();
+                sendSearchMode(0);
                 return true;
             }
             return false;
         });
-        queryRow.addView(songQueryInput,new LinearLayout.LayoutParams(0,dp(52),1));
-        Button search=controlButton("검색 재생",this::sendSearch);
-        queryRow.addView(search,new LinearLayout.LayoutParams(dp(104),dp(52)));
-        controls.addView(queryRow);
+        controls.addView(songQueryInput,new LinearLayout.LayoutParams(-1,dp(52)));
+        artistQueryInput=new EditText(this);
+        artistQueryInput.setSingleLine(true);
+        artistQueryInput.setTextColor(WHITE);
+        artistQueryInput.setHintTextColor(MUTED);
+        artistQueryInput.setTextSize(15);
+        artistQueryInput.setHint("가수 (선택 · 예: Nirvana)");
+        artistQueryInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        controls.addView(artistQueryInput,new LinearLayout.LayoutParams(-1,dp(52)));
+        addButtons(controls,
+            new String[]{"① 기본 검색","② 곡명 지정"},
+            new Runnable[]{()->sendSearchMode(0),()->sendSearchMode(1)});
+        addButtons(controls,
+            new String[]{"③ 가수 지정","④ 곡+가수"},
+            new Runnable[]{()->sendSearchMode(2),()->sendSearchMode(3)});
+        controls.addView(text("Android 공식 미디어 검색 Intent도 별도 검증합니다. "
+            +"YT Music이 이 인텐트를 지원하지 않을 수 있습니다.",12,MUTED,false));
+        addButtons(controls,
+            new String[]{"⑤ YTM 검색 Intent"},
+            new Runnable[]{()->sendSearchIntent()});
+        searchErrorText=text("검색 오류 미발생",13,Color.rgb(255,180,138),false);
+        controls.addView(searchErrorText);
         addSpace(controls,8);
         lastCommandText=text("명령 대기 중",13,ACCENT,false);
         controls.addView(lastCommandText);
@@ -537,10 +571,32 @@ public final class InspectorActivity extends Activity {
         }
     }
 
-    private void sendSearch(){
-        String query=songQueryInput==null?"":songQueryInput.getText().toString().trim();
-        if(query.isEmpty()){
-            noteCommand("검색어를 입력하세요");
+    private String queryText(){
+        return songQueryInput==null?"":songQueryInput.getText().toString().trim();
+    }
+
+    private String artistText(){
+        return artistQueryInput==null?"":artistQueryInput.getText().toString().trim();
+    }
+
+    /**
+     * Compare four standards-based variants. PlaybackState's advertised
+     * ACTION_PLAY_FROM_SEARCH doesn't guarantee the target app will execute it.
+     */
+    private void sendSearchMode(int mode){
+        String title=queryText();
+        String artist=artistText();
+        if(title.isEmpty() && artist.isEmpty()){
+            noteCommand("검색어 또는 가수를 입력하세요");
+            return;
+        }
+        if(mode==2 && artist.isEmpty()) artist=title;
+        if(mode==3 && (title.isEmpty()||artist.isEmpty())){
+            noteCommand("④ 곡+가수 방식은 두 칸 모두 입력하세요");
+            return;
+        }
+        if(mode==1 && title.isEmpty()){
+            noteCommand("② 곡명 지정은 곡명을 입력하세요");
             return;
         }
         MediaController target=commandTarget();
@@ -551,14 +607,91 @@ public final class InspectorActivity extends Activity {
             noteCommand("PlayFromSearch 미지원 · 미전송");
             return;
         }
+        String query=mode==2?artist:
+            mode==3?(artist+" "+title):title;
+        Bundle extras=new Bundle();
+        String modeName="";
+        if(mode==0){
+            modeName="① 기본 Bundle.EMPTY";
+            // 1.a02's original request for regression comparison.
+        }else if(mode==1){
+            modeName="② 제목 집중";
+            extras.putString(MediaStore.EXTRA_MEDIA_FOCUS,
+                MediaStore.Audio.Media.ENTRY_CONTENT_TYPE);
+            extras.putString(MediaStore.EXTRA_MEDIA_TITLE,title);
+            extras.putString(SearchManager.QUERY,query);
+        }else if(mode==2){
+            modeName="③ 가수 집중";
+            extras.putString(MediaStore.EXTRA_MEDIA_FOCUS,
+                MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE);
+            extras.putString(MediaStore.EXTRA_MEDIA_ARTIST,artist);
+            extras.putString(SearchManager.QUERY,query);
+        }else if(mode==3){
+            modeName="④ 곡+가수";
+            extras.putString(MediaStore.EXTRA_MEDIA_FOCUS,
+                MediaStore.Audio.Media.ENTRY_CONTENT_TYPE);
+            extras.putString(MediaStore.EXTRA_MEDIA_TITLE,title);
+            extras.putString(MediaStore.EXTRA_MEDIA_ARTIST,artist);
+            extras.putString(SearchManager.QUERY,query);
+        }else{
+            noteCommand("지원하지 않는 검색 모드");
+            return;
+        }
         String before=observed(target);
+        lastSearchError="검색 오류 미발생";
+        if(searchErrorText!=null)searchErrorText.setText(lastSearchError);
+        String label="곡 검색 "+modeName+" [ "+query+" ]";
+        log(label+" / extras="+(extras.isEmpty()?"EMPTY":extras.toString()));
         try{
-            target.getTransportControls().playFromSearch(query,Bundle.EMPTY);
-            sent(target,"곡명 검색 ["+query+"]",before);
+            target.getTransportControls().playFromSearch(
+                query,mode==0?Bundle.EMPTY:extras);
+            sent(target,label,before);
+            // Delayed check catches recoveries or track changes after 1.3s.
+            final MediaController source=target;
+            handler.postDelayed(()->{
+                MediaController live=commandTargetSilent(source);
+                log("검색 4초 후 · "+label+" / "+(live==null?
+                    "원래 세션 사라짐":observed(live))+
+                    " / 마지막 오류: "+lastSearchError);
+            },4000L);
         }catch(Exception e){
-            noteCommand("PlayFromSearch 오류: "+e.getClass().getSimpleName());
+            noteCommand(label+" 전송 예외: "+e.getClass().getSimpleName()+
+                " "+String.valueOf(e.getMessage()));
         }
     }
+
+    /** A separate explicit-package intent fallback. Requires an exported YTM handler. */
+    private void sendSearchIntent(){
+        String title=queryText();
+        if(title.isEmpty()){
+            noteCommand("⑤ Intent 방식은 곡명을 입력하세요");
+            return;
+        }
+        String artist=artistText();
+        Intent intent=new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
+        intent.setPackage(YTM);
+        intent.putExtra(MediaStore.EXTRA_MEDIA_FOCUS,
+            MediaStore.Audio.Media.ENTRY_CONTENT_TYPE);
+        intent.putExtra(MediaStore.EXTRA_MEDIA_TITLE,title);
+        if(!artist.isEmpty())intent.putExtra(MediaStore.EXTRA_MEDIA_ARTIST,artist);
+        intent.putExtra(SearchManager.QUERY,
+            artist.isEmpty()?title:(artist+" "+title));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try{
+            if(intent.resolveActivity(getPackageManager())==null){
+                noteCommand("⑤ YT Music에 공개된 MEDIA_PLAY_FROM_SEARCH 화면이 없음 · 미전송");
+                return;
+            }
+            String label="⑤ 명시적 YT Music 검색 Intent ["+title+"]";
+            startActivity(intent);
+            noteCommand(label+" 실행 요청 · 재생 성공 여부 별도 확인");
+        }catch(Exception e){
+            noteCommand("⑤ 검색 Intent 실패: "+e.getClass().getSimpleName()+
+                " "+String.valueOf(e.getMessage()));
+        }
+    }
+
+
 
     private boolean permitted(){
         try{
@@ -837,8 +970,8 @@ public final class InspectorActivity extends Activity {
 
     private void copyDiagnostics(){
         String history=getSharedPreferences(STORE,MODE_PRIVATE).getString(HISTORY,"");
-        String payload="Polaris YTM Inspector v1.a02\nAndroid API "+Build.VERSION.SDK_INT+
-            "\n\n"+latestDiagnostic+"\n\n세션 변경 로그:\n"+history;
+        String payload="Polaris YTM Inspector v1.a03\nAndroid API "+Build.VERSION.SDK_INT+
+            "\n\n"+latestDiagnostic+"\n\n검색 오류: "+lastSearchError+"\n\n세션 변경 로그:\n"+history;
         ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
         if(clipboard==null)return;
         clipboard.setPrimaryClip(ClipData.newPlainText("Polaris YTM diagnostic",payload));
