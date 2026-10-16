@@ -98,6 +98,13 @@ public final class InspectorActivity extends Activity {
     private MediaBrowserCompat relayBrowser;
     private MediaControllerCompat relayController;
     private boolean relayConnecting=false;
+    private static final long RELAY_PULSE_INTERVAL_MS=20000L;
+    private final Runnable relayHeartbeat=new Runnable(){
+        @Override public void run(){
+            sendRelayHeartbeat();
+            handler.postDelayed(this,RELAY_PULSE_INTERVAL_MS);
+        }
+    };
     private String lastSearchError="검색 오류 미발생";
 
     private final MediaController.Callback selectedCallback=new MediaController.Callback(){
@@ -140,10 +147,12 @@ public final class InspectorActivity extends Activity {
 
     @Override protected void onStart(){
         super.onStart();
+        sendRelayHeartbeat();
         connectRelay();
     }
 
     @Override protected void onStop(){
+        handler.removeCallbacks(relayHeartbeat);
         disconnectRelay();
         super.onStop();
     }
@@ -151,6 +160,8 @@ public final class InspectorActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();
         watching=true;
+        handler.removeCallbacks(relayHeartbeat);
+        handler.postDelayed(relayHeartbeat,RELAY_PULSE_INTERVAL_MS);
         handler.removeCallbacks(poll);
         scan(true);
         handler.postDelayed(poll,POLL_MS);
@@ -158,6 +169,7 @@ public final class InspectorActivity extends Activity {
 
     @Override protected void onPause(){
         watching=false;
+        handler.removeCallbacks(relayHeartbeat);
         handler.removeCallbacks(poll);
         removeSessionsListener();
         super.onPause();
@@ -217,12 +229,12 @@ public final class InspectorActivity extends Activity {
 
         root.addView(text("Polaris YTM Inspector",25,WHITE,true));
         addSpace(root,4);
-        root.addView(text("1.b01 · 폰 전용 · MediaSession 중계 검증",14,ACCENT,true));
+        root.addView(text("1.b02 · 폰 전용 · 중계 유지·오류 안정화",14,ACCENT,true));
         addSpace(root,8);
         root.addView(text(
-            "YT Music 원래 세션은 그대로 두고, 별도 중계 MediaSession에 곡 정보와 "
-            +"재생 상태를 복제합니다. 중계 버튼은 YT Music에만 전달되며 "
-            +"이 앱 자체는 음악을 재생하거나 오디오 포커스를 요청하지 않습니다.",14,MUTED,false));
+            "중계 서비스는 화면 전환 후 최대 75초 동안 유지되도록 시도합니다. "
+            +"앱 화면이 열려 있으면 20초마다 유지 신호를 보냅니다. "
+            +"백그라운드에서는 Android가 서비스를 더 일찍 종료할 수도 있습니다.",14,MUTED,false));
         addSpace(root,14);
 
         LinearLayout permissions=card(root);
@@ -730,6 +742,18 @@ public final class InspectorActivity extends Activity {
         }
     };
 
+    private void sendRelayHeartbeat(){
+        android.content.Intent intent=new android.content.Intent(this,YtmRelayService.class);
+        intent.setAction(YtmRelayService.ACTION_PULSE);
+        try{
+            startService(intent);
+        }catch(Exception e){
+            log("BRIDGE KEEPALIVE 실패 · "+e.getClass().getSimpleName()+
+                " (화면 연결만 유지)");
+            if(relayInfo!=null)relayInfo.setText("중계 유지 실패 · 화면 연결만 가능");
+        }
+    }
+
     private void connectRelay(){
         if(relayBrowser!=null || relayConnecting)return;
         relayConnecting=true;
@@ -802,11 +826,11 @@ public final class InspectorActivity extends Activity {
 
     private void addRelayPanel(LinearLayout root){
         LinearLayout panel=card(root);
-        panel.addView(text("1.b01 · Polaris 중계 MediaSession",17,WHITE,true));
+        panel.addView(text("1.b02 · Polaris 중계 MediaSession",17,WHITE,true));
         addSpace(panel,5);
-        panel.addView(text("이 중계는 실험 앱 내부에서만 접근 가능합니다. "
-            +"아직 Android Auto에 노출하지 않습니다. 아래 중계 버튼은 "
-            +"기존 YT Music 버튼과 다르게 중간 MediaSession을 경유합니다.",12,MUTED,false));
+        panel.addView(text("이 중계는 실험 앱 내부에서만 접근 가능하며 아직 AA에 노출하지 않습니다. "
+            +"YT Music으로 이동했다 돌아와도 서비스 시작 횟수가 증가하지 않는지 확인하세요. "
+            +"아래 중계 버튼은 MediaSession을 경유합니다.",12,MUTED,false));
         addSpace(panel,9);
         relayInfo=text("중계 연결 대기",14,ACCENT,false);
         panel.addView(relayInfo);
@@ -845,8 +869,13 @@ public final class InspectorActivity extends Activity {
         String details=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
             .getString(YtmRelayService.STATUS,"중계 상태 없음");
         MediaControllerCompat bridge=relayController;
+        int starts=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
+            .getInt(YtmRelayService.STARTS,0);
+        int pulses=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
+            .getInt(YtmRelayService.PULSES,0);
+        String lifecycle="서비스 생성 횟수: "+starts+" / 이번 실행 유지 신호: "+pulses;
         if(bridge==null){
-            relayInfoText("중계 연결 대기 · "+details);
+            relayInfoText("중계 연결 대기 · "+details+"\n"+lifecycle);
         }else{
             try{
                 MediaMetadataCompat md=bridge.getMetadata();
@@ -859,7 +888,7 @@ public final class InspectorActivity extends Activity {
                     String.valueOf(playback.getState());
                 relayInfoText("중계 연결됨 · "+title+" / "+artist+
                     "\n중계 state="+state+" / actions=0x"+Long.toHexString(actions)+
-                    "\n"+details);
+                    "\n"+details+"\n"+lifecycle);
             }catch(Exception e){relayInfoText("중계 상태 읽기 오류: "+e.getClass().getSimpleName());}
         }
         if(relayHistory!=null){
@@ -1151,7 +1180,7 @@ public final class InspectorActivity extends Activity {
 
     private void copyDiagnostics(){
         String history=getSharedPreferences(STORE,MODE_PRIVATE).getString(HISTORY,"");
-        String payload="Polaris YTM Inspector v1.b01\nAndroid API "+Build.VERSION.SDK_INT+
+        String payload="Polaris YTM Inspector v1.b02\nAndroid API "+Build.VERSION.SDK_INT+
             "\n\n"+latestDiagnostic+"\n\n검색 오류: "+lastSearchError+
             "\n\n중계 세션 기록:\n"+
             getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE).getString(YtmRelayService.EVENTS,"")+
