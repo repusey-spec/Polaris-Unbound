@@ -1,0 +1,41 @@
+name: YTM 1.b Bridge APK
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ytminspector/**'
+      - 'settings.gradle.kts'
+      - '.github/workflows/ytminspector.yml'
+  workflow_dispatch:
+
+jobs:
+  inspector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Restore stable signing key
+        run: |
+          base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
+          keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
+      - name: Build only 1.b03 streamlined bridge app
+        run: gradle :ytminspector:assembleDebug
+      - name: Verify inspector APK signature
+        run: |
+          APK="$(find ytminspector/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$APK"
+          "$APKSIGNER" verify --print-certs "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-YTM-Bridge-1.b03
+          path: ytminspector/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
