@@ -49,7 +49,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Polaris YTM 1.b01 — PHONE-ONLY MediaSession proxy + search diagnostics.
+ * Polaris YTM 1.b03 — PHONE-ONLY MediaSession bridge with streamlined test UI.
  *
  * Uses the Android MediaSessionManager / NotificationListener access foundation
  * studied in MQ Player without copying its GPL implementation.
@@ -229,7 +229,7 @@ public final class InspectorActivity extends Activity {
 
         root.addView(text("Polaris YTM Inspector",25,WHITE,true));
         addSpace(root,4);
-        root.addView(text("1.b02 · 폰 전용 · 중계 유지·오류 안정화",14,ACCENT,true));
+        root.addView(text("1.b03 · 폰 전용 · 중계 테스트",14,ACCENT,true));
         addSpace(root,8);
         root.addView(text(
             "중계 서비스는 화면 전환 후 최대 75초 동안 유지되도록 시도합니다. "
@@ -384,14 +384,6 @@ public final class InspectorActivity extends Activity {
                 ()->sendCustom("셔플","shuffle_action"),
                 ()->sendCustom("반복","loop_mode_action")
             });
-        controls.addView(text("SetRating 비교 시험 (위 Custom Action과 별개의 경로)",12,MUTED,false));
-        addButtons(controls,
-            new String[]{"SetRating 👍","SetRating 👎"},
-            new Runnable[]{
-                ()->sendThumbRating(true),
-                ()->sendThumbRating(false)
-            });
-
         controls.addView(text("곡명 검색 검증 · 모드별 개별 실행",14,ACCENT,true));
         addSpace(controls,6);
         songQueryInput=new EditText(this);
@@ -582,25 +574,6 @@ public final class InspectorActivity extends Activity {
             sent(target,label+" ["+actionId+"]",before);
         }catch(Exception e){
             noteCommand(label+" Custom Action 전송 오류: "+e.getClass().getSimpleName());
-        }
-    }
-
-    private void sendThumbRating(boolean up){
-        MediaController target=commandTarget();
-        if(target==null)return;
-        PlaybackState state=target.getPlaybackState();
-        if(state==null ||
-           (state.getActions()&PlaybackState.ACTION_SET_RATING)==0 ||
-           target.getRatingType()!=Rating.RATING_THUMB_UP_DOWN){
-            noteCommand("SetRating → 사용 가능한 THUMB_UP_DOWN 인터페이스 없음 · 미전송");
-            return;
-        }
-        String before=observed(target);
-        try{
-            target.getTransportControls().setRating(Rating.newThumbRating(up));
-            sent(target,"SetRating "+(up?"좋아요":"싫어요"),before);
-        }catch(Exception e){
-            noteCommand("SetRating 오류: "+e.getClass().getSimpleName());
         }
     }
 
@@ -826,7 +799,7 @@ public final class InspectorActivity extends Activity {
 
     private void addRelayPanel(LinearLayout root){
         LinearLayout panel=card(root);
-        panel.addView(text("1.b02 · Polaris 중계 MediaSession",17,WHITE,true));
+        panel.addView(text("1.b03 · Polaris 중계 MediaSession",17,WHITE,true));
         addSpace(panel,5);
         panel.addView(text("이 중계는 실험 앱 내부에서만 접근 가능하며 아직 AA에 노출하지 않습니다. "
             +"YT Music으로 이동했다 돌아와도 서비스 시작 횟수가 증가하지 않는지 확인하세요. "
@@ -1180,7 +1153,7 @@ public final class InspectorActivity extends Activity {
 
     private void copyDiagnostics(){
         String history=getSharedPreferences(STORE,MODE_PRIVATE).getString(HISTORY,"");
-        String payload="Polaris YTM Inspector v1.b02\nAndroid API "+Build.VERSION.SDK_INT+
+        String payload="Polaris YTM Inspector v1.b03\nAndroid API "+Build.VERSION.SDK_INT+
             "\n\n"+latestDiagnostic+"\n\n검색 오류: "+lastSearchError+
             "\n\n중계 세션 기록:\n"+
             getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE).getString(YtmRelayService.EVENTS,"")+
