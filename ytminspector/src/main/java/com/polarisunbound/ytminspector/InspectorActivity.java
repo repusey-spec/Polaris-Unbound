@@ -22,10 +22,13 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.text.InputType;
+import android.view.inputmethod.EditorInfo;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -39,11 +42,12 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Polaris YTM 1.a01 — PHONE-ONLY, READ-ONLY MediaSession diagnostics.
+ * Polaris YTM 1.a02 — PHONE-ONLY MediaSession remote control diagnostics.
  *
- * Uses the same Android MediaSessionManager / NotificationListener access
- * foundation as MQ Player, without copying its GPL implementation.
- * Never invokes transportControls or creates an Android Auto media service.
+ * Uses the Android MediaSessionManager / NotificationListener access foundation
+ * studied in MQ Player without copying its GPL implementation.
+ * Sends commands ONLY to the live YouTube Music MediaSession package.
+ * No Android Auto service and no separate media playback/audio focus.
  */
 public final class InspectorActivity extends Activity {
     private static final String YTM="com.google.android.apps.youtube.music";
@@ -78,6 +82,8 @@ public final class InspectorActivity extends Activity {
     private TextView customText;
     private TextView logText;
     private ImageView artwork;
+    private EditText songQueryInput;
+    private TextView lastCommandText;
 
     private final MediaController.Callback selectedCallback=new MediaController.Callback(){
         @Override public void onMetadataChanged(MediaMetadata metadata){ handler.post(()->scan(false)); }
@@ -173,11 +179,12 @@ public final class InspectorActivity extends Activity {
 
         root.addView(text("Polaris YTM Inspector",25,WHITE,true));
         addSpace(root,4);
-        root.addView(text("1.a01 · 폰 전용 · 읽기 전용",14,ACCENT,true));
+        root.addView(text("1.a02 · 폰 전용 · YT Music 리모컨 테스트",14,ACCENT,true));
         addSpace(root,8);
         root.addView(text(
-            "YT Music의 활성 MediaSession과 외부에서 보이는 지원 명령만 확인합니다. "
-            +"재생을 시작하거나 끊지 않습니다.",14,MUTED,false));
+            "YT Music 세션에서 광고한 명령을 실제로 전송합니다. "
+            +"좋아요·싫어요는 계정에 반영될 수 있습니다. "
+            +"명령 전송과 실제 처리 성공은 구분해 기록합니다.",14,MUTED,false));
         addSpace(root,14);
 
         LinearLayout permissions=card(root);
@@ -223,8 +230,10 @@ public final class InspectorActivity extends Activity {
         sessionText=text("실행 중인 미디어 세션 검색 중…",13,MUTED,false);
         now.addView(sessionText);
 
+        addRemoteControls(root);
+
         LinearLayout details=card(root);
-        details.addView(text("지원 명령 (실제 작동 여부는 다음 단계에서 시험)",16,WHITE,true));
+        details.addView(text("MediaSession 지원 명령 분석",16,WHITE,true));
         addSpace(details,9);
         actionText=text("아직 확인되지 않았습니다.",14,WHITE,false);
         details.addView(actionText);
@@ -259,6 +268,296 @@ public final class InspectorActivity extends Activity {
         logText=text("",12,MUTED,false);
         diagnostics.addView(logText);
         showLog();
+    }
+
+
+    private Button controlButton(String name,Runnable action){
+        Button button=new Button(this);
+        button.setAllCaps(false);
+        button.setText(name);
+        button.setTextSize(13);
+        button.setMinHeight(dp(48));
+        button.setOnClickListener(v->action.run());
+        return button;
+    }
+
+    private void addButtons(LinearLayout root,String[] titles,Runnable[] actions){
+        if(titles.length!=actions.length)throw new IllegalArgumentException("Button mismatch");
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for(int i=0;i<titles.length;i++){
+            Button button=controlButton(titles[i],actions[i]);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(53),1);
+            lp.setMargins(dp(2),0,dp(2),0);
+            row.addView(button,lp);
+        }
+        root.addView(row,new LinearLayout.LayoutParams(-1,-2));
+        addSpace(root,6);
+    }
+
+    /** Real transport commands are tested only in this 1.a02 experimental app. */
+    private void addRemoteControls(LinearLayout root){
+        LinearLayout controls=card(root);
+        controls.addView(text("YT Music 원격 제어",17,WHITE,true));
+        addSpace(controls,5);
+        controls.addView(text("아래 버튼은 YT Music 앱에 실제 명령을 보냅니다. "
+            +"Polaris 라디오·NAS에는 명령을 보내지 않습니다.",13,MUTED,false));
+        addSpace(controls,10);
+        addButtons(controls,
+            new String[]{"◀ 이전","▶ 재생","Ⅱ 일시정지","다음 ▶"},
+            new Runnable[]{
+                ()->sendTransport("이전 곡",PlaybackState.ACTION_SKIP_TO_PREVIOUS,
+                    t->t.skipToPrevious()),
+                ()->sendTransport("재생",PlaybackState.ACTION_PLAY,t->t.play()),
+                ()->sendTransport("일시정지",PlaybackState.ACTION_PAUSE,t->t.pause()),
+                ()->sendTransport("다음 곡",PlaybackState.ACTION_SKIP_TO_NEXT,
+                    t->t.skipToNext())
+            });
+        addButtons(controls,
+            new String[]{"-10초"," +30초"},
+            new Runnable[]{
+                ()->seekRelative(-10000L),
+                ()->seekRelative(30000L)
+            });
+        controls.addView(text("YT Music 자체 Custom Action",13,ACCENT,true));
+        addSpace(controls,6);
+        addButtons(controls,
+            new String[]{"👍 좋아요","👎 싫어요"},
+            new Runnable[]{
+                ()->sendCustom("좋아요","thumbs_up_action"),
+                ()->sendCustom("싫어요","thumbs_down_action")
+            });
+        addButtons(controls,
+            new String[]{"⇄ 셔플","↻ 반복"},
+            new Runnable[]{
+                ()->sendCustom("셔플","shuffle_action"),
+                ()->sendCustom("반복","loop_mode_action")
+            });
+        controls.addView(text("SetRating 비교 시험 (위 Custom Action과 별개의 경로)",12,MUTED,false));
+        addButtons(controls,
+            new String[]{"SetRating 👍","SetRating 👎"},
+            new Runnable[]{
+                ()->sendThumbRating(true),
+                ()->sendThumbRating(false)
+            });
+
+        controls.addView(text("곡명 검색 / PlayFromSearch",13,ACCENT,true));
+        addSpace(controls,6);
+        LinearLayout queryRow=new LinearLayout(this);
+        queryRow.setOrientation(LinearLayout.HORIZONTAL);
+        songQueryInput=new EditText(this);
+        songQueryInput.setSingleLine(true);
+        songQueryInput.setTextColor(WHITE);
+        songQueryInput.setHintTextColor(MUTED);
+        songQueryInput.setTextSize(15);
+        songQueryInput.setHint("곡명 또는 가수 + 곡명");
+        songQueryInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        songQueryInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        songQueryInput.setOnEditorActionListener((v,action,event)->{
+            if(action==EditorInfo.IME_ACTION_SEARCH){
+                sendSearch();
+                return true;
+            }
+            return false;
+        });
+        queryRow.addView(songQueryInput,new LinearLayout.LayoutParams(0,dp(52),1));
+        Button search=controlButton("검색 재생",this::sendSearch);
+        queryRow.addView(search,new LinearLayout.LayoutParams(dp(104),dp(52)));
+        controls.addView(queryRow);
+        addSpace(controls,8);
+        lastCommandText=text("명령 대기 중",13,ACCENT,false);
+        controls.addView(lastCommandText);
+    }
+
+    /** Never send a command to an old session or a session of another app. */
+    private MediaController commandTarget(){
+        if(!permitted()||manager==null){
+            noteCommand("권한 없음 · 알림 접근을 허용하세요");
+            return null;
+        }
+        try{
+            List<MediaController> live=manager.getActiveSessions(listenerComponent);
+            MediaController target=null;
+            int highest=Integer.MIN_VALUE;
+            for(MediaController item:live){
+                if(item==null || !YTM.equals(item.getPackageName()))continue;
+                PlaybackState state=item.getPlaybackState();
+                int type=state==null?PlaybackState.STATE_NONE:state.getState();
+                int score=type==PlaybackState.STATE_PLAYING?5000:
+                    type==PlaybackState.STATE_BUFFERING?4000:
+                    type==PlaybackState.STATE_PAUSED?3000:1000;
+                if(selected!=null && item.getSessionToken().equals(selected.getSessionToken()))
+                    score+=250;
+                if(score>highest){highest=score;target=item;}
+            }
+            if(target==null){
+                noteCommand("YT Music 활성 세션 없음 · 명령 미전송");
+                return null;
+            }
+            attach(target);
+            return target;
+        }catch(Exception e){
+            noteCommand("YT Music 세션 검색 오류 · "+e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    private interface TransportCommand {
+        void run(MediaController.TransportControls transport);
+    }
+
+    private String observed(MediaController c){
+        try{
+            PlaybackState st=c.getPlaybackState();
+            MediaMetadata md=c.getMetadata();
+            String song=md==null?"":md.getString(MediaMetadata.METADATA_KEY_TITLE);
+            long position=st==null?-1:st.getPosition();
+            return safe(song)+" / "+(st==null?"상태 없음":stateName(st.getState()))+
+                " / "+position+"ms";
+        }catch(Exception e){
+            return "관측 실패 "+e.getClass().getSimpleName();
+        }
+    }
+
+    private void noteCommand(String message){
+        if(lastCommandText!=null)lastCommandText.setText(message);
+        log("제어 · "+message);
+    }
+
+    private void sent(MediaController target,String label,String before){
+        noteCommand(label+" → 명령 전달 (처리 성공은 별도 확인)");
+        handler.postDelayed(()->{
+            MediaController live=commandTargetSilent(target);
+            if(live==null){
+                log("명령 후 관측 · "+label+" → 원래 세션 사라짐/변경됨");
+                return;
+            }
+            String after=observed(live);
+            log("명령 후 관측 · "+label+" / 이전: "+before+" / 이후: "+after+
+                " / ※ 계정 반영은 YT Music에서 직접 확인 필요");
+            scan(false);
+        },1300L);
+    }
+
+    private MediaController commandTargetSilent(MediaController previous){
+        if(previous==null||!permitted())return null;
+        try{
+            for(MediaController live:manager.getActiveSessions(listenerComponent)){
+                if(YTM.equals(live.getPackageName()) &&
+                   live.getSessionToken().equals(previous.getSessionToken()))
+                    return live;
+            }
+        }catch(Exception ignored){}
+        return null;
+    }
+
+    private void sendTransport(String label,long required,TransportCommand operation){
+        MediaController target=commandTarget();
+        if(target==null)return;
+        PlaybackState state=target.getPlaybackState();
+        if(state==null||(state.getActions()&required)==0){
+            noteCommand(label+" → MediaSession에서 지원한다고 표시하지 않음 · 미전송");
+            return;
+        }
+        String before=observed(target);
+        try{
+            operation.run(target.getTransportControls());
+            sent(target,label,before);
+        }catch(Exception e){
+            noteCommand(label+" 전송 예외: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void seekRelative(long offset){
+        MediaController target=commandTarget();
+        if(target==null)return;
+        PlaybackState state=target.getPlaybackState();
+        if(state==null||(state.getActions()&PlaybackState.ACTION_SEEK_TO)==0){
+            noteCommand("탐색(Seek) 미지원 · 미전송");
+            return;
+        }
+        long position=state.getPosition();
+        if(position<0){
+            noteCommand("재생 위치 미제공 · 탐색 미전송");
+            return;
+        }
+        long to=Math.max(0,position+offset);
+        MediaMetadata metadata=target.getMetadata();
+        long duration=metadata==null?-1:
+            metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+        if(duration>0)to=Math.min(to,Math.max(0,duration-500));
+        String before=observed(target);
+        try{
+            target.getTransportControls().seekTo(to);
+            sent(target,"탐색 "+(offset>=0?"+":"")+(offset/1000)+"초",before);
+        }catch(Exception e){
+            noteCommand("탐색 전송 오류: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void sendCustom(String label,String actionId){
+        MediaController target=commandTarget();
+        if(target==null)return;
+        PlaybackState state=target.getPlaybackState();
+        boolean exposed=false;
+        if(state!=null && state.getCustomActions()!=null){
+            for(PlaybackState.CustomAction action:state.getCustomActions()){
+                if(actionId.equals(action.getAction())){exposed=true;break;}
+            }
+        }
+        if(!exposed){
+            noteCommand(label+" → Custom Action 미노출 · 명령 미전송");
+            return;
+        }
+        String before=observed(target);
+        try{
+            target.getTransportControls().sendCustomAction(actionId,Bundle.EMPTY);
+            sent(target,label+" ["+actionId+"]",before);
+        }catch(Exception e){
+            noteCommand(label+" Custom Action 전송 오류: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void sendThumbRating(boolean up){
+        MediaController target=commandTarget();
+        if(target==null)return;
+        PlaybackState state=target.getPlaybackState();
+        if(state==null ||
+           (state.getActions()&PlaybackState.ACTION_SET_RATING)==0 ||
+           target.getRatingType()!=Rating.RATING_THUMB_UP_DOWN){
+            noteCommand("SetRating → 사용 가능한 THUMB_UP_DOWN 인터페이스 없음 · 미전송");
+            return;
+        }
+        String before=observed(target);
+        try{
+            target.getTransportControls().setRating(Rating.newThumbRating(up));
+            sent(target,"SetRating "+(up?"좋아요":"싫어요"),before);
+        }catch(Exception e){
+            noteCommand("SetRating 오류: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void sendSearch(){
+        String query=songQueryInput==null?"":songQueryInput.getText().toString().trim();
+        if(query.isEmpty()){
+            noteCommand("검색어를 입력하세요");
+            return;
+        }
+        MediaController target=commandTarget();
+        if(target==null)return;
+        PlaybackState state=target.getPlaybackState();
+        if(state==null||
+           (state.getActions()&PlaybackState.ACTION_PLAY_FROM_SEARCH)==0){
+            noteCommand("PlayFromSearch 미지원 · 미전송");
+            return;
+        }
+        String before=observed(target);
+        try{
+            target.getTransportControls().playFromSearch(query,Bundle.EMPTY);
+            sent(target,"곡명 검색 ["+query+"]",before);
+        }catch(Exception e){
+            noteCommand("PlayFromSearch 오류: "+e.getClass().getSimpleName());
+        }
     }
 
     private boolean permitted(){
@@ -538,7 +837,7 @@ public final class InspectorActivity extends Activity {
 
     private void copyDiagnostics(){
         String history=getSharedPreferences(STORE,MODE_PRIVATE).getString(HISTORY,"");
-        String payload="Polaris YTM Inspector v1.a01\nAndroid API "+Build.VERSION.SDK_INT+
+        String payload="Polaris YTM Inspector v1.a02\nAndroid API "+Build.VERSION.SDK_INT+
             "\n\n"+latestDiagnostic+"\n\n세션 변경 로그:\n"+history;
         ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
         if(clipboard==null)return;
