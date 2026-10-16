@@ -82,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
     private String currentFtpMp3Path="";
     private int currentFtpMp3Offset=0;
     private boolean returnToFavoritesFromPlayer=false;
+    private boolean returnToSavedFromPlayer=false;
     private void choosePreset(int slot){
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle((slot+1)+"번 프리셋 변경 (기존 위치와 교환)")
@@ -198,6 +199,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void returnFromNowPlaying(){
+        if(returnToSavedFromPlayer){
+            showNasSavedSongs();
+            return;
+        }
         if(returnToFavoritesFromPlayer){
             showMp3Favorites();
             return;
@@ -467,6 +472,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void playId(String id,String label){
+        returnToSavedFromPlayer=false;
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
         if(id!=null && (id.startsWith("mp3:")||id.startsWith("ftpmp3:")||
@@ -1561,8 +1567,11 @@ public class MainActivity extends AppCompatActivity {
                 "\n"+song.relativePath);
             track.setTextSize(15);
             track.setGravity(android.view.Gravity.CENTER_VERTICAL|android.view.Gravity.LEFT);
-            track.setOnClickListener(v->playId("ftpmp3:"+android.net.Uri.encode(song.relativePath),
-                PolarisFtp.displayTitle(song.relativePath)));
+            track.setOnClickListener(v->{
+                playId("ftpmp3:"+android.net.Uri.encode(song.relativePath),
+                    PolarisFtp.displayTitle(song.relativePath));
+                returnToSavedFromPlayer=true;
+            });
             track.setOnLongClickListener(v->{
                 new androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("저장 파일 삭제")
