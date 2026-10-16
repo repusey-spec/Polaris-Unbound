@@ -30,18 +30,19 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 1.b02 phone-only experimental MediaBrowser/MediaSession bridge.
- * No audio player, no focus requests and no foreground media notification.
- * Not exported: AA and other apps cannot bind in this experimental version.
+ * 1.c01 experimental Android Auto media browser bridge.
+ * This is a separate app/package from the stable Polaris v0.58.
+ * Audio always comes from YouTube Music: do NOT create players, claim
+ * media audio focus or launch other apps from this service.
  *
- * To bridge brief YTM/Inspector screen switches without repeated service
- * restarts, Activity sends startService(PULSE) while visible (every 20s).
- * Service stops itself 75s after the last pulse. Android may terminate a
- * background service sooner; this is a best-effort PHONE test, not a
- * production background playback guarantee.
+ * Android Auto binds the exported MediaBrowserServiceCompat, authenticated
+ * against a small tested package allowlist + calling UID. The phone activity
+ * continues the bounded 75s test keepalive; an AA media-browser binding
+ * independently holds the service alive while that client is connected.
+ * No foreground service or background playback guarantee.
  */
 public final class YtmRelayService extends MediaBrowserServiceCompat {
-    public static final String PREFS="ytm_bridge_b02";
+    public static final String PREFS="ytm_bridge_c01";
     public static final String ACTION_PULSE="com.polarisunbound.ytminspector.action.RELAY_PULSE";
     public static final String STARTS="starts";
     public static final String PULSES="pulses";
@@ -49,6 +50,13 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
     public static final String STATUS="status";
     private static final String YTM="com.google.android.apps.youtube.music";
     private static final String ROOT="ytm:bridge:root";
+    private static final String NOW="ytm:bridge:now";
+    private static final String[] TRUSTED_MEDIA_CLIENTS={
+        "com.google.android.projection.gearhead", // Android Auto projection
+        "com.google.android.gms", // AA transport on some Google builds
+        "com.android.car.media", // DHU / Android Automotive media test
+        "com.google.android.apps.automotive.media"
+    };
     private static final String CURRENT="ytm:bridge:current";
     private static final long POLL_MS=1250L;
     private static final long BACKGROUND_GRACE_MS=75000L;
@@ -67,6 +75,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
     private String pendingTransientKey="";
     private long pendingTransientSince=0L;
     private String lastPublishedMetadataKey="";
+    private String lastPublishedBrowseKey="";
     private String lastPublishedSnapshot="";
     private long lastPublishedPosition=-1L;
     private long lastPublishedAt=0L;
@@ -76,6 +85,10 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
     private int lastPulseStartId=0;
     private int runStarts=0;
     private int runPulses=0;
+    private String lastBrowserClient="아직 AA/브라우저 접속 없음";
+    private String lastBrowserRequest="";
+    private int acceptedRoots=0;
+    private int rejectedRoots=0;
 
     private final MediaController.Callback ytCallback=new MediaController.Callback(){
         @Override public void onMetadataChanged(MediaMetadata m){handler.post(()->refresh());}
@@ -178,7 +191,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         super.onCreate();
         manager=(MediaSessionManager)getSystemService(Context.MEDIA_SESSION_SERVICE);
         permissionComponent=new ComponentName(this,SessionAccessListener.class);
-        session=new MediaSessionCompat(this,"PolarisYTMRelay1b02");
+        session=new MediaSessionCompat(this,"PolarisYTMRelay1c01AA");
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|
             MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(bridgeCallback,handler);
@@ -308,6 +321,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
             pendingTransientKey="";
             lastSnapshot="";
             lastPublishedMetadataKey="";
+            lastPublishedBrowseKey="";
             lastPublishedSnapshot="";
             lastPublishedPosition=-1L;
             lastStatus=allowed()?"YT Music 활성 세션 없음":"알림 접근 권한 없음";
@@ -316,6 +330,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE,"YT Music 연결 대기").build());
             session.setPlaybackState(new PlaybackStateCompat.Builder()
                 .setState(PlaybackStateCompat.STATE_NONE,0L,0f).setActions(0L).build());
+            if(currentMetadata!=null)notifyChildrenChanged(NOW);
             currentMetadata=null;
             return;
         }
@@ -397,7 +412,10 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
             session.setMetadata(currentMetadata);
             lastPublishedMetadataKey=metadataKey;
         }
-        if(mirrorChanged)notifyChildrenChanged(ROOT);
+        if(!metadataKey.equals(lastPublishedBrowseKey)){
+            lastPublishedBrowseKey=metadataKey;
+            notifyChildrenChanged(NOW);
+        }
 
         PlaybackStateCompat.Builder ps=new PlaybackStateCompat.Builder();
         long exposed=0L;
@@ -455,7 +473,8 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         }
         lastStatus="YTM "+safe(title)+" / "+stateName(state)+
             " / relay actions 0x"+Long.toHexString(exposed)+
-            " / starts="+runStarts+" / pulses="+runPulses;
+            " / starts="+runStarts+" / pulses="+runPulses+
+            " / AA roots="+acceptedRoots+" reject="+rejectedRoots;
         getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(STATUS,lastStatus).apply();
     }
 
@@ -487,23 +506,71 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(EVENTS,history).apply();
     }
 
+
+    /**
+     * AA clients bind through MediaBrowserService. The Android supplied client
+     * package name is additionally checked against the uid's actual packages.
+     * Unknown clients are intentionally rejected and logged for car testing.
+     */
+    private boolean trustedClient(String clientPackage,int uid){
+        if(clientPackage==null || clientPackage.isEmpty() || uid<0)return false;
+        String[] uidPkgs;
+        try{uidPkgs=getPackageManager().getPackagesForUid(uid);}
+        catch(Exception e){return false;}
+        if(uidPkgs==null)return false;
+        boolean uidMatches=false;
+        for(String p:uidPkgs){
+            if(clientPackage.equals(p)){uidMatches=true;break;}
+        }
+        if(!uidMatches)return false;
+        if(getPackageName().equals(clientPackage))return true;
+        for(String allowedPackage:TRUSTED_MEDIA_CLIENTS)
+            if(allowedPackage.equals(clientPackage))return true;
+        return false;
+    }
+
     @Override public BrowserRoot onGetRoot(String clientPackageName,int clientUid,Bundle rootHints){
-        // This experimental service is explicitly non-exported; double-check client identity.
-        if(!getPackageName().equals(clientPackageName))return null;
-        return new BrowserRoot(ROOT,null);
+        boolean accept=trustedClient(clientPackageName,clientUid);
+        if(accept)acceptedRoots++;else rejectedRoots++;
+        lastBrowserClient=(accept?"ACCEPT ":"REJECT ")+
+            String.valueOf(clientPackageName)+" / uid="+clientUid;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putString("aa_client",lastBrowserClient).apply();
+        record("AA BROWSER ROOT "+lastBrowserClient);
+        if(!accept)return null;
+
+        // A player-less proxy exposes only the selected YTM queue's current
+        // track, not any invented NAS/radio or music search results.
+        Bundle extras=new Bundle();
+        extras.putBoolean("android.media.browse.CONTENT_STYLE_SUPPORTED",true);
+        handler.post(()->refresh());
+        return new BrowserRoot(ROOT,extras);
     }
 
     @Override public void onLoadChildren(String parentId,
             Result<List<MediaBrowserCompat.MediaItem>> result){
         List<MediaBrowserCompat.MediaItem> items=new ArrayList<>();
-        if(ROOT.equals(parentId)&&currentMetadata!=null){
-            MediaDescriptionCompat description=new MediaDescriptionCompat.Builder()
+        if(ROOT.equals(parentId)){
+            MediaDescriptionCompat folder=new MediaDescriptionCompat.Builder()
+                .setMediaId(NOW)
+                .setTitle("YT Music 현재 재생")
+                .setSubtitle("YT Music에서 재생 중인 곡")
+                .build();
+            items.add(new MediaBrowserCompat.MediaItem(folder,
+                MediaBrowserCompat.MediaItem.FLAG_BROWSABLE));
+        }else if(NOW.equals(parentId)&&currentMetadata!=null){
+            MediaDescriptionCompat.Builder builder=new MediaDescriptionCompat.Builder()
                 .setMediaId(CURRENT)
                 .setTitle(currentMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE))
                 .setSubtitle(currentMetadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST))
-                .build();
-            items.add(new MediaBrowserCompat.MediaItem(description,
+                .setDescription(currentMetadata.getString(MediaMetadataCompat.METADATA_KEY_ALBUM));
+            items.add(new MediaBrowserCompat.MediaItem(builder.build(),
                 MediaBrowserCompat.MediaItem.FLAG_PLAYABLE));
+        }
+        String event=parentId+" / items="+items.size();
+        if(!event.equals(lastBrowserRequest)){
+            lastBrowserRequest=event;
+            record("AA BROWSER CHILDREN "+event);
         }
         result.sendResult(items);
     }
