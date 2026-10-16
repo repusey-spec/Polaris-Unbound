@@ -582,37 +582,83 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private TextView radioSectionTitle(String text){
+        TextView v=new TextView(this);
+        v.setText(text);
+        v.setTextSize(19);
+        v.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        v.setTextColor(Color.WHITE);
+        v.setPadding(dp(4),dp(16),dp(4),dp(4));
+        return v;
+    }
+
+    private LinearLayout radioRow(){
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        body.addView(row,new LinearLayout.LayoutParams(-1,-2));
+        return row;
+    }
+
+    private void addRadioCard(LinearLayout row,String id,String label){
+        ImageButton v=stationButton(id,label);
+        v.setOnClickListener(x->playId(id,label));
+        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
+        bp.setMargins(10,10,10,10);
+        row.addView(v,bp);
+    }
+
+    private void addRadioSpacer(LinearLayout row){
+        android.view.View spacer=new android.view.View(this);
+        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
+        bp.setMargins(10,10,10,10);
+        row.addView(spacer,bp);
+    }
+
     private void showDomestic(){
         selectedRadioId=null;
-        currentPage="radio"; base("라디오");
-        LinearLayout row=null;
-        for(int i=0;i<8;i++){
-            if(i%4==0){
-                row=new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                body.addView(row,new LinearLayout.LayoutParams(-1,-2));
-            }
+        currentPage="radio";
+        base("라디오");
+
+        body.addView(radioSectionTitle("국내"));
+        LinearLayout row=radioRow();
+        for(int i=0;i<6;i++){
+            if(i==4) row=radioRow();
             final int slot=i;
-            final String id;
-            final String label;
-            if(i<6){
-                int station=presetStation(i);
-                id="kr"+(station+1);
-                label=RADIO_NAMES[station];
-            }else if(i==6){
-                id="kiis"; label="102.7 KIIS-FM";
-            }else{
-                id="gallery"; label="Jazz from Gallery 41";
-            }
+            int station=presetStation(i);
+            final String id="kr"+(station+1);
+            final String label=RADIO_NAMES[station];
             ImageButton v=stationButton(id,(slot+1)+"번 "+label);
             v.setOnClickListener(x->playId(id,label));
-            if(i<6){
-                v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
-            }
+            v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
             bp.setMargins(10,10,10,10);
             row.addView(v,bp);
         }
+        // Keep the domestic grid four columns wide.
+        addRadioSpacer(row);
+        addRadioSpacer(row);
+
+        body.addView(radioSectionTitle("SF"));
+        row=radioRow();
+        addRadioCard(row,"gallery","Jazz from Gallery 41");
+        addRadioCard(row,"wild949","Wild 94.9");
+        addRadioSpacer(row);
+        addRadioSpacer(row);
+
+        body.addView(radioSectionTitle("LA"));
+        row=radioRow();
+        addRadioCard(row,"kiis","102.7 KIIS-FM");
+        addRadioCard(row,"alt987","ALT 98.7");
+        addRadioCard(row,"myfm1043","104.3 MYfm");
+        addRadioSpacer(row);
+
+        body.addView(radioSectionTitle("NY"));
+        row=radioRow();
+        addRadioCard(row,"z100","Z100 New York");
+        addRadioCard(row,"power1051","Power 105.1");
+        addRadioSpacer(row);
+        addRadioSpacer(row);
+
         addSchedulePanel();
     }
 
@@ -843,10 +889,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showForeign(){
-        selectedRadioId=null;
-        currentPage="foreign"; base("해외라디오");
-        TextView v=button("102.7 KIIS-FM\nLos Angeles"); v.setOnClickListener(x->playId("kiis","102.7 KIIS-FM")); body.addView(v);
-        addSchedulePanel();
+        // Keep the legacy home shortcut consistent with the unified radio page.
+        showDomestic();
     }
 
     private int dp(int value){
