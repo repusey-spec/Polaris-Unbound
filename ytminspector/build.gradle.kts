@@ -8,8 +8,8 @@ android {
         applicationId = "com.polarisunbound.ytminspector"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1002
-        versionName = "1.a02"
+        versionCode = 1003
+        versionName = "1.a03"
     }
     signingConfigs {
         create("stableDebug") {
