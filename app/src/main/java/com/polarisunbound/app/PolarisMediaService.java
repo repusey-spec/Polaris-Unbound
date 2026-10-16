@@ -130,7 +130,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
     private static final int NOTIFICATION_ID=71;
-    private static final String[] RADIO_ORDER={"kr1","kr2","kr3","kr4","kr5","kr6","kiis","gallery"};
+    private static final String[] RADIO_ORDER={
+        "kr1","kr2","kr3","kr4","kr5","kr6",
+        "gallery","wild949",
+        "kiis","alt987","myfm1043",
+        "z100","power1051"
+    };
     private static final Map<String,String> STREAMS=new HashMap<>();
     static {
         STREAMS.put("kr1","https://cfpwwwapi.kbs.co.kr/api/v1/landing/live/channel_code/25");
@@ -141,6 +146,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         STREAMS.put("kr6","https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y");
         STREAMS.put("kiis","https://stream.revma.ihrhls.com/zc185");
         STREAMS.put("gallery","https://streaming.live365.com/a94394");
+        STREAMS.put("wild949","https://stream.revma.ihrhls.com/zc305");
+        STREAMS.put("alt987","https://stream.revma.ihrhls.com/zc201");
+        STREAMS.put("myfm1043","https://stream.revma.ihrhls.com/zc173");
+        STREAMS.put("z100","https://stream.revma.ihrhls.com/zc1469");
+        STREAMS.put("power1051","https://stream.revma.ihrhls.com/zc1481");
     }
     private static final Map<String,String> TITLES=new HashMap<>();
     static {
@@ -152,6 +162,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         TITLES.put("kr6","107.7 SBS PowerFM");
         TITLES.put("kiis","102.7 KIIS-FM");
         TITLES.put("gallery","Jazz from Gallery 41");
+        TITLES.put("wild949","Wild 94.9");
+        TITLES.put("alt987","ALT 98.7");
+        TITLES.put("myfm1043","104.3 MYfm");
+        TITLES.put("z100","Z100 New York");
+        TITLES.put("power1051","Power 105.1");
     }
 
     private final class RadioTalkLoadErrorPolicy extends DefaultLoadErrorHandlingPolicy {
@@ -937,7 +952,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         programHandler.postDelayed(new Runnable(){
             @Override public void run(){
                 String id=currentRadioId;
-                if("kiis".equals(id)||"gallery".equals(id)){
+                if(CurrentProgramResolver.hasLocalClock(id)){
                     applyCurrentRadioMetadata(id);
                     notifyChildrenChanged("radio");
                 }
@@ -2545,11 +2560,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem item(String id,String title,String sub){
+        return item(id,title,sub,null);
+    }
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem item(
+        String id,String title,String sub,String groupTitle){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
             .setMediaId(id).setTitle(title).setSubtitle(sub);
         if(STREAMS.containsKey(id)) b.setIconBitmap(StationArt.bitmap(this,id,128));
         Bundle e=new Bundle();
-        e.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",2);
+        e.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+            MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM);
+        if(groupTitle!=null&&!groupTitle.trim().isEmpty())
+            e.putString(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_GROUP_TITLE,groupTitle);
         b.setExtras(e);
         return new android.support.v4.media.MediaBrowserCompat.MediaItem(
             b.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
@@ -2643,8 +2666,16 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 String id=presetRadioId(slot);
                 x.add(item(id,radioProgramTitle(id),TITLES.get(id)+" · Preset "+(slot+1)));
             }
-            x.add(item("kiis",radioProgramTitle("kiis"),TITLES.get("kiis")));
-            x.add(item("gallery",radioProgramTitle("gallery"),TITLES.get("gallery")));
+
+            x.add(item("gallery",radioProgramTitle("gallery"),TITLES.get("gallery"),"SF"));
+            x.add(item("wild949",radioProgramTitle("wild949"),TITLES.get("wild949"),"SF"));
+
+            x.add(item("kiis",radioProgramTitle("kiis"),TITLES.get("kiis"),"LA"));
+            x.add(item("alt987",radioProgramTitle("alt987"),TITLES.get("alt987"),"LA"));
+            x.add(item("myfm1043",radioProgramTitle("myfm1043"),TITLES.get("myfm1043"),"LA"));
+
+            x.add(item("z100",radioProgramTitle("z100"),TITLES.get("z100"),"NY"));
+            x.add(item("power1051",radioProgramTitle("power1051"),TITLES.get("power1051"),"NY"));
         } else if(parent.equals("mp3")){
             x.add(folder("mp3_favorites","좋아요"));
             x.add(folder("mp3_ftp","FTP"));
