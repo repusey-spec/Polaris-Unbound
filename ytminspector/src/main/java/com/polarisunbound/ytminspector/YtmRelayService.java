@@ -30,19 +30,30 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 1.b01 phone-only experimental MediaBrowser/MediaSession bridge.
- * No audio player, no focus requests, no foreground media notification.
+ * 1.b02 phone-only experimental MediaBrowser/MediaSession bridge.
+ * No audio player, no focus requests and no foreground media notification.
  * Not exported: AA and other apps cannot bind in this experimental version.
- * Starts only while the Inspector Activity's MediaBrowser is connected.
+ *
+ * To bridge brief YTM/Inspector screen switches without repeated service
+ * restarts, Activity sends startService(PULSE) while visible (every 20s).
+ * Service stops itself 75s after the last pulse. Android may terminate a
+ * background service sooner; this is a best-effort PHONE test, not a
+ * production background playback guarantee.
  */
 public final class YtmRelayService extends MediaBrowserServiceCompat {
-    public static final String PREFS="ytm_bridge_b01";
+    public static final String PREFS="ytm_bridge_b02";
+    public static final String ACTION_PULSE="com.polarisunbound.ytminspector.action.RELAY_PULSE";
+    public static final String STARTS="starts";
+    public static final String PULSES="pulses";
     public static final String EVENTS="events";
     public static final String STATUS="status";
     private static final String YTM="com.google.android.apps.youtube.music";
     private static final String ROOT="ytm:bridge:root";
     private static final String CURRENT="ytm:bridge:current";
     private static final long POLL_MS=1250L;
+    private static final long BACKGROUND_GRACE_MS=75000L;
+    private static final long PAUSE_SETTLE_MS=400L;
+    private static final long ERROR_SETTLE_MS=1200L;
 
     private final Handler handler=new Handler(Looper.getMainLooper());
     private MediaSessionManager manager;
@@ -53,6 +64,17 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
     private String lastSnapshot="";
     private String lastStatus="중계 시작 전";
     private MediaMetadataCompat currentMetadata;
+    private String pendingTransientKey="";
+    private long pendingTransientSince=0L;
+    private String lastPublishedMetadataKey="";
+    private String lastPublishedSnapshot="";
+    private long lastPublishedPosition=-1L;
+    private long lastPublishedAt=0L;
+    private int lastPublishedState=PlaybackState.STATE_NONE;
+    private long lastPulseAt=0L;
+    private int lastPulseStartId=0;
+    private int runStarts=0;
+    private int runPulses=0;
 
     private final MediaController.Callback ytCallback=new MediaController.Callback(){
         @Override public void onMetadataChanged(MediaMetadata m){handler.post(()->refresh());}
@@ -67,6 +89,19 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         @Override public void run(){
             refresh();
             handler.postDelayed(this,POLL_MS);
+        }
+    };
+
+    private final Runnable idleStop=new Runnable(){
+        @Override public void run(){
+            long elapsed=SystemClock.elapsedRealtime()-lastPulseAt;
+            if(lastPulseAt!=0L && elapsed>=BACKGROUND_GRACE_MS){
+                record("BRIDGE IDLE STOP · no Inspector heartbeat for "+
+                    (elapsed/1000L)+"s");
+                stopSelfResult(lastPulseStartId);
+            }else if(lastPulseAt!=0L){
+                handler.postDelayed(this,Math.max(1000L,BACKGROUND_GRACE_MS-elapsed));
+            }
         }
     };
 
@@ -142,7 +177,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         super.onCreate();
         manager=(MediaSessionManager)getSystemService(Context.MEDIA_SESSION_SERVICE);
         permissionComponent=new ComponentName(this,SessionAccessListener.class);
-        session=new MediaSessionCompat(this,"PolarisYTMRelay1b01");
+        session=new MediaSessionCompat(this,"PolarisYTMRelay1b02");
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|
             MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(bridgeCallback,handler);
@@ -150,7 +185,12 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
             .setState(PlaybackStateCompat.STATE_NONE,0,0f).setActions(0).build());
         session.setActive(true);
         setSessionToken(session.getSessionToken());
-        record("BRIDGE START · 자체 오디오 재생 없음 / YTM 전용 / 외부 비공개");
+        runStarts=getSharedPreferences(PREFS,MODE_PRIVATE).getInt(STARTS,0)+1;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putInt(STARTS,runStarts).apply();
+        record("BRIDGE START #"+runStarts+
+            " · 자체 오디오 재생 없음 / YTM 전용 / 외부 비공개");
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putString(STATUS,"중계 실행 #"+runStarts+" · YTM 연결 대기").apply();
         if(allowed()&&manager!=null){
             try{
                 manager.addOnActiveSessionsChangedListener(listChanged,permissionComponent,handler);
@@ -160,8 +200,27 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         handler.post(poll);
     }
 
+    @Override public int onStartCommand(android.content.Intent intent,int flags,int startId){
+        super.onStartCommand(intent,flags,startId);
+        if(intent==null || !ACTION_PULSE.equals(intent.getAction())){
+            record("BRIDGE unexpected start request · ignored");
+            return START_NOT_STICKY;
+        }
+        lastPulseAt=SystemClock.elapsedRealtime();
+        lastPulseStartId=startId;
+        runPulses++;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putInt(PULSES,runPulses).apply();
+        handler.removeCallbacks(idleStop);
+        handler.postDelayed(idleStop,BACKGROUND_GRACE_MS);
+        if(runPulses==1)
+            record("BRIDGE KEEPALIVE armed · last pulse expires in 75s");
+        return START_NOT_STICKY;
+    }
+
     @Override public void onDestroy(){
+        record("BRIDGE DESTROY · lifecycle end");
         handler.removeCallbacks(poll);
+        handler.removeCallbacks(idleStop);
         if(listenerAdded&&manager!=null){
             try{manager.removeOnActiveSessionsChangedListener(listChanged);}
             catch(Exception ignored){}
@@ -245,7 +304,11 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         MediaController found=bestController();
         if(found==null){
             detach();
+            pendingTransientKey="";
             lastSnapshot="";
+            lastPublishedMetadataKey="";
+            lastPublishedSnapshot="";
+            lastPublishedPosition=-1L;
             lastStatus=allowed()?"YT Music 활성 세션 없음":"알림 접근 권한 없음";
             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(STATUS,lastStatus).apply();
             session.setMetadata(new MediaMetadataCompat.Builder()
@@ -277,6 +340,26 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         long duration=metadata==null?0L:metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
         int state=playback==null?PlaybackState.STATE_NONE:playback.getState();
         long actions=playback==null?0L:playback.getActions();
+
+        // Do not propagate 100ms PAUSED transitions during track changes,
+        // or YTM's brief STATE_ERROR generated by rejected PlayFromSearch.
+        // Explicit, sustained pause/error will still be mirrored.
+        long settle=state==PlaybackState.STATE_PAUSED?PAUSE_SETTLE_MS:
+            state==PlaybackState.STATE_ERROR?ERROR_SETTLE_MS:0L;
+        if(settle>0L){
+            String transientKey=safe(title)+"|"+safe(artist)+"|"+state;
+            long now=SystemClock.elapsedRealtime();
+            if(!transientKey.equals(pendingTransientKey)){
+                pendingTransientKey=transientKey;
+                pendingTransientSince=now;
+                handler.postDelayed(()->refresh(),settle);
+                return;
+            }
+            if(now-pendingTransientSince<settle)return;
+        }else{
+            pendingTransientKey="";
+            pendingTransientSince=0L;
+        }
         String snapshot=String.valueOf(title)+"|"+artist+"|"+album+"|"+duration+"|"+
             state+"|"+actions+customSignature(playback);
         if(!snapshot.equals(lastSnapshot)){
@@ -307,8 +390,12 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
                 }catch(Exception ignored){}
             }
         }
-        currentMetadata=md.build();
-        session.setMetadata(currentMetadata);
+        String metadataKey=safe(title)+"|"+safe(artist)+"|"+safe(album)+"|"+duration;
+        if(!metadataKey.equals(lastPublishedMetadataKey)||currentMetadata==null){
+            currentMetadata=md.build();
+            session.setMetadata(currentMetadata);
+            lastPublishedMetadataKey=metadataKey;
+        }
 
         PlaybackStateCompat.Builder ps=new PlaybackStateCompat.Builder();
         long exposed=0L;
@@ -348,9 +435,24 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
                 }
             }
         }
-        session.setPlaybackState(ps.build());
+        // Only republish playback state on meaningful changes, not every poll.
+        // A normal advancing position is interpolated from playback speed/timestamp.
+        long now=SystemClock.elapsedRealtime();
+        long expected=lastPublishedPosition;
+        if(lastPublishedState==PlaybackState.STATE_PLAYING && expected>=0L){
+            expected+=Math.round((now-lastPublishedAt)*1f);
+        }
+        boolean seekOrDrift=expected<0L || Math.abs(position-expected)>2200L;
+        if(!snapshot.equals(lastPublishedSnapshot)||seekOrDrift){
+            session.setPlaybackState(ps.build());
+            lastPublishedPosition=position;
+            lastPublishedAt=now;
+            lastPublishedState=state;
+            lastPublishedSnapshot=snapshot;
+        }
         lastStatus="YTM "+safe(title)+" / "+stateName(state)+
-            " / relay actions 0x"+Long.toHexString(exposed);
+            " / relay actions 0x"+Long.toHexString(exposed)+
+            " / starts="+runStarts+" / pulses="+runPulses;
         getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(STATUS,lastStatus).apply();
     }
 
