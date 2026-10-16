@@ -81,10 +81,15 @@ public class MainActivity extends AppCompatActivity {
     private String currentFtpMp3Path="";
     private int currentFtpMp3Offset=0;
     private boolean returnToFavoritesFromPlayer=false;
-    private static final String[] RADIO_NAMES={"89.1 KBS CoolFM","91.9 MBC FM4U","93.9 CBS MusicFM","95.9 MBC 표준FM","102.7 AFN EagleFM","107.7 SBS PowerFM"};
-    private int presetStation(int slot){ return getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot); }
-    private void choosePreset(int slot){ new androidx.appcompat.app.AlertDialog.Builder(this).setTitle((slot+1)+"번 프리셋에 저장").setItems(RADIO_NAMES,(d,which)->{ getSharedPreferences("radio_presets",MODE_PRIVATE).edit().putInt("slot"+slot,which).apply(); showDomestic(); Toast.makeText(this,(slot+1)+"번 → "+RADIO_NAMES[which],Toast.LENGTH_SHORT).show(); }).show(); }
-
+    private void choosePreset(int slot){
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle((slot+1)+"번 프리셋 변경 (기존 위치와 교환)")
+            .setItems(RadioPresets.NAMES,(d,which)->{
+                RadioPresets.swap(this,slot,which);
+                showDomestic();
+                Toast.makeText(this,(slot+1)+"번 → "+RadioPresets.NAMES[which],Toast.LENGTH_SHORT).show();
+            }).show();
+    }
 
     private final class PlayerSwipeScrollView extends ScrollView {
         private float downX;
@@ -226,6 +231,7 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
                                 updateRadioScheduleFromMetadata();
+                                updateRadioPlaybackButton(lastPlaybackState);
                                 updateMiniPlayerMetadata();
                                 updateNowPlayingMetadata();
                                 updateNowPlayingModes();
@@ -432,9 +438,10 @@ public class MainActivity extends AppCompatActivity {
     private void updateRadioPlaybackButton(PlaybackStateCompat s){
         if(radioPlaybackButton==null) return;
         int state=s==null?PlaybackStateCompat.STATE_NONE:s.getState();
-        if(state==PlaybackStateCompat.STATE_PLAYING){
-            radioPlaybackButton.setText("Ⅱ  일시정지");
-        }else if(state==PlaybackStateCompat.STATE_BUFFERING){
+        boolean radioActive=radioIdFromMetadata(lastMetadata)!=null;
+        if(radioActive && state==PlaybackStateCompat.STATE_PLAYING){
+            radioPlaybackButton.setText("■  정지");
+        }else if(radioActive && state==PlaybackStateCompat.STATE_BUFFERING){
             radioPlaybackButton.setText("◌  연결 중…");
         }else{
             radioPlaybackButton.setText("▶  재생");
@@ -446,14 +453,15 @@ public class MainActivity extends AppCompatActivity {
         if(controller==null) return;
         int state=lastPlaybackState==null?PlaybackStateCompat.STATE_NONE:lastPlaybackState.getState();
         MediaControllerCompat.TransportControls transport=controller.getTransportControls();
-        if(state==PlaybackStateCompat.STATE_PLAYING||state==PlaybackStateCompat.STATE_BUFFERING){
-            transport.pause();
-        }else if(state==PlaybackStateCompat.STATE_STOPPED||state==PlaybackStateCompat.STATE_NONE||
-                 state==PlaybackStateCompat.STATE_ERROR){
-            if(selectedRadioId!=null) transport.playFromMediaId(selectedRadioId,null);
-            else Toast.makeText(this,"먼저 채널을 선택하세요",Toast.LENGTH_SHORT).show();
+        boolean radioActive=radioIdFromMetadata(lastMetadata)!=null;
+        if(radioActive && (state==PlaybackStateCompat.STATE_PLAYING||
+                           state==PlaybackStateCompat.STATE_BUFFERING)){
+            transport.stop();
         }else{
-            transport.play();
+            String id=selectedRadioId;
+            if(id==null) id=radioIdFromMetadata(lastMetadata);
+            if(id!=null) transport.playFromMediaId(id,null);
+            else Toast.makeText(this,"먼저 채널을 선택하세요",Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -670,9 +678,11 @@ public class MainActivity extends AppCompatActivity {
         return row;
     }
 
-    private void addRadioCard(LinearLayout row,String id,String label){
-        ImageButton v=stationButton(id,label);
+    private void addRadioCard(LinearLayout row,String id,int slot){
+        String label=RadioPresets.stationName(id);
+        ImageButton v=stationButton(id,(slot+1)+"번 "+label);
         v.setOnClickListener(x->playId(id,label));
+        v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
         LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
         bp.setMargins(10,10,10,10);
         row.addView(v,bp);
@@ -685,46 +695,55 @@ public class MainActivity extends AppCompatActivity {
         row.addView(spacer,bp);
     }
 
+    private void addRadioRegionLabels(String[] ordered,int first,int count){
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.HORIZONTAL);
+        boolean anyLabel=false;
+        for(int column=0;column<count;){
+            String region=RadioPresets.region(ordered[first+column]);
+            int span=1;
+            while(column+span<count &&
+                  region.equals(RadioPresets.region(ordered[first+column+span]))) span++;
+            // Keep consecutive regions across physical rows under one heading.
+            boolean continued=(first+column>0 &&
+                region.equals(RadioPresets.region(ordered[first+column-1])));
+            TextView label=radioSectionTitle(continued?"":region);
+            if(!continued) anyLabel=true;
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,span);
+            lp.setMargins(10,0,10,0);
+            labels.addView(label,lp);
+            column+=span;
+        }
+        for(int column=count;column<4;column++){
+            TextView blank=new TextView(this);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
+            lp.setMargins(10,0,10,0);
+            labels.addView(blank,lp);
+        }
+        if(anyLabel) body.addView(labels,new LinearLayout.LayoutParams(-1,-2));
+    }
+
+    private void addRadioPresetRow(String[] ordered,int first,int count){
+        addRadioRegionLabels(ordered,first,count);
+        LinearLayout row=radioRow();
+        for(int column=0;column<count;column++)
+            addRadioCard(row,ordered[first+column],first+column);
+        for(int column=count;column<4;column++) addRadioSpacer(row);
+    }
+
     private void showDomestic(){
         String activeRadio=radioIdFromMetadata(lastMetadata);
         if(activeRadio!=null) selectedRadioId=activeRadio;
         currentPage="radio";
         base("라디오");
 
-        body.addView(radioSectionTitle("국내"));
-        LinearLayout row=radioRow();
-        for(int i=0;i<6;i++){
-            if(i==4) row=radioRow();
-            final int slot=i;
-            int station=presetStation(i);
-            final String id="kr"+(station+1);
-            final String label=RADIO_NAMES[station];
-            ImageButton v=stationButton(id,(slot+1)+"번 "+label);
-            v.setOnClickListener(x->playId(id,label));
-            v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
-            LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
-            bp.setMargins(10,10,10,10);
-            row.addView(v,bp);
-        }
-        // Keep the domestic grid four columns wide.
-        addRadioSpacer(row);
-        addRadioSpacer(row);
-
-        // SF and NY share one row; their station artwork names each city.
-        body.addView(radioSectionTitle("SF / NY"));
-        row=radioRow();
-        addRadioCard(row,"gallery","Jazz from Gallery 41");
-        addRadioCard(row,"wild949","Wild 94.9");
-        addRadioCard(row,"z100","Z100 New York");
-        addRadioCard(row,"power1051","Power 105.1");
-
-        body.addView(radioSectionTitle("LA"));
-        row=radioRow();
-        addRadioCard(row,"kiis","102.7 KIIS-FM");
-        addRadioCard(row,"alt987","ALT 98.7");
-        addRadioCard(row,"myfm1043","104.3 MYfm");
-        addRadioSpacer(row);
-
+        String[] ordered=RadioPresets.orderedIds(this);
+        // Preserve the compact 4+2 / 4 / 3 grid while allowing all 13 slots
+        // to change stations. Heading regions follow the selected stations.
+        addRadioPresetRow(ordered,0,4);
+        addRadioPresetRow(ordered,4,2);
+        addRadioPresetRow(ordered,6,4);
+        addRadioPresetRow(ordered,10,3);
     }
 
 
