@@ -71,6 +71,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
     private long lastPublishedPosition=-1L;
     private long lastPublishedAt=0L;
     private int lastPublishedState=PlaybackState.STATE_NONE;
+    private float lastPublishedSpeed=0f;
     private long lastPulseAt=0L;
     private int lastPulseStartId=0;
     private int runStarts=0;
@@ -362,11 +363,11 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         }
         String snapshot=String.valueOf(title)+"|"+artist+"|"+album+"|"+duration+"|"+
             state+"|"+actions+customSignature(playback);
-        if(!snapshot.equals(lastSnapshot)){
+        boolean mirrorChanged=!snapshot.equals(lastSnapshot);
+        if(mirrorChanged){
             lastSnapshot=snapshot;
             record("BRIDGE MIRROR "+safe(title)+" / "+safe(artist)+
                 " / "+stateName(state)+" / actions=0x"+Long.toHexString(actions));
-            notifyChildrenChanged(ROOT);
         }
 
         MediaMetadataCompat.Builder md=new MediaMetadataCompat.Builder()
@@ -396,6 +397,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
             session.setMetadata(currentMetadata);
             lastPublishedMetadataKey=metadataKey;
         }
+        if(mirrorChanged)notifyChildrenChanged(ROOT);
 
         PlaybackStateCompat.Builder ps=new PlaybackStateCompat.Builder();
         long exposed=0L;
@@ -440,7 +442,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
         long now=SystemClock.elapsedRealtime();
         long expected=lastPublishedPosition;
         if(lastPublishedState==PlaybackState.STATE_PLAYING && expected>=0L){
-            expected+=Math.round((now-lastPublishedAt)*1f);
+            expected+=Math.round((now-lastPublishedAt)*lastPublishedSpeed);
         }
         boolean seekOrDrift=expected<0L || Math.abs(position-expected)>2200L;
         if(!snapshot.equals(lastPublishedSnapshot)||seekOrDrift){
@@ -448,6 +450,7 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
             lastPublishedPosition=position;
             lastPublishedAt=now;
             lastPublishedState=state;
+            lastPublishedSpeed=speed;
             lastPublishedSnapshot=snapshot;
         }
         lastStatus="YTM "+safe(title)+" / "+stateName(state)+
