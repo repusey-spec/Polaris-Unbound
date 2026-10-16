@@ -1232,13 +1232,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         else if(currentMp3Id>=0 || !currentMp3Queue.isEmpty()) skipMp3(delta);
     }
 
-    private void prepareFtpQueueAsync(String relativePath){
+    private void prepareFtpQueueAsync(String relativePath,boolean offlineOnly){
         final String rel=relativePath;
         final String directory=PolarisFtp.parentRelative(rel);
         ftpExecutor.execute(() -> {
             try{
                 List<String> queue;
-                if(NasMusicStore.hasSaved(this,rel))
+                if(offlineOnly)
                     queue=NasMusicStore.savedInDirectory(this,directory);
                 else{
                     try{queue=PolarisFtp.listMp3AudioPaths(this,directory);}
@@ -1633,9 +1633,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             try{
                 // Offline-first: never contact NAS for a previously saved song.
                 Uri saved=NasMusicStore.savedUri(this,rel);
+                boolean offlineBeforeDownload=(saved!=null);
                 File cached=null;
                 if(saved==null){
                     cached=PolarisFtp.cachedMp3IfPresent(this,rel);
+                    if(cached!=null) offlineBeforeDownload=true;
                     if(cached==null){
                         if(!NasMusicStore.mayDownload(this))
                             throw new java.io.IOException(
@@ -1655,7 +1657,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 if(!rel.equals(currentFtpMp3Path)) return;
                 final Uri playableUri=saved;
                 ftpMp3Preparing=false;
-                prepareFtpQueueAsync(rel);
+                prepareFtpQueueAsync(rel,offlineBeforeDownload);
 
                 String title=fallbackTitle;
                 String artist="Synology FTP";
