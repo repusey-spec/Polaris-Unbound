@@ -1237,7 +1237,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         final String directory=PolarisFtp.parentRelative(rel);
         ftpExecutor.execute(() -> {
             try{
-                List<String> queue=PolarisFtp.listMp3AudioPaths(this,directory);
+                List<String> queue;
+                try{queue=PolarisFtp.listMp3AudioPaths(this,directory);}
+                catch(Exception offline){queue=NasMusicStore.savedInDirectory(this,directory);}
                 if(currentFtpMp3Path==null ||
                    !directory.equals(PolarisFtp.parentRelative(currentFtpMp3Path))) return;
                 synchronized(currentFtpMp3Queue){
@@ -1271,7 +1273,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     }
                 }
                 if(queue==null){
-                    queue=PolarisFtp.listMp3AudioPaths(this,directory);
+                    try{queue=PolarisFtp.listMp3AudioPaths(this,directory);}
+                    catch(Exception offline){
+                        queue=NasMusicStore.savedInDirectory(this,directory);
+                        trace("NAS MUSIC offline skip queue "+directory+" size="+queue.size());
+                    }
                     synchronized(currentFtpMp3Queue){
                         currentFtpMp3Queue.clear();
                         currentFtpMp3Queue.addAll(queue);
@@ -1593,7 +1599,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         currentFtpMp3Path=rel;
         currentFtpMp3Directory=PolarisFtp.parentRelative(rel);
         ftpMp3Preparing=true;
-        prepareFtpQueueAsync(rel);
+        // Queue discovery must never hold up a saved offline song.
         retryCount=0;
         radioSoftRetryCount=0;
         userStopped=false;
@@ -1621,9 +1627,31 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         trace("FTP MP3 prepare: "+rel);
         ftpExecutor.execute(() -> {
             try{
-                File cached=PolarisFtp.downloadMp3ToCache(this,rel);
+                // Offline-first: never contact NAS for a previously saved song.
+                Uri saved=NasMusicStore.savedUri(this,rel);
+                File cached=null;
+                if(saved==null){
+                    cached=PolarisFtp.cachedMp3IfPresent(this,rel);
+                    if(cached==null){
+                        if(!NasMusicStore.mayDownload(this))
+                            throw new java.io.IOException(
+                                "모바일 데이터 다운로드 차단 중 · Wi-Fi 연결 또는 NAS MUSIC 설정에서 허용");
+                        cached=PolarisFtp.downloadMp3ToCache(this,rel);
+                    }
+                    if(!rel.equals(currentFtpMp3Path)) return;
+                    try{
+                        saved=NasMusicStore.store(this,rel,cached);
+                    }catch(Exception storageError){
+                        // Preserve existing v0.56 playback if storage is full or
+                        // SAF access has been revoked; do not silently stop audio.
+                        trace("NAS persistent save failed: "+rel+" / "+storageError);
+                        saved=Uri.fromFile(cached);
+                    }
+                }
                 if(!rel.equals(currentFtpMp3Path)) return;
+                final Uri playableUri=saved;
                 ftpMp3Preparing=false;
+                prepareFtpQueueAsync(rel);
 
                 String title=fallbackTitle;
                 String artist="Synology FTP";
@@ -1633,7 +1661,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
                 MediaMetadataRetriever mmr=new MediaMetadataRetriever();
                 try{
-                    mmr.setDataSource(cached.getAbsolutePath());
+                    mmr.setDataSource(this,playableUri);
                     String metaTitle=mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
                     String metaArtist=mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
                     String metaAlbum=mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM);
@@ -1667,7 +1695,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 final long dur=duration;
                 final long startAt=resumePosition;
                 final Bitmap cover=art;
-                final Uri uri=Uri.fromFile(cached);
+                final Uri uri=playableUri;
 
                 runOnPlayerThread(() -> {
                     if(!rel.equals(currentFtpMp3Path)) return;
@@ -1687,7 +1715,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         if(!userStopped && requestPlaybackFocus()) player.play();
                         rememberFtpForResume(rel,startAt);
                         publishState();
-                        trace("FTP MP3 cached play: "+rel+" -> "+cached.getName()+
+                        trace("NAS MUSIC offline-first play: "+rel+" -> "+uri+
                             (restoring?" restore@"+startAt:""));
                     }catch(Throwable e){
                         publishError("FTP 음악 재생 오류: "+e.getMessage());
@@ -2682,6 +2710,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
         } else if(parent.equals("mp3")){
             x.add(folder("mp3_favorites","좋아요"));
+            x.add(folder("mp3_saved","저장된 NAS 곡"));
             x.add(folder("mp3_ftp","FTP"));
             x.add(folder("mp3_recent","최근 재생"));
             x.add(folder("mp3_albums","앨범"));
@@ -2692,6 +2721,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             PolarisFtp.Config cfg=PolarisFtp.load(this);
             String sub=cfg.isConfigured() ? cfg.mp3Root+" · "+mp3FtpStatus : "폰에서 FTP 설정 필요";
             x.add(item("mp3:ftp_upload","FTP 테스트 업로드",sub));
+        } else if(parent.equals("mp3_saved")){
+            for(NasMusicStore.Song song:NasMusicStore.savedSongs(this))
+                x.add(listTextItem("ftpmp3:"+Uri.encode(song.relativePath),
+                    PolarisFtp.displayTitle(song.relativePath),
+                    "저장됨 · "+PolarisFtp.parentRelative(song.relativePath)));
         } else if(parent.equals("mp3_recent")){
             x.addAll(loadAudioByIds(recentIds()));
         } else if(parent.equals("mp3_folders")){
