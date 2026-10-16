@@ -49,7 +49,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Polaris YTM 1.b03 — PHONE-ONLY MediaSession bridge with streamlined test UI.
+ * Polaris YTM 1.c01 — Android Auto exposed YTM MediaBrowser test client.
  *
  * Uses the Android MediaSessionManager / NotificationListener access foundation
  * studied in MQ Player without copying its GPL implementation.
@@ -95,6 +95,8 @@ public final class InspectorActivity extends Activity {
     private EditText artistQueryInput;
     private TextView relayInfo;
     private TextView relayHistory;
+    private TextView aaProbeText;
+    private String aaProbeResult="로컬 AA 브라우저 목록 시험 전";
     private MediaBrowserCompat relayBrowser;
     private MediaControllerCompat relayController;
     private boolean relayConnecting=false;
@@ -229,12 +231,12 @@ public final class InspectorActivity extends Activity {
 
         root.addView(text("Polaris YTM Inspector",25,WHITE,true));
         addSpace(root,4);
-        root.addView(text("1.b03 · 폰 전용 · 중계 테스트",14,ACCENT,true));
+        root.addView(text("1.c01 · 실험용 Android Auto 미디어 브리지",14,ACCENT,true));
         addSpace(root,8);
         root.addView(text(
-            "중계 서비스는 화면 전환 후 최대 75초 동안 유지되도록 시도합니다. "
-            +"앱 화면이 열려 있으면 20초마다 유지 신호를 보냅니다. "
-            +"백그라운드에서는 Android가 서비스를 더 일찍 종료할 수도 있습니다.",14,MUTED,false));
+            "독립된 AA 테스트 앱입니다. 원래 Polaris 0.58에는 변경이 없습니다. "
+            +"차량에서는 Android Auto 앱 목록에서 Polaris YTM AA Test를 선택합니다. "
+            +"YT Music이 실제 오디오를 재생하며 이 앱은 소리를 직접 만들지 않습니다.",14,MUTED,false));
         addSpace(root,14);
 
         LinearLayout permissions=card(root);
@@ -799,11 +801,11 @@ public final class InspectorActivity extends Activity {
 
     private void addRelayPanel(LinearLayout root){
         LinearLayout panel=card(root);
-        panel.addView(text("1.b03 · Polaris 중계 MediaSession",17,WHITE,true));
+        panel.addView(text("1.c01 · Android Auto YTM 중계",17,WHITE,true));
         addSpace(panel,5);
-        panel.addView(text("이 중계는 실험 앱 내부에서만 접근 가능하며 아직 AA에 노출하지 않습니다. "
-            +"YT Music으로 이동했다 돌아와도 서비스 시작 횟수가 증가하지 않는지 확인하세요. "
-            +"아래 중계 버튼은 MediaSession을 경유합니다.",12,MUTED,false));
+        panel.addView(text("이 버전은 AA에서 미디어 앱으로 인식하도록 설정됐습니다. "
+            +"아래 폰 버튼이 정상이라면 AA 화면의 재생·이전·다음 명령이 "
+            +"같은 중계 세션으로 전달되는지 실차에서 확인합니다.",12,MUTED,false));
         addSpace(panel,9);
         relayInfo=text("중계 연결 대기",14,ACCENT,false);
         panel.addView(relayInfo);
@@ -833,9 +835,77 @@ public final class InspectorActivity extends Activity {
                     ()->relayController.getTransportControls()
                         .sendCustomAction("loop_mode_action",Bundle.EMPTY))
             });
+        addButtons(panel,new String[]{"AA 미디어 목록 로컬 검증"},
+            new Runnable[]{this::runBrowserProbe});
+        aaProbeText=text(aaProbeResult,12,ACCENT,false);
+        panel.addView(aaProbeText);
         panel.addView(text("중계 서비스 최근 진단 로그",12,MUTED,true));
         relayHistory=text("아직 중계 이벤트 없음",12,MUTED,false);
         panel.addView(relayHistory);
+    }
+
+    /** Proves a local phone client can read the same AA browse tree. */
+    private void runBrowserProbe(){
+        final MediaBrowserCompat browser=relayBrowser;
+        if(browser==null || !browser.isConnected()){
+            aaProbeResult="로컬 시험 실패: 중계 MediaBrowser 미연결";
+            if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+            log("AA PROBE no browser connection");
+            return;
+        }
+        aaProbeResult="AA 미디어 목록 로컬 시험 중…";
+        if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+        final String rootId="ytm:bridge:root", folderId="ytm:bridge:now";
+        try{
+            browser.subscribe(rootId,new MediaBrowserCompat.SubscriptionCallback(){
+                @Override public void onChildrenLoaded(String parent,
+                        java.util.List<MediaBrowserCompat.MediaItem> children){
+                    if(browser!=relayBrowser || !browser.isConnected())return;
+                    boolean folder=children!=null&&children.size()==1
+                        &&children.get(0).isBrowsable()
+                        &&folderId.equals(children.get(0).getMediaId());
+                    browser.unsubscribe(rootId);
+                    if(!folder){
+                        aaProbeResult="로컬 시험 실패: AA 루트 폴더 형식 불일치";
+                        if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+                        log("AA PROBE root invalid");
+                        return;
+                    }
+                    log("AA PROBE ROOT OK · browsable folder=1");
+                    browser.subscribe(folderId,new MediaBrowserCompat.SubscriptionCallback(){
+                        @Override public void onChildrenLoaded(String id,
+                                java.util.List<MediaBrowserCompat.MediaItem> tracks){
+                            if(browser!=relayBrowser || !browser.isConnected())return;
+                            browser.unsubscribe(folderId);
+                            if(tracks!=null&&tracks.size()==1&&tracks.get(0).isPlayable()){
+                                CharSequence title=tracks.get(0).getDescription().getTitle();
+                                aaProbeResult="로컬 AA 목록 통과 · "+String.valueOf(title);
+                                log("AA PROBE TRACK OK · "+String.valueOf(title));
+                            }else{
+                                aaProbeResult="AA 루트 정상 · 현재 YT Music 곡 없음 ("+
+                                    (tracks==null?"null":tracks.size())+")";
+                                log("AA PROBE no playable YTM track");
+                            }
+                            if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+                        }
+                        @Override public void onError(String id){
+                            aaProbeResult="로컬 시험 실패: 곡 목록 검색 오류";
+                            if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+                            log("AA PROBE track browse error");
+                        }
+                    });
+                }
+                @Override public void onError(String parent){
+                    aaProbeResult="로컬 시험 실패: AA 루트 목록 오류";
+                    if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+                    log("AA PROBE root browse error");
+                }
+            });
+        }catch(Exception e){
+            aaProbeResult="로컬 시험 예외: "+e.getClass().getSimpleName();
+            if(aaProbeText!=null)aaProbeText.setText(aaProbeResult);
+            log("AA PROBE error "+e.getClass().getSimpleName());
+        }
     }
 
     private void showRelay(){
@@ -846,7 +916,10 @@ public final class InspectorActivity extends Activity {
             .getInt(YtmRelayService.STARTS,0);
         int pulses=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
             .getInt(YtmRelayService.PULSES,0);
-        String lifecycle="서비스 생성 횟수: "+starts+" / 이번 실행 유지 신호: "+pulses;
+        String aaClient=getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
+            .getString("aa_client","AA 브라우저 외부 접속 기록 없음");
+        String lifecycle="서비스 생성 횟수: "+starts+" / 이번 실행 유지 신호: "+pulses+
+            "\n브라우저 접속 기록: "+aaClient;
         if(bridge==null){
             relayInfoText("중계 연결 대기 · "+details+"\n"+lifecycle);
         }else{
@@ -1153,8 +1226,12 @@ public final class InspectorActivity extends Activity {
 
     private void copyDiagnostics(){
         String history=getSharedPreferences(STORE,MODE_PRIVATE).getString(HISTORY,"");
-        String payload="Polaris YTM Inspector v1.b03\nAndroid API "+Build.VERSION.SDK_INT+
+        String payload="Polaris YTM Inspector v1.c01\nAndroid API "+Build.VERSION.SDK_INT+
             "\n\n"+latestDiagnostic+"\n\n검색 오류: "+lastSearchError+
+            "\n\n로컬 AA 브라우저 검증: "+aaProbeResult+
+            "\nAA 브라우저 최근 요청: "+
+            getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE)
+                .getString("aa_client","접속 기록 없음")+
             "\n\n중계 세션 기록:\n"+
             getSharedPreferences(YtmRelayService.PREFS,MODE_PRIVATE).getString(YtmRelayService.EVENTS,"")+
             "\n\n세션 변경 로그:\n"+history;
