@@ -419,7 +419,7 @@ public class MainActivity extends AppCompatActivity {
         String station=CurrentProgramResolver.stationName(id);
         String title=lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
         if(title!=null&&!title.trim().isEmpty()&&!title.equals(station))
-            scheduleView.setText(station+"\\n"+title);
+            scheduleView.setText(station+"\n"+title);
     }
 
     private void updateRadioPlaybackButton(PlaybackStateCompat s){
