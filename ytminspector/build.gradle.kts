@@ -8,8 +8,8 @@ android {
         applicationId = "com.polarisunbound.ytminspector"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1003
-        versionName = "1.a03"
+        versionCode = 1101
+        versionName = "1.b01"
     }
     signingConfigs {
         create("stableDebug") {
@@ -24,4 +24,8 @@ android {
             signingConfig = signingConfigs.getByName("stableDebug")
         }
     }
+}
+
+dependencies {
+    implementation("androidx.media:media:1.7.0")
 }
