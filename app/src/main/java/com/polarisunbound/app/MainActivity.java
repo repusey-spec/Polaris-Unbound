@@ -41,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
     private MediaBrowserCompat browser;
     private MediaControllerCompat controller;
     private TextView status;
+    private TextView radioPlaybackButton;
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
     private TextView scheduleView;
@@ -216,6 +217,7 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onPlaybackStateChanged(PlaybackStateCompat s){
                                 lastPlaybackState=s;
                                 updateStatus(s);
+                                updateRadioPlaybackButton(s);
                                 updateMiniPlayerState();
                                 updateNowPlayingState();
                                 updateNowPlayingModes();
@@ -223,6 +225,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
+                                updateRadioScheduleFromMetadata();
                                 updateMiniPlayerMetadata();
                                 updateNowPlayingMetadata();
                                 updateNowPlayingModes();
@@ -233,6 +236,8 @@ public class MainActivity extends AppCompatActivity {
                         lastPlaybackState=controller.getPlaybackState();
                         updateMiniPlayerMetadata();
                         updateMiniPlayerState();
+                        updateRadioPlaybackButton(lastPlaybackState);
+                        updateRadioScheduleFromMetadata();
                         if(status!=null) status.setText("재생 서비스 연결됨");
                     }catch(Exception e){ if(status!=null) status.setText("서비스 연결 오류"); }
                 }
@@ -259,9 +264,9 @@ public class MainActivity extends AppCompatActivity {
         return v;
     }
 
-    private TextView stopButton(){
+    private TextView radioControlButton(){
         TextView v=new TextView(this);
-        v.setText("■  정지");
+        v.setText("▶  재생");
         v.setTextSize(16);
         v.setGravity(17);
         v.setPadding(24,18,24,18);
@@ -359,33 +364,92 @@ public class MainActivity extends AppCompatActivity {
         refreshTabs();
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
-        TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
-        if("mp3".equals(currentPage)||"can".equals(currentPage)){
+        radioPlaybackButton=null;
+        if(!"radio".equals(currentPage)){
+            TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
+        }
+        progressHandler.removeCallbacks(progressTick);
+        mp3Progress=null;
+        mp3Elapsed=null;
+        mp3Duration=null;
+        if("radio".equals(currentPage)){
             status=null;
-            progressHandler.removeCallbacks(progressTick);
-            mp3Progress=null;
-            mp3Elapsed=null;
-            mp3Duration=null;
+            // The current station/programme is the radio page heading.
+            addSchedulePanel();
+            radioPlaybackButton=radioControlButton();
+            radioPlaybackButton.setOnClickListener(v->toggleRadioPlayback());
+            LinearLayout.LayoutParams controlLp=new LinearLayout.LayoutParams(-1,-2);
+            controlLp.setMargins(0,2,0,16);
+            body.addView(radioPlaybackButton,controlLp);
+            updateRadioPlaybackButton(lastPlaybackState);
+            updateRadioScheduleFromMetadata();
+        }else if("mp3".equals(currentPage)||"can".equals(currentPage)){
+            status=null;
         }else{
-            progressHandler.removeCallbacks(progressTick);
-            mp3Progress=null;
-            mp3Elapsed=null;
-            mp3Duration=null;
             status=new TextView(this);
             status.setText(controller==null?"재생 서비스 연결 중…":"재생 준비");
             status.setTextSize(16);
             status.setTextColor(0xDDFFFFFF);
             status.setPadding(0,0,0,12);
             body.addView(status);
-            TextView stop=stopButton();
-            stop.setOnClickListener(v->{ if(controller!=null) controller.getTransportControls().stop(); });
-            LinearLayout.LayoutParams stopLp=new LinearLayout.LayoutParams(-1,-2);
-            stopLp.setMargins(0,2,0,16);
-            body.addView(stop,stopLp);
         }
         updateMiniPlayerVisibility();
         sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
+
+    private String radioIdFromMetadata(MediaMetadataCompat m){
+        if(m==null) return null;
+        String id=m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if(id==null) return null;
+        if(id.matches("kr[1-6]")||CurrentProgramResolver.hasLocalClock(id)) return id;
+        return null;
+    }
+
+    private void updateRadioScheduleFromMetadata(){
+        if(!"radio".equals(currentPage)||scheduleView==null) return;
+        String id=radioIdFromMetadata(lastMetadata);
+        if(id==null) return;
+        if(selectedRadioId==null) selectedRadioId=id;
+        if(!id.equals(selectedRadioId)) return;
+        CurrentProgramResolver.Result current=CurrentProgramResolver.cached(this,id);
+        if(CurrentProgramResolver.isCurrentNow(id,current)){
+            scheduleView.setText(current.phoneText(id));
+            return;
+        }
+        String station=CurrentProgramResolver.stationName(id);
+        String title=lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+        if(title!=null&&!title.trim().isEmpty()&&!title.equals(station))
+            scheduleView.setText(station+"\\n"+title);
+    }
+
+    private void updateRadioPlaybackButton(PlaybackStateCompat s){
+        if(radioPlaybackButton==null) return;
+        int state=s==null?PlaybackStateCompat.STATE_NONE:s.getState();
+        if(state==PlaybackStateCompat.STATE_PLAYING){
+            radioPlaybackButton.setText("Ⅱ  일시정지");
+        }else if(state==PlaybackStateCompat.STATE_BUFFERING){
+            radioPlaybackButton.setText("◌  연결 중…");
+        }else{
+            radioPlaybackButton.setText("▶  재생");
+        }
+        radioPlaybackButton.setEnabled(controller!=null);
+    }
+
+    private void toggleRadioPlayback(){
+        if(controller==null) return;
+        int state=lastPlaybackState==null?PlaybackStateCompat.STATE_NONE:lastPlaybackState.getState();
+        MediaControllerCompat.TransportControls transport=controller.getTransportControls();
+        if(state==PlaybackStateCompat.STATE_PLAYING||state==PlaybackStateCompat.STATE_BUFFERING){
+            transport.pause();
+        }else if(state==PlaybackStateCompat.STATE_STOPPED||state==PlaybackStateCompat.STATE_NONE||
+                 state==PlaybackStateCompat.STATE_ERROR){
+            if(selectedRadioId!=null) transport.playFromMediaId(selectedRadioId,null);
+            else Toast.makeText(this,"먼저 채널을 선택하세요",Toast.LENGTH_SHORT).show();
+        }else{
+            transport.play();
+        }
+    }
+
     private void playId(String id,String label){
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
@@ -615,7 +679,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showDomestic(){
-        selectedRadioId=null;
+        String activeRadio=radioIdFromMetadata(lastMetadata);
+        if(activeRadio!=null) selectedRadioId=activeRadio;
         currentPage="radio";
         base("라디오");
 
@@ -638,12 +703,13 @@ public class MainActivity extends AppCompatActivity {
         addRadioSpacer(row);
         addRadioSpacer(row);
 
-        body.addView(radioSectionTitle("SF"));
+        // SF and NY share one row; their station artwork names each city.
+        body.addView(radioSectionTitle("SF / NY"));
         row=radioRow();
         addRadioCard(row,"gallery","Jazz from Gallery 41");
         addRadioCard(row,"wild949","Wild 94.9");
-        addRadioSpacer(row);
-        addRadioSpacer(row);
+        addRadioCard(row,"z100","Z100 New York");
+        addRadioCard(row,"power1051","Power 105.1");
 
         body.addView(radioSectionTitle("LA"));
         row=radioRow();
@@ -652,14 +718,6 @@ public class MainActivity extends AppCompatActivity {
         addRadioCard(row,"myfm1043","104.3 MYfm");
         addRadioSpacer(row);
 
-        body.addView(radioSectionTitle("NY"));
-        row=radioRow();
-        addRadioCard(row,"z100","Z100 New York");
-        addRadioCard(row,"power1051","Power 105.1");
-        addRadioSpacer(row);
-        addRadioSpacer(row);
-
-        addSchedulePanel();
     }
 
 
