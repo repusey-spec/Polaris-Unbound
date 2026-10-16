@@ -1,18 +1,14 @@
 package com.polarisunbound.app;
 
 import android.content.ContentResolver;
-import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.net.ConnectivityManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
-
-import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -27,20 +23,17 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * v0.57 NAS downloads: permanent user-visible music, not Android cache.
+ * v0.58 NAS downloads.
  *
- * The default Android 10+ destination is Music/Polaris NAS, in MediaStore.
- * An optional persisted ACTION_OPEN_DOCUMENT_TREE permission overrides the
- * destination for subsequent downloads. A per-source-path manifest maps each
- * completed file to its exact URI, so offline playback never calls the FTP
- * server just to check file sizes. Interrupted writes are never registered.
+ * No user-selected folder, no new Polaris folder and no Wi-Fi-only restriction.
+ * On Android 10+, save directly into the already-existing public Music folder;
+ * if Music does not exist, use the public Download folder through MediaStore.
+ * These MediaStore inserts don't require a storage-folder picker or broad
+ * write-storage permission. The manifest preserves completed v0.57 URIs too.
  */
 public final class NasMusicStore {
     private static final String PREF="polaris_nas_music_v1";
     private static final String ITEM="saved:";
-    private static final String TREE="selected_tree_uri";
-    private static final String MOBILE="allow_metered_download";
-    private static final String DEFAULT_RELATIVE="Music/Polaris NAS/";
     private NasMusicStore(){}
 
     public static final class Song {
@@ -58,15 +51,16 @@ public final class NasMusicStore {
 
     private static String key(String relativePath){
         return ITEM+Base64.encodeToString(
-            relativePath.getBytes(StandardCharsets.UTF_8),Base64.URL_SAFE|Base64.NO_WRAP);
+            relativePath.getBytes(StandardCharsets.UTF_8),
+            Base64.URL_SAFE|Base64.NO_WRAP);
     }
 
     private static String pathFromKey(String key){
         if(key==null||!key.startsWith(ITEM)) return null;
-        try {
+        try{
             return new String(Base64.decode(key.substring(ITEM.length()),
                 Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8);
-        }catch(Exception e){return null;}
+        }catch(Exception ignored){return null;}
     }
 
     private static String clean(String relativePath){
@@ -80,22 +74,18 @@ public final class NasMusicStore {
         return path;
     }
 
-    public static boolean hasSaved(Context c,String relativePath){
-        if(relativePath==null) return false;
-        return prefs(c).contains(key(relativePath));
-    }
-
     public static Uri savedUri(Context c,String relativePath){
         if(relativePath==null) return null;
-        String entry=prefs(c).getString(key(relativePath),null);
-        if(entry==null) return null;
+        String stored=prefs(c).getString(key(relativePath),null);
+        if(stored==null) return null;
         try{
-            Uri uri=Uri.parse(entry);
-            try(android.os.ParcelFileDescriptor fd=c.getContentResolver().openFileDescriptor(uri,"r")){
+            Uri uri=Uri.parse(stored);
+            try(android.os.ParcelFileDescriptor fd=
+                    c.getContentResolver().openFileDescriptor(uri,"r")){
                 if(fd!=null && fd.getStatSize()!=0L) return uri;
             }
         }catch(Exception ignored){}
-        // The file was deleted manually or its SAF permission was revoked.
+        // Do not delete the file; only clear a stale manifest entry.
         prefs(c).edit().remove(key(relativePath)).apply();
         return null;
     }
@@ -106,7 +96,7 @@ public final class NasMusicStore {
             String rel=pathFromKey(entry.getKey());
             Object value=entry.getValue();
             if(rel==null||!(value instanceof String)) continue;
-            try{ songs.add(new Song(rel,Uri.parse((String)value))); }
+            try{songs.add(new Song(rel,Uri.parse((String)value)));}
             catch(Exception ignored){}
         }
         Collections.sort(songs,(a,b)->
@@ -118,47 +108,26 @@ public final class NasMusicStore {
         String normalized=directory==null?"":directory;
         List<String> result=new ArrayList<>();
         for(Song song:savedSongs(c)){
-            String path=song.relativePath;
-            int slash=path.lastIndexOf('/');
-            String parent=slash<0?"":path.substring(0,slash);
-            if(parent.equals(normalized)) result.add(path);
+            int slash=song.relativePath.lastIndexOf('/');
+            String parent=slash<0?"":song.relativePath.substring(0,slash);
+            if(parent.equals(normalized)) result.add(song.relativePath);
         }
         return result;
     }
 
-    public static boolean allowMetered(Context c){
-        return prefs(c).getBoolean(MOBILE,false);
-    }
-    public static void setAllowMetered(Context c,boolean value){
-        prefs(c).edit().putBoolean(MOBILE,value).apply();
-    }
-
-    /** Unmetered networks such as Wi-Fi are allowed by default. */
-    public static boolean mayDownload(Context c){
-        if(allowMetered(c)) return true;
-        ConnectivityManager manager=(ConnectivityManager)
-            c.getSystemService(Context.CONNECTIVITY_SERVICE);
-        return manager!=null && !manager.isActiveNetworkMetered();
-    }
-
-    public static Uri selectedTree(Context c){
-        String uri=prefs(c).getString(TREE,null);
-        return uri==null||uri.isEmpty()?null:Uri.parse(uri);
-    }
-
-    public static void setSelectedTree(Context c,Uri uri){
-        if(uri==null) prefs(c).edit().remove(TREE).apply();
-        else prefs(c).edit().putString(TREE,uri.toString()).apply();
+    private static boolean musicFolderExists(){
+        try{
+            File music=Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_MUSIC);
+            return music!=null && music.isDirectory();
+        }catch(Exception ignored){
+            return false;
+        }
     }
 
     public static String locationName(Context c){
-        Uri tree=selectedTree(c);
-        if(tree==null) return DEFAULT_RELATIVE;
-        try{
-            DocumentFile root=DocumentFile.fromTreeUri(c,tree);
-            if(root!=null && root.canWrite()) return root.getName()+" (선택한 폴더)";
-        }catch(Exception ignored){}
-        return "선택한 폴더 접근 권한 확인 필요";
+        if(Build.VERSION.SDK_INT<29) return "앱 저장소 / Music (Android 9 이하)";
+        return musicFolderExists()?"Music (공용)":"Download (공용)";
     }
 
     private static String mime(String name){
@@ -174,95 +143,81 @@ public final class NasMusicStore {
         return "application/octet-stream";
     }
 
-    private static void transfer(File source,OutputStream out) throws Exception{
-        long copied=0L;
+    private static void copy(File source,OutputStream out) throws Exception{
+        long copied=0;
         try(InputStream in=new FileInputStream(source)){
-            byte[] buf=new byte[65536];
-            for(int n;(n=in.read(buf))>=0;){
-                if(n==0) continue;
-                out.write(buf,0,n);
-                copied+=n;
+            byte[] buffer=new byte[65536];
+            int count;
+            while((count=in.read(buffer))!=-1){
+                if(count>0){out.write(buffer,0,count);copied+=count;}
             }
             out.flush();
         }
-        if(copied!=source.length() || copied==0L)
-            throw new java.io.IOException("NAS 저장 크기 불일치");
+        if(copied<=0 || copied!=source.length())
+            throw new java.io.IOException("저장된 파일 크기가 원본과 다릅니다");
     }
 
-    /** The already-downloaded source is copied to the permanent destination. */
-    public static Uri store(Context c,String relativePath,File cached) throws Exception{
+    /**
+     * FTP's downloaded/cached File is copied into a user-visible destination.
+     * Existing tracked songs keep their old location (including v0.57 SAF).
+     * Android MediaStore resolves same-name collisions without overwriting.
+     */
+    public static Uri store(Context c,String relativePath,File cached)throws Exception{
         String rel=clean(relativePath);
-        Uri old=savedUri(c,rel);
-        if(old!=null) return old;
+        Uri existing=savedUri(c,rel);
+        if(existing!=null) return existing;
         if(cached==null||!cached.isFile()||cached.length()<=0)
-            throw new java.io.IOException("다운로드 원본 파일이 없습니다");
-        int slash=rel.lastIndexOf('/');
-        String name=slash<0?rel:rel.substring(slash+1);
-        String directory=slash<0?"":rel.substring(0,slash);
-        ContentResolver resolver=c.getContentResolver();
+            throw new java.io.IOException("다운로드된 파일이 없습니다");
+
+        String fileName=rel.substring(rel.lastIndexOf('/')+1);
         Uri result=null;
         boolean committed=false;
+        ContentResolver resolver=c.getContentResolver();
 
         try{
-            Uri tree=selectedTree(c);
-            if(tree!=null){
-                DocumentFile root=DocumentFile.fromTreeUri(c,tree);
-                if(root==null||!root.canWrite())
-                    throw new java.io.IOException("선택한 NAS 저장 폴더에 쓸 수 없습니다");
-                if(!directory.isEmpty()){
-                    for(String segment:directory.split("/")){
-                        DocumentFile child=root.findFile(segment);
-                        if(child==null) child=root.createDirectory(segment);
-                        if(child==null||!child.isDirectory())
-                            throw new java.io.IOException("NAS 폴더 생성 실패: "+segment);
-                        root=child;
-                    }
-                }
-                // Never overwrite a user-managed file with the same name.
-                if(root.findFile(name)!=null)
-                    throw new java.io.IOException("저장 위치에 동명 파일이 있습니다: "+name);
-                DocumentFile doc=root.createFile(mime(name),name);
-                if(doc==null) throw new java.io.IOException("NAS 저장 파일 생성 실패");
-                result=doc.getUri();
-                try(OutputStream out=resolver.openOutputStream(result,"w")){
-                    if(out==null) throw new java.io.IOException("NAS 폴더 쓰기 오류");
-                    transfer(cached,out);
-                }
-            }else if(Build.VERSION.SDK_INT>=29){
+            if(Build.VERSION.SDK_INT>=29){
+                boolean music=musicFolderExists();
                 ContentValues values=new ContentValues();
-                values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);
-                values.put(MediaStore.MediaColumns.MIME_TYPE,mime(name));
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME,fileName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE,mime(fileName));
                 values.put(MediaStore.MediaColumns.RELATIVE_PATH,
-                    DEFAULT_RELATIVE+(directory.isEmpty()?"":directory+"/"));
+                    music?Environment.DIRECTORY_MUSIC+"/":Environment.DIRECTORY_DOWNLOADS+"/");
                 values.put(MediaStore.MediaColumns.IS_PENDING,1);
-                result=resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,values);
-                if(result==null) throw new java.io.IOException("NAS Music 저장 항목 생성 실패");
+
+                // Download is a different MediaStore collection than Audio:
+                // Audio.Media does not permit relative path Download/ on all OSes.
+                Uri collection=music ? MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                    : MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+                result=resolver.insert(collection,values);
+                if(result==null) throw new java.io.IOException("공용 음악 저장소 접근 실패");
                 try(OutputStream out=resolver.openOutputStream(result,"w")){
-                    if(out==null) throw new java.io.IOException("NAS 저장 파일 접근 오류");
-                    transfer(cached,out);
+                    if(out==null) throw new java.io.IOException("공용 파일 쓰기 실패");
+                    copy(cached,out);
                 }
                 ContentValues done=new ContentValues();
                 done.put(MediaStore.MediaColumns.IS_PENDING,0);
                 if(resolver.update(result,done,null,null)<1)
-                    throw new java.io.IOException("NAS 저장 파일 완료 처리 실패");
+                    throw new java.io.IOException("공용 음악 파일 완료 처리 실패");
             }else{
-                File folder=c.getExternalFilesDir(Environment.DIRECTORY_MUSIC);
-                if(folder==null) folder=c.getFilesDir();
-                File destDir=new File(folder,"Polaris NAS"+(directory.isEmpty()?"":"/"+directory));
-                if(!destDir.isDirectory()&&!destDir.mkdirs())
-                    throw new java.io.IOException("NAS 저장 폴더를 만들지 못했습니다");
-                File target=new File(destDir,name);
+                // Android 9 and older: preserve permission-free legacy fallback.
+                File directory=c.getExternalFilesDir(Environment.DIRECTORY_MUSIC);
+                if(directory==null) directory=c.getFilesDir();
+                if(!directory.isDirectory()&&!directory.mkdirs())
+                    throw new java.io.IOException("앱 음악 폴더를 사용할 수 없습니다");
+                File target=new File(directory,fileName);
                 if(target.exists())
-                    throw new java.io.IOException("저장 위치에 동명 파일이 있습니다: "+name);
-                File pending=new File(destDir,name+".part");
-                try(OutputStream out=new FileOutputStream(pending)){transfer(cached,out);}
-                if(!pending.renameTo(target)){
-                    pending.delete();
-                    throw new java.io.IOException("NAS 저장 완료 처리 실패");
+                    throw new java.io.IOException("동일한 이름의 저장 파일이 있습니다");
+                File partial=new File(directory,fileName+".part");
+                try(OutputStream out=new FileOutputStream(partial)){copy(cached,out);}
+                if(!partial.renameTo(target)){
+                    partial.delete();
+                    throw new java.io.IOException("음악 파일 저장 완료 실패");
                 }
                 result=Uri.fromFile(target);
             }
-            prefs(c).edit().putString(key(rel),result.toString()).commit();
+
+            if(!prefs(c).edit().putString(key(rel),result.toString()).commit())
+                throw new java.io.IOException("저장곡 목록 기록 실패");
             committed=true;
             return result;
         }finally{
@@ -275,21 +230,23 @@ public final class NasMusicStore {
     private static void deleteUri(Context c,Uri uri)throws Exception{
         if("file".equals(uri.getScheme())){
             File file=new File(uri.getPath());
-            if(file.exists()&&!file.delete()) throw new java.io.IOException("파일 삭제 실패");
+            if(file.exists()&&!file.delete())
+                throw new java.io.IOException("저장 파일 삭제 실패");
+        }else if(android.provider.DocumentsContract.isDocumentUri(c,uri)){
+            android.provider.DocumentsContract.deleteDocument(
+                c.getContentResolver(),uri);
         }else{
-            if(android.provider.DocumentsContract.isDocumentUri(c,uri)){
-                android.provider.DocumentsContract.deleteDocument(c.getContentResolver(),uri);
-            }else c.getContentResolver().delete(uri,null,null);
+            c.getContentResolver().delete(uri,null,null);
         }
     }
 
     public static boolean deleteSaved(Context c,String relativePath){
-        String entry=prefs(c).getString(key(relativePath),null);
-        if(entry==null) return true;
+        String stored=prefs(c).getString(key(relativePath),null);
+        if(stored==null) return true;
         try{
-            deleteUri(c,Uri.parse(entry));
+            deleteUri(c,Uri.parse(stored));
             prefs(c).edit().remove(key(relativePath)).apply();
             return true;
-        }catch(Exception e){return false;}
+        }catch(Exception ignored){return false;}
     }
 }

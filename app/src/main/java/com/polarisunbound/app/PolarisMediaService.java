@@ -1639,9 +1639,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     cached=PolarisFtp.cachedMp3IfPresent(this,rel);
                     if(cached!=null) offlineBeforeDownload=true;
                     if(cached==null){
-                        if(!NasMusicStore.mayDownload(this))
-                            throw new java.io.IOException(
-                                "모바일 데이터 다운로드 차단 중 · Wi-Fi 연결 또는 NAS MUSIC 설정에서 허용");
+                        // Wi-Fi and cellular use the same download path.
                         cached=PolarisFtp.downloadMp3ToCache(this,rel);
                     }
                     if(!rel.equals(currentFtpMp3Path)) return;
