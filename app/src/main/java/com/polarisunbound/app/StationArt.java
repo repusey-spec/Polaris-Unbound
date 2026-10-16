@@ -76,8 +76,17 @@ public final class StationArt {
         if("kr4".equals(id)) return new Spec(0xFF1476D4,Color.WHITE,"95.9","MBC","STANDARD FM",72,112,46);
         if("kr5".equals(id)) return new Spec(0xFF173B63,Color.WHITE,"102.7","AFN","THE EAGLE",68,112,50);
         if("kr6".equals(id)) return new Spec(0xFF123A7A,0xFF4DE7F0,"107.7","SBS","POWER FM",68,112,56);
-        if("kiis".equals(id)) return new Spec(0xFFF7F7F7,0xFFD4007F,"102.7","KIIS FM","LOS ANGELES",66,102,44);
-        return new Spec(0xFF050505,0xFFB41414,"JAZZ FROM","GALLERY 41","SAN FRANCISCO",48,78,40);
+
+        // US stations use the same droplet/text template as the Korean presets.
+        if("kiis".equals(id)) return new Spec(0xFFD4007F,Color.WHITE,"102.7","KIIS FM","LOS ANGELES",66,102,44);
+        if("gallery".equals(id)) return new Spec(0xFF151515,0xFFFF4B4B,"JAZZ FROM","GALLERY 41","SAN FRANCISCO",48,78,40);
+        if("wild949".equals(id)) return new Spec(0xFF7A1FA2,Color.WHITE,"94.9","WILD","SAN FRANCISCO",72,112,42);
+        if("alt987".equals(id)) return new Spec(0xFF202020,0xFF66E0FF,"98.7","ALT","LOS ANGELES",72,118,42);
+        if("myfm1043".equals(id)) return new Spec(0xFFEA5B2A,Color.WHITE,"104.3","MYFM","LOS ANGELES",66,106,42);
+        if("z100".equals(id)) return new Spec(0xFFE21F26,Color.WHITE,"100.3","Z100","NEW YORK",68,112,46);
+        if("power1051".equals(id)) return new Spec(0xFF1B1B1B,0xFFFFC400,"105.1","POWER","NEW YORK",68,102,46);
+
+        return new Spec(0xFF304050,Color.WHITE,"RADIO","POLARIS","LIVE",60,92,48);
     }
 
     private static final class Spec{

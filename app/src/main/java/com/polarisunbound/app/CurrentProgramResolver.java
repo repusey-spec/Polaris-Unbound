@@ -58,13 +58,13 @@ public final class CurrentProgramResolver {
 
         public String aaTitle(String id){
             String title=aaTitle();
-            if("kiis".equals(id)||"gallery".equals(id))
+            if(hasLocalClock(id))
                 return title+"  |  "+localClockLabel(id);
             return title;
         }
 
         public String phoneText(String id){
-            if("kiis".equals(id)||"gallery".equals(id)){
+            if(hasLocalClock(id)){
                 String clock=localClockLabel(id);
                 if(program==null||program.trim().isEmpty()||program.equals(station))
                     return station+"  |  "+clock;
@@ -76,11 +76,28 @@ public final class CurrentProgramResolver {
         }
     }
 
+    public static boolean hasLocalClock(String id){
+        return "kiis".equals(id)||"gallery".equals(id)||"wild949".equals(id)||
+               "alt987".equals(id)||"myfm1043".equals(id)||
+               "z100".equals(id)||"power1051".equals(id);
+    }
+
     public static String localClockLabel(String id){
-        if(!"kiis".equals(id)&&!"gallery".equals(id)) return "";
+        if(!hasLocalClock(id)) return "";
         SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US);
-        f.setTimeZone(TimeZone.getTimeZone("America/Los_Angeles"));
-        String city="kiis".equals(id)?"LA":"SF";
+        String city;
+        String zone;
+        if("z100".equals(id)||"power1051".equals(id)){
+            city="NY";
+            zone="America/New_York";
+        }else if("gallery".equals(id)||"wild949".equals(id)){
+            city="SF";
+            zone="America/Los_Angeles";
+        }else{
+            city="LA";
+            zone="America/Los_Angeles";
+        }
+        f.setTimeZone(TimeZone.getTimeZone(zone));
         return city+" "+f.format(new Date());
     }
 
@@ -101,6 +118,11 @@ public final class CurrentProgramResolver {
         if("kr6".equals(id)) return "107.7 SBS PowerFM";
         if("kiis".equals(id)) return "102.7 KIIS-FM";
         if("gallery".equals(id)) return "Jazz from Gallery 41";
+        if("wild949".equals(id)) return "Wild 94.9";
+        if("alt987".equals(id)) return "ALT 98.7";
+        if("myfm1043".equals(id)) return "104.3 MYfm";
+        if("z100".equals(id)) return "Z100 New York";
+        if("power1051".equals(id)) return "Power 105.1";
         return id==null?"":id;
     }
 
@@ -116,7 +138,11 @@ public final class CurrentProgramResolver {
     }
 
     public static TimeZone timeZoneFor(String id){
-        return TimeZone.getTimeZone(("kiis".equals(id)||"gallery".equals(id))?"America/Los_Angeles":"Asia/Seoul");
+        if("z100".equals(id)||"power1051".equals(id))
+            return TimeZone.getTimeZone("America/New_York");
+        if(hasLocalClock(id))
+            return TimeZone.getTimeZone("America/Los_Angeles");
+        return TimeZone.getTimeZone("Asia/Seoul");
     }
 
     public static Result resolve(String id) throws Exception {
