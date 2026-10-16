@@ -2689,11 +2689,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         if(parent.equals("root")){
             // v0.41 order: Radio | MP3 | CAN. CAN may become the first index later.
             x.add(folder("radio","라디오"));
-            x.add(folder("mp3","MP3"));
+            x.add(folder("mp3","YT NAS MUSIC"));
             x.add(folder("can","CAN"));
         } else if(parent.equals("home")){
             x.add(folder("radio","라디오"));
-            x.add(folder("mp3","MP3"));
+            x.add(folder("mp3","YT NAS MUSIC"));
             x.add(folder("can","CAN"));
         } else if(parent.equals("can")){
             PolarisFtp.Config cfg=PolarisFtp.load(this);
