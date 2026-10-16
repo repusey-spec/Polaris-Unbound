@@ -3,6 +3,7 @@ package com.polarisunbound.app;
 import android.os.Bundle;
 import android.content.Intent;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.AudioManager;
 import android.media.AudioFocusRequest;
 import android.app.Notification;
@@ -63,6 +64,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private final android.os.Handler radioBufferingHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler programHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable radioBrowseNotifyRunnable=() -> notifyChildrenChanged("radio");
+    private final SharedPreferences.OnSharedPreferenceChangeListener radioPresetListener=
+        (prefs,key)->{
+            if(key!=null && key.startsWith("slot")) scheduleRadioBrowseNotify();
+        };
     private final android.os.Handler positionHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.os.Handler restoreHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private String currentRadioId=null;
@@ -203,6 +208,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     @Override public void onCreate(){
         super.onCreate();
+        getSharedPreferences("radio_presets",MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(radioPresetListener);
         ensurePlaybackChannel();
         audioManager=(AudioManager)getSystemService(Context.AUDIO_SERVICE);
         DefaultHttpDataSource.Factory playerHttpFactory=new DefaultHttpDataSource.Factory()
@@ -1291,11 +1298,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     private void skipRadio(int delta){
         if(currentRadioId==null || !STREAMS.containsKey(currentRadioId)) return;
+        String[] order=RadioPresets.orderedIds(this);
         int at=-1;
-        for(int i=0;i<RADIO_ORDER.length;i++) if(RADIO_ORDER[i].equals(currentRadioId)){ at=i; break; }
+        for(int i=0;i<order.length;i++) if(order[i].equals(currentRadioId)){ at=i; break; }
         if(at<0) return;
-        int next=(at+delta+RADIO_ORDER.length)%RADIO_ORDER.length;
-        String id=RADIO_ORDER[next];
+        int next=(at+delta+order.length)%order.length;
+        String id=order[next];
         trace("RADIO skip "+currentRadioId+" -> "+id);
         currentFtpMp3Path=null;
         currentRadioId=id;
@@ -2522,12 +2530,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return new BrowserRoot("root",style);
     }
 
-    private String presetRadioId(int slot){
-        int station=getSharedPreferences("radio_presets",MODE_PRIVATE).getInt("slot"+slot,slot);
-        if(station<0||station>5) station=slot;
-        return "kr"+(station+1);
-    }
-
     private android.support.v4.media.MediaBrowserCompat.MediaItem folder(String id,String title){
         Bundle e=new Bundle();
         e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
@@ -2669,20 +2671,14 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             String sub=cfg.isConfigured() ? cfg.canRoot+" · "+canFtpStatus : "폰에서 FTP 설정 필요";
             x.add(item("can:ftp_upload","FTP 업로드",sub));
         } else if(parent.equals("radio")){
-            for(int slot=0;slot<6;slot++){
-                String id=presetRadioId(slot);
-                x.add(item(id,radioProgramTitle(id),TITLES.get(id)+" · Preset "+(slot+1)));
+            // Android Auto renders the host UI; user changes positions on
+            // the phone and the ordered items + region hints are sent here.
+            String[] ordered=RadioPresets.orderedIds(this);
+            for(int slot=0;slot<ordered.length;slot++){
+                String id=ordered[slot];
+                x.add(item(id,radioProgramTitle(id),
+                    TITLES.get(id)+" · Preset "+(slot+1),RadioPresets.region(id)));
             }
-
-            x.add(item("gallery",radioProgramTitle("gallery"),TITLES.get("gallery"),"SF"));
-            x.add(item("wild949",radioProgramTitle("wild949"),TITLES.get("wild949"),"SF"));
-
-            x.add(item("kiis",radioProgramTitle("kiis"),TITLES.get("kiis"),"LA"));
-            x.add(item("alt987",radioProgramTitle("alt987"),TITLES.get("alt987"),"LA"));
-            x.add(item("myfm1043",radioProgramTitle("myfm1043"),TITLES.get("myfm1043"),"LA"));
-
-            x.add(item("z100",radioProgramTitle("z100"),TITLES.get("z100"),"NY"));
-            x.add(item("power1051",radioProgramTitle("power1051"),TITLES.get("power1051"),"NY"));
         } else if(parent.equals("mp3")){
             x.add(folder("mp3_favorites","좋아요"));
             x.add(folder("mp3_ftp","FTP"));
@@ -2750,6 +2746,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onDestroy(){
+        getSharedPreferences("radio_presets",MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(radioPresetListener);
         saveLastPlaybackPosition();
         retryHandler.removeCallbacksAndMessages(null);
         resolverRefreshHandler.removeCallbacksAndMessages(null);
