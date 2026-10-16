@@ -8,7 +8,20 @@ android {
         applicationId = "com.polarisunbound.ytminspector"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1001
-        versionName = "1.a01"
+        versionCode = 1002
+        versionName = "1.a02"
+    }
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = rootProject.file(".github/polaris-debug.keystore")
+            storePassword = "android"
+            keyAlias = "polarisdebug"
+            keyPassword = "android"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("stableDebug")
+        }
     }
 }
