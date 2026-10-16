@@ -1238,8 +1238,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         ftpExecutor.execute(() -> {
             try{
                 List<String> queue;
-                try{queue=PolarisFtp.listMp3AudioPaths(this,directory);}
-                catch(Exception offline){queue=NasMusicStore.savedInDirectory(this,directory);}
+                if(NasMusicStore.hasSaved(this,rel))
+                    queue=NasMusicStore.savedInDirectory(this,directory);
+                else{
+                    try{queue=PolarisFtp.listMp3AudioPaths(this,directory);}
+                    catch(Exception offline){queue=NasMusicStore.savedInDirectory(this,directory);}
+                }
                 if(currentFtpMp3Path==null ||
                    !directory.equals(PolarisFtp.parentRelative(currentFtpMp3Path))) return;
                 synchronized(currentFtpMp3Queue){
