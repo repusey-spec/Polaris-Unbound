@@ -679,56 +679,54 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addRadioCard(LinearLayout row,String id,int slot){
-        String label=RadioPresets.stationName(id);
-        ImageButton v=stationButton(id,(slot+1)+"번 "+label);
-        v.setOnClickListener(x->playId(id,label));
+        android.view.View v;
+        if(id==null){
+            // Transparent cell: show the existing galaxy background underneath.
+            // A tap does nothing; a long press opens the same station picker.
+            android.view.View blank=new android.view.View(this);
+            blank.setBackgroundColor(Color.TRANSPARENT);
+            blank.setContentDescription("빈 프리셋 "+(slot+1)+"번 · 길게 눌러 변경");
+            v=blank;
+        }else{
+            String label=RadioPresets.stationName(id);
+            ImageButton button=stationButton(id,(slot+1)+"번 "+label);
+            button.setOnClickListener(x->playId(id,label));
+            v=button;
+        }
         v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
         LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
         bp.setMargins(10,10,10,10);
         row.addView(v,bp);
     }
 
-    private void addRadioSpacer(LinearLayout row){
-        android.view.View spacer=new android.view.View(this);
-        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
-        bp.setMargins(10,10,10,10);
-        row.addView(spacer,bp);
-    }
-
-    private void addRadioRegionLabels(String[] ordered,int first,int count){
+    private void addRadioRegionLabels(String[] ordered,int first){
         LinearLayout labels=new LinearLayout(this);
         labels.setOrientation(LinearLayout.HORIZONTAL);
-        boolean anyLabel=false;
-        for(int column=0;column<count;){
+        // Every physical row reserves the same header height. Region headings
+        // can appear over any cell without moving cards in that row up/down.
+        labels.setMinimumHeight(dp(48));
+        for(int column=0;column<4;){
             String region=RadioPresets.region(ordered[first+column]);
             int span=1;
-            while(column+span<count &&
+            while(column+span<4 &&
                   region.equals(RadioPresets.region(ordered[first+column+span]))) span++;
-            // Keep consecutive regions across physical rows under one heading.
-            boolean continued=(first+column>0 &&
-                region.equals(RadioPresets.region(ordered[first+column-1])));
+            boolean continued=first+column>0 &&
+                !region.isEmpty() &&
+                region.equals(RadioPresets.region(ordered[first+column-1]));
             TextView label=radioSectionTitle(continued?"":region);
-            if(!continued) anyLabel=true;
-            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,span);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(48),span);
             lp.setMargins(10,0,10,0);
             labels.addView(label,lp);
             column+=span;
         }
-        for(int column=count;column<4;column++){
-            TextView blank=new TextView(this);
-            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
-            lp.setMargins(10,0,10,0);
-            labels.addView(blank,lp);
-        }
-        if(anyLabel) body.addView(labels,new LinearLayout.LayoutParams(-1,-2));
+        body.addView(labels,new LinearLayout.LayoutParams(-1,dp(48)));
     }
 
-    private void addRadioPresetRow(String[] ordered,int first,int count){
-        addRadioRegionLabels(ordered,first,count);
+    private void addRadioPresetRow(String[] layout,int first){
+        addRadioRegionLabels(layout,first);
         LinearLayout row=radioRow();
-        for(int column=0;column<count;column++)
-            addRadioCard(row,ordered[first+column],first+column);
-        for(int column=count;column<4;column++) addRadioSpacer(row);
+        for(int column=0;column<4;column++)
+            addRadioCard(row,layout[first+column],first+column);
     }
 
     private void showDomestic(){
@@ -737,13 +735,11 @@ public class MainActivity extends AppCompatActivity {
         currentPage="radio";
         base("라디오");
 
-        String[] ordered=RadioPresets.orderedIds(this);
-        // Preserve the compact 4+2 / 4 / 3 grid while allowing all 13 slots
-        // to change stations. Heading regions follow the selected stations.
-        addRadioPresetRow(ordered,0,4);
-        addRadioPresetRow(ordered,4,2);
-        addRadioPresetRow(ordered,6,4);
-        addRadioPresetRow(ordered,10,3);
+        String[] layout=RadioPresets.layoutIds(this);
+        // Four fixed-height 4-column rows: 13 stations + 3 invisible cells.
+        // Presets and their region labels can move into any physical position.
+        for(int first=0;first<RadioPresets.SLOT_COUNT;first+=4)
+            addRadioPresetRow(layout,first);
     }
 
 
