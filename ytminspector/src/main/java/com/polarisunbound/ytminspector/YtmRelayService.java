@@ -541,10 +541,8 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
 
         // A player-less proxy exposes only the selected YTM queue's current
         // track, not any invented NAS/radio or music search results.
-        Bundle extras=new Bundle();
-        extras.putBoolean("android.media.browse.CONTENT_STYLE_SUPPORTED",true);
         handler.post(()->refresh());
-        return new BrowserRoot(ROOT,extras);
+        return new BrowserRoot(ROOT,null);
     }
 
     @Override public void onLoadChildren(String parentId,
