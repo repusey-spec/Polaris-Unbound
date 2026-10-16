@@ -256,6 +256,21 @@ public final class PolarisFtp {
         }
     }
 
+    /** v0.57: reuse a validated-by-prior-download legacy cache without FTP. */
+    public static File cachedMp3IfPresent(Context context,String relativePath){
+        try{
+            String rel=normalizeRelative(relativePath);
+            if(rel.isEmpty()||!isAudioFile(rel)) return null;
+            String extension="";
+            int dot=rel.lastIndexOf('.');
+            if(dot>=0 && dot>rel.lastIndexOf('/'))
+                extension=rel.substring(dot).toLowerCase(Locale.US);
+            File target=new File(new File(context.getCacheDir(),"ftp_mp3"),
+                sha256(rel)+extension);
+            return target.isFile()&&target.length()>0L?target:null;
+        }catch(Exception ignored){return null;}
+    }
+
     public static File downloadMp3ToCache(Context context,String relativePath) throws Exception {
         Config cfg=load(context);
         if(!cfg.isConfigured()) throw new IllegalStateException("FTP 설정이 필요합니다");

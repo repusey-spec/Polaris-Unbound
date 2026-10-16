@@ -66,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean mp3UserSeeking=false;
     private EditText voiceSearchTarget;
     private static final int REQ_VOICE_SEARCH=881;
+    private static final int REQ_NAS_FOLDER=882;
     private final Handler progressHandler=new Handler(Looper.getMainLooper());
     private final Runnable progressTick=new Runnable(){
         @Override public void run(){
@@ -81,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
     private String currentFtpMp3Path="";
     private int currentFtpMp3Offset=0;
     private boolean returnToFavoritesFromPlayer=false;
+    private boolean returnToSavedFromPlayer=false;
     private void choosePreset(int slot){
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle((slot+1)+"번 프리셋 변경 (기존 위치와 교환)")
@@ -197,6 +199,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void returnFromNowPlaying(){
+        if(returnToSavedFromPlayer){
+            showNasSavedSongs();
+            return;
+        }
         if(returnToFavoritesFromPlayer){
             showMp3Favorites();
             return;
@@ -356,7 +362,7 @@ public class MainActivity extends AppCompatActivity {
     private void refreshTabs(){
         tabsBar.removeAllViews();
         TextView t1=tab("라디오","radio".equals(currentPage));
-        TextView t2=tab("MP3","mp3".equals(currentPage));
+        TextView t2=tab("YT NAS MUSIC","mp3".equals(currentPage));
         TextView t3=tab("CAN","can".equals(currentPage));
         addTab(t1); addTab(t2); addTab(t3);
         t1.setOnClickListener(v->showDomestic());
@@ -466,6 +472,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void playId(String id,String label){
+        returnToSavedFromPlayer=false;
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
         if(id!=null && (id.startsWith("mp3:")||id.startsWith("ftpmp3:")||
@@ -1530,6 +1537,59 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+    private void pickNasFolder(){
+        try{
+            Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION|
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(picker,REQ_NAS_FOLDER);
+        }catch(Exception e){
+            Toast.makeText(this,"폴더 선택 화면을 열 수 없습니다",Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Show the persistent NAS manifest, independently of network/FTP state. */
+    private void showNasSavedSongs(){
+        selectedRadioId=null;
+        currentPage="mp3";
+        base("NAS MUSIC · 저장된 곡");
+        addMp3Back();
+        List<NasMusicStore.Song> songs=NasMusicStore.savedSongs(this);
+        if(songs.isEmpty()){
+            TextView empty=ftpActionButton("아직 다운로드한 NAS 음악이 없습니다.");
+            empty.setTextSize(16);
+            body.addView(empty,new LinearLayout.LayoutParams(-1,dp(70)));
+            return;
+        }
+        for(NasMusicStore.Song song:songs){
+            TextView track=ftpActionButton("♫  "+PolarisFtp.displayTitle(song.relativePath)+
+                "\n"+song.relativePath);
+            track.setTextSize(15);
+            track.setGravity(android.view.Gravity.CENTER_VERTICAL|android.view.Gravity.LEFT);
+            track.setOnClickListener(v->{
+                playId("ftpmp3:"+android.net.Uri.encode(song.relativePath),
+                    PolarisFtp.displayTitle(song.relativePath));
+                returnToSavedFromPlayer=true;
+            });
+            track.setOnLongClickListener(v->{
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("저장 파일 삭제")
+                    .setMessage(song.relativePath+"\n\nNAS 원본은 삭제되지 않습니다.")
+                    .setPositiveButton("삭제",(dialog,which)->{
+                        if(NasMusicStore.deleteSaved(this,song.relativePath))
+                            showNasSavedSongs();
+                        else Toast.makeText(this,"삭제 실패: 저장소 접근 권한을 확인하세요",
+                            Toast.LENGTH_LONG).show();
+                    }).setNegativeButton("취소",null).show();
+                return true;
+            });
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+            lp.setMargins(0,dp(4),0,dp(4));
+            body.addView(track,lp);
+        }
+    }
+
     private void showMp3Ftp(){
         showMp3FtpDirectory("",0);
     }
@@ -1540,11 +1600,11 @@ public class MainActivity extends AppCompatActivity {
         currentFtpMp3Path=rel;
         currentFtpMp3Offset=pageOffset;
         currentPage="mp3";
-        base(rel.isEmpty()?"MP3 FTP":("FTP · "+PolarisFtp.displayTitle(rel)));
+        base(rel.isEmpty()?"NAS MUSIC · FTP":("FTP · "+PolarisFtp.displayTitle(rel)));
 
         TextView back=new TextView(this);
         String parent=PolarisFtp.parentRelative(rel);
-        back.setText(rel.isEmpty()?"←  MP3":"←  상위 폴더");
+        back.setText(rel.isEmpty()?"←  NAS MUSIC":"←  상위 폴더");
         back.setTextSize(15);
         back.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         back.setTextColor(Color.WHITE);
@@ -1569,6 +1629,39 @@ public class MainActivity extends AppCompatActivity {
         location.setPadding(dp(4),dp(4),dp(4),dp(10));
         location.setOnLongClickListener(v->{ showFtpSettings(); return true; });
         body.addView(location,new LinearLayout.LayoutParams(-1,-2));
+
+        if(rel.isEmpty()){
+            TextView saved=ftpActionButton("↓  저장된 곡 ("+
+                NasMusicStore.savedSongs(this).size()+") · 오프라인 재생");
+            saved.setOnClickListener(v->showNasSavedSongs());
+            body.addView(saved,new LinearLayout.LayoutParams(-1,dp(62)));
+
+            TextView destination=ftpActionButton("저장 폴더: "+NasMusicStore.locationName(this));
+            destination.setTextSize(14);
+            destination.setOnClickListener(v->pickNasFolder());
+            destination.setOnLongClickListener(v->{
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("기본 NAS 저장 폴더 사용")
+                    .setMessage("새로 받는 곡은 Music/Polaris NAS 폴더에 저장됩니다. 기존 다운로드는 옮기거나 삭제하지 않습니다.")
+                    .setPositiveButton("기본 폴더로 변경",(dialog,which)->{
+                        NasMusicStore.setSelectedTree(this,null);
+                        showMp3FtpDirectory("",0);
+                    }).setNegativeButton("취소",null).show();
+                return true;
+            });
+            body.addView(destination,new LinearLayout.LayoutParams(-1,dp(60)));
+
+            TextView mobile=ftpActionButton(
+                NasMusicStore.allowMetered(this)?"모바일 데이터 다운로드: 허용":"모바일 데이터 다운로드: 차단 (Wi-Fi만)");
+            mobile.setTextSize(14);
+            mobile.setOnClickListener(v->{
+                NasMusicStore.setAllowMetered(this,!NasMusicStore.allowMetered(this));
+                mobile.setText(NasMusicStore.allowMetered(this)
+                    ?"모바일 데이터 다운로드: 허용"
+                    :"모바일 데이터 다운로드: 차단 (Wi-Fi만)");
+            });
+            body.addView(mobile,new LinearLayout.LayoutParams(-1,dp(58)));
+        }
 
         TextView loading=new TextView(this);
         loading.setText("FTP 목록 불러오는 중…");
@@ -1834,7 +1927,7 @@ public class MainActivity extends AppCompatActivity {
     private void showMp3(){
         selectedRadioId=null;
         scheduleHandler.removeCallbacksAndMessages(null);
-        currentPage="mp3"; base("내 음악");
+        currentPage="mp3"; base("NAS MUSIC");
 
         if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO)!=PackageManager.PERMISSION_GRANTED){
             TextView t=new TextView(this);
@@ -1916,6 +2009,23 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==REQ_NAS_FOLDER){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
+                try{
+                    int flags=data.getFlags() &
+                        (Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    if((flags&Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==0)
+                        throw new SecurityException("폴더 쓰기 권한이 없습니다");
+                    getContentResolver().takePersistableUriPermission(data.getData(),flags);
+                    NasMusicStore.setSelectedTree(this,data.getData());
+                    Toast.makeText(this,"NAS 저장 폴더가 변경되었습니다",Toast.LENGTH_SHORT).show();
+                    showMp3FtpDirectory("",0);
+                }catch(Exception e){
+                    Toast.makeText(this,"폴더 선택 실패: "+e.getMessage(),Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if(requestCode!=REQ_VOICE_SEARCH || resultCode!=RESULT_OK || data==null) return;
         ArrayList<String> results=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if(results==null||results.isEmpty()) return;
@@ -1999,7 +2109,7 @@ public class MainActivity extends AppCompatActivity {
             {"★","좋아요"},{"♫","전체 곡"},
             {"⇧","FTP"},{"▣","앨범"},
             {"♬","아티스트"},{"▤","폴더"},
-            {"↻","최근 추가"},{"",""}
+            {"↻","최근 추가"},{"↓","저장곡"}
         };
         for(int r=0;r<4;r++){
             LinearLayout row=new LinearLayout(this);
@@ -2008,13 +2118,6 @@ public class MainActivity extends AppCompatActivity {
                 final int at=r*2+c;
                 LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
                 lp.setMargins(c==0?0:dp(6),dp(5),c==0?dp(6):0,dp(5));
-
-                if(at==7){
-                    View spacer=new View(this);
-                    spacer.setVisibility(View.INVISIBLE);
-                    row.addView(spacer,lp);
-                    continue;
-                }
 
                 TextView v=mp3Shortcut(items[at][0],items[at][1]);
                 row.addView(v,lp);
@@ -2026,6 +2129,7 @@ public class MainActivity extends AppCompatActivity {
                     else if(at==4) showMp3Artists();
                     else if(at==5) showMp3Groups("폴더",true);
                     else if(at==6) showMp3Tracks("최근 추가",null,null,MediaStore.Audio.Media.DATE_ADDED+" DESC");
+                    else if(at==7) showNasSavedSongs();
                 });
             }
             body.addView(row,new LinearLayout.LayoutParams(-1,-2));
