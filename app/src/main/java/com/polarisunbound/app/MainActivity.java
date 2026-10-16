@@ -66,7 +66,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean mp3UserSeeking=false;
     private EditText voiceSearchTarget;
     private static final int REQ_VOICE_SEARCH=881;
-    private static final int REQ_NAS_FOLDER=882;
     private final Handler progressHandler=new Handler(Looper.getMainLooper());
     private final Runnable progressTick=new Runnable(){
         @Override public void run(){
@@ -1537,18 +1536,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    private void pickNasFolder(){
-        try{
-            Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|
-                Intent.FLAG_GRANT_WRITE_URI_PERMISSION|
-                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            startActivityForResult(picker,REQ_NAS_FOLDER);
-        }catch(Exception e){
-            Toast.makeText(this,"폴더 선택 화면을 열 수 없습니다",Toast.LENGTH_LONG).show();
-        }
-    }
-
     /** Show the persistent NAS manifest, independently of network/FTP state. */
     private void showNasSavedSongs(){
         selectedRadioId=null;
@@ -1636,31 +1623,12 @@ public class MainActivity extends AppCompatActivity {
             saved.setOnClickListener(v->showNasSavedSongs());
             body.addView(saved,new LinearLayout.LayoutParams(-1,dp(62)));
 
-            TextView destination=ftpActionButton("저장 폴더: "+NasMusicStore.locationName(this));
+            TextView destination=new TextView(this);
+            destination.setText("NAS 저장 위치: "+NasMusicStore.locationName(this));
             destination.setTextSize(14);
-            destination.setOnClickListener(v->pickNasFolder());
-            destination.setOnLongClickListener(v->{
-                new androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("기본 NAS 저장 폴더 사용")
-                    .setMessage("새로 받는 곡은 Music/Polaris NAS 폴더에 저장됩니다. 기존 다운로드는 옮기거나 삭제하지 않습니다.")
-                    .setPositiveButton("기본 폴더로 변경",(dialog,which)->{
-                        NasMusicStore.setSelectedTree(this,null);
-                        showMp3FtpDirectory("",0);
-                    }).setNegativeButton("취소",null).show();
-                return true;
-            });
-            body.addView(destination,new LinearLayout.LayoutParams(-1,dp(60)));
-
-            TextView mobile=ftpActionButton(
-                NasMusicStore.allowMetered(this)?"모바일 데이터 다운로드: 허용":"모바일 데이터 다운로드: 차단 (Wi-Fi만)");
-            mobile.setTextSize(14);
-            mobile.setOnClickListener(v->{
-                NasMusicStore.setAllowMetered(this,!NasMusicStore.allowMetered(this));
-                mobile.setText(NasMusicStore.allowMetered(this)
-                    ?"모바일 데이터 다운로드: 허용"
-                    :"모바일 데이터 다운로드: 차단 (Wi-Fi만)");
-            });
-            body.addView(mobile,new LinearLayout.LayoutParams(-1,dp(58)));
+            destination.setTextColor(0xAAFFFFFF);
+            destination.setPadding(dp(8),dp(12),dp(8),dp(12));
+            body.addView(destination,new LinearLayout.LayoutParams(-1,-2));
         }
 
         TextView loading=new TextView(this);
@@ -2009,23 +1977,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
-        if(requestCode==REQ_NAS_FOLDER){
-            if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
-                try{
-                    int flags=data.getFlags() &
-                        (Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                    if((flags&Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==0)
-                        throw new SecurityException("폴더 쓰기 권한이 없습니다");
-                    getContentResolver().takePersistableUriPermission(data.getData(),flags);
-                    NasMusicStore.setSelectedTree(this,data.getData());
-                    Toast.makeText(this,"NAS 저장 폴더가 변경되었습니다",Toast.LENGTH_SHORT).show();
-                    showMp3FtpDirectory("",0);
-                }catch(Exception e){
-                    Toast.makeText(this,"폴더 선택 실패: "+e.getMessage(),Toast.LENGTH_LONG).show();
-                }
-            }
-            return;
-        }
         if(requestCode!=REQ_VOICE_SEARCH || resultCode!=RESULT_OK || data==null) return;
         ArrayList<String> results=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if(results==null||results.isEmpty()) return;
