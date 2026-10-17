@@ -116,68 +116,16 @@ final class PolarisYtmSnapshot {
         }
         return items;
     }
-    /**
-     * Different builds/locales use '•', '·' or full-width middle dots.
-     * Text order is not a stable Android accessibility contract, therefore
-     * keep the scan strictly read-only and do not invent media IDs.
-     */
     static List<Entry> fromVisibleLabels(List<String> labels) {
-        ArrayList<Entry> entries=new ArrayList<>();
-        Set<String> seen=new HashSet<>();
-        for(int i=1;i<labels.size() && entries.size()<MAX_ITEMS;i++){
-            String description=labels.get(i).replace('\u00a0',' ').trim();
-            String lower=description.toLowerCase(Locale.US);
-            String kind=kindFromDescription(lower);
-            if(kind==null)continue;
-            for(int delta=1;delta<=3 && delta<=i;delta++){
-                String title=labels.get(i-delta).trim();
-                if(!validTitle(title,description))continue;
-                String key=kind+"|"+title;
-                if(seen.add(key))
-                    entries.add(new Entry(title,description,kind));
-                break;
-            }
+        List<Entry> items=new ArrayList<>();
+        for(PolarisYtmLabelParser.Entry match:PolarisYtmLabelParser.parse(labels)){
+            items.add(new Entry(match.title,match.description,match.kind));
         }
-        return entries;
+        return items;
     }
 
-    static int metadataCandidateCount(List<String> labels){
-        int candidates=0;
-        for(String label:labels)
-            if(kindFromDescription(label.toLowerCase(Locale.US).trim())!=null)
-                candidates++;
-        return candidates;
+    static int metadataCandidateCount(List<String> labels) {
+        return PolarisYtmLabelParser.metadataCount(labels);
     }
 
-    private static String kindFromDescription(String s){
-        if(s==null)return null;
-        if(startsWithType(s,"재생목록") || startsWithType(s,"playlist") ||
-            startsWithType(s,"자동 재생목록")) return "playlist";
-        if(startsWithType(s,"앨범")||startsWithType(s,"album"))
-            return "album";
-        if(startsWithType(s,"아티스트")||startsWithType(s,"artist"))
-            return "artist";
-        if(startsWithType(s,"노래")||startsWithType(s,"song"))
-            return "song";
-        return null;
-    }
-
-    private static boolean startsWithType(String value,String type){
-        if(!value.startsWith(type)||value.length()==type.length())return false;
-        char next=value.charAt(type.length());
-        return Character.isWhitespace(next)||next=='•'||next=='·'||
-            next=='ㆍ'||next==':'||next=='|';
-    }
-
-    private static boolean validTitle(String title,String metadata){
-        if(title.isEmpty() || title.length()>150 ||
-            title.equals(metadata)||title.startsWith("android."))return false;
-        String lower=title.toLowerCase(Locale.US);
-        if(lower.equals("보관함")||lower.equals("재생목록")||
-           lower.equals("플레이리스트")||lower.equals("playlist")||
-           lower.equals("최근 활동")||lower.equals("최근 추가한 항목")||
-           lower.equals("오프라인 저장")||lower.equals("검색"))return false;
-        if(kindFromDescription(lower)!=null)return false;
-        return !(title.contains("•")||title.contains("·"));
-    }
 }
