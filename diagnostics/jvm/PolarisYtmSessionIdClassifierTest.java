@@ -27,8 +27,26 @@ public final class PolarisYtmSessionIdClassifierTest {
             "https://music.youtube.com/playlist?list=LM","LM");
         playlist("unrelated opaque track ID","abcDefGHIJ_012",null);
         playlist("not an official playlist ID","PLabc123",null);
-        playlist("watch with list parameter",
-            "https://music.youtube.com/watch?v=abcdef12345&list=PLabc123",null);
+        playlist("watch with real playlist context",
+            "https://music.youtube.com/watch?v=abcdef12345&list=PLabc123","PLabc123");
+        playlist("youtube watch with real playlist context",
+            "https://www.youtube.com/watch?list=PLxyz789&v=abcdef12345","PLxyz789");
+        playlist("watch with encoded playlist id",
+            "https://music.youtube.com/watch?v=abcdef12345&list=PLabc%3D","PLabc=");
+        playlist("watch without list is track only",
+            "https://music.youtube.com/watch?v=abcdef12345",null);
+        playlist("list without real video id",
+            "https://music.youtube.com/watch?list=PLabc123",null);
+        playlist("invalid short watch video id",
+            "https://music.youtube.com/watch?v=abc&list=PLabc123",null);
+        playlist("ambiguous duplicate list values",
+            "https://music.youtube.com/watch?v=abcdef12345&list=PLabc123&list=PLxyz789",null);
+        playlist("watch link on spoofed host",
+            "https://music.youtube.com.attacker.invalid/watch?v=abcdef12345&list=PLabc123",null);
+        playlist("plaintext URL watch link",
+            "http://music.youtube.com/watch?v=abcdef12345&list=PLabc123",null);
+        playlist("valid raw track ID must NOT be a playlist",
+            "abcdef12345",null);
         playlist("playback CDN URL",
             "https://googlevideo.com/videoplayback?id=abc",null);
         playlist("spoofed official host",
