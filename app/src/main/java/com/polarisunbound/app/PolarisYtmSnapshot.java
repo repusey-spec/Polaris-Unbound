@@ -43,8 +43,20 @@ final class PolarisYtmSnapshot {
     }
     static void save(Context ctx,List<Entry> entries) {
         if(entries==null||entries.isEmpty())return;
-        JSONArray arr=new JSONArray();
+        // The original implementation replaced the entire cache on each
+        // accessibility event. Scrolling the real library therefore discarded
+        // all entries that were no longer visible. Accumulate verified names.
+        java.util.LinkedHashMap<String,Entry> merged=new java.util.LinkedHashMap<>();
         for(Entry e:entries){
+            if(e==null||e.title==null||e.title.trim().isEmpty())continue;
+            merged.put(e.kind+"|"+e.title,e);
+        }
+        for(Entry e:load(ctx)){
+            if(e!=null && e.title!=null)
+                merged.putIfAbsent(e.kind+"|"+e.title,e);
+        }
+        JSONArray arr=new JSONArray();
+        for(Entry e:merged.values()){
             if(arr.length()>=MAX_ITEMS)break;
             try {
                 arr.put(new JSONObject().put("title",e.title)
@@ -55,6 +67,7 @@ final class PolarisYtmSnapshot {
             .putString(KEY,arr.toString())
             .putLong(TIME,System.currentTimeMillis()).apply();
     }
+
     static void markAttempt(Context ctx,String reason,int nodes,int labels,int matches) {
         ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit()
             .putLong(LAST_SCAN,System.currentTimeMillis())
@@ -75,7 +88,7 @@ final class PolarisYtmSnapshot {
         return "마지막 YT Music 화면 검사 "+delta+"초 전; "+
             "노드="+prefs.getInt(LAST_NODES,0)+
             ", 문자열="+prefs.getInt(LAST_LABELS,0)+
-            ", 분류된 항목="+prefs.getInt(LAST_MATCHES,0)+
+            ", 유형설명 후보="+prefs.getInt(LAST_MATCHES,0)+
             "; 결과="+prefs.getString(LAST_REASON,"(없음)")+
             "; 최근 정상 저장="+(saved==0L?"없음":
                 ((System.currentTimeMillis()-saved)/1000L)+"초 전");
