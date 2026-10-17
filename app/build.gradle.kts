@@ -8,8 +8,8 @@ android {
         applicationId = "com.polarisunbound.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 5911
-        versionName = "0.58-ytm-clean-library-test.11"
+        versionCode = 5912
+        versionName = "0.58-index-test.12"
     }
 
     signingConfigs {
