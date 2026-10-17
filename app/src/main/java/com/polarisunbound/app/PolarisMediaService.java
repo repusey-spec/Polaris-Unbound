@@ -2775,22 +2775,34 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> x=new ArrayList<>();
         if(parent.equals("root")){
-            // v0.41 order: Radio | MP3 | CAN. CAN may become the first index later.
-            x.add(folder("radio","라디오"));
-            x.add(folder("mp3","YT NAS MUSIC"));
-            x.add(folder("ytm","YT Music"));
-            x.add(folder("can","CAN"));
-        } else if(parent.equals("home")){
+            // Single AA index. No second duplicate 'home' source index.
             x.add(folder("radio","라디오"));
             x.add(folder("mp3","YT NAS MUSIC"));
             x.add(folder("ytm","YT Music"));
             x.add(folder("can","CAN"));
         } else if(parent.equals("ytm")){
+            // Display only a real YTM current track, without inventing playlists.
+            // The diagnostic on the phone checks whether YTM offers browsable library data.
             MediaMetadataCompat metadata=ytmBridge==null?null:ytmBridge.currentMetadata();
-            String name=metadata==null?"YT Music 현재 곡":
+            String name=metadata==null?null:
                 metadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
-            x.add(item(YTM_ID,name==null?"YT Music 현재 곡":name,
-                "YT Music에서 재생 중인 음악을 연결"));
+            String artist=metadata==null?null:
+                metadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+            MediaDescriptionCompat.Builder current=new MediaDescriptionCompat.Builder()
+                .setMediaId(YTM_ID)
+                .setTitle(name==null||name.trim().isEmpty()?"YT Music 현재 재생 연결":name)
+                .setSubtitle(artist==null||artist.trim().isEmpty()?
+                    "YT Music에서 음악을 먼저 재생하세요":artist);
+            if(metadata!=null){
+                Bitmap art=metadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
+                if(art!=null)current.setIconBitmap(art);
+            }
+            Bundle hints=new Bundle();
+            hints.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
+            current.setExtras(hints);
+            x.add(new android.support.v4.media.MediaBrowserCompat.MediaItem(
+                current.build(),
+                android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE));
         } else if(parent.equals("can")){
             PolarisFtp.Config cfg=PolarisFtp.load(this);
             String sub=cfg.isConfigured() ? cfg.canRoot+" · "+canFtpStatus : "폰에서 FTP 설정 필요";
