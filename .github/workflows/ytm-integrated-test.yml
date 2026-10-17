@@ -1,4 +1,4 @@
-name: Polaris YTM Background Search Test 09 APK
+name: Polaris YTM Authenticated Library Test 10 APK
 
 on:
   pull_request:
@@ -38,13 +38,16 @@ jobs:
             app/src/main/java/com/polarisunbound/app/PolarisYtmSessionIdClassifier.java \
             diagnostics/jvm/PolarisYtmSessionIdClassifierTest.java \
             app/src/main/java/com/polarisunbound/app/PolarisYtmSearchQuery.java \
-            diagnostics/jvm/PolarisYtmSearchQueryTest.java
+            diagnostics/jvm/PolarisYtmSearchQueryTest.java \
+            app/src/main/java/com/polarisunbound/app/PolarisYtmAccountIds.java \
+            diagnostics/jvm/PolarisYtmAccountIdsTest.java
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmLabelParserTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmDeepLinkTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmSharedPlaylistTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmShareRoundTripTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmSessionIdClassifierTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmSearchQueryTest
+          java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmAccountIdsTest
       - name: Build isolated Polaris + YTM integration test
         run: gradle :app:assembleDebug
       - name: Verify separate test APK identity, signature and installer
@@ -54,10 +57,10 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           test -n "$APK"
           "$APKSIGNER" verify --print-certs "$APK"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polarisunbound.app.test'.*versionCode='5909'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polarisunbound.app.test'.*versionCode='5910'"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-0.58-YTM-Background-Search-Test-09
+          name: Polaris-0.58-YTM-Authenticated-Library-Test-10
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
