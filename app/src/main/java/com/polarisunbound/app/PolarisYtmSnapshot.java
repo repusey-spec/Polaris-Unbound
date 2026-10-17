@@ -118,13 +118,35 @@ final class PolarisYtmSnapshot {
     }
     static List<MediaBrowserCompat.MediaItem> items(Context ctx) {
         List<MediaBrowserCompat.MediaItem> items=new ArrayList<>();
+        Set<String> displayed=new HashSet<>();
         for(Entry entry:load(ctx)) {
             String key=entry.kind+"|"+entry.title;
             String mediaId=PolarisYtmCatalog.CAPTURED+Uri.encode(key);
+            String boundId="playlist".equals(entry.kind)?
+                PolarisYtmPlaylistBindings.get(ctx,entry.title):null;
+            String subtitle=boundId!=null?
+                entry.description+" · 공식 YT Music 공유 링크 연결됨":
+                entry.description+" · 화면에서 읽음 / 재생 ID 미확인";
             MediaDescriptionCompat d=new MediaDescriptionCompat.Builder()
                 .setMediaId(mediaId)
                 .setTitle(entry.title)
-                .setSubtitle(entry.description+" · 화면에서 읽음 / 재생 ID 미확인")
+                .setSubtitle(subtitle)
+                .build();
+            items.add(new MediaBrowserCompat.MediaItem(d,
+                MediaBrowserCompat.MediaItem.FLAG_BROWSABLE));
+            displayed.add(entry.title);
+        }
+        // User-provided name, backed by a genuine shared playlist link, is
+        // legitimate even when that item was not visible to Accessibility.
+        // Identify it honestly as a manual share import rather than "captured".
+        for(java.util.Map.Entry<String,String> bound:
+                PolarisYtmPlaylistBindings.all(ctx).entrySet()){
+            if(displayed.contains(bound.getKey()))continue;
+            String id=PolarisYtmCatalog.CAPTURED+
+                Uri.encode("playlist|"+bound.getKey());
+            MediaDescriptionCompat d=new MediaDescriptionCompat.Builder()
+                .setMediaId(id).setTitle(bound.getKey())
+                .setSubtitle("사용자가 공유 링크로 등록한 재생목록 · 원본에서 열기 가능")
                 .build();
             items.add(new MediaBrowserCompat.MediaItem(d,
                 MediaBrowserCompat.MediaItem.FLAG_BROWSABLE));
