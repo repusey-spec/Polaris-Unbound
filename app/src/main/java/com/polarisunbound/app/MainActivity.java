@@ -760,7 +760,8 @@ public class MainActivity extends AppCompatActivity {
         browseNote.setText("홈은 YouTube Music의 공개 온라인 데이터만 표시합니다. "
             +"내 계정 보관함은 위 접근성 권한을 허용한 뒤 원본 YT Music에서 "
             +"보관함 화면을 열어 실제로 표시된 이름만 가져옵니다. "
-            +"이름만 확보한 항목은 아직 AA에서 직접 재생할 수 없습니다.");
+            +"이름만 확보한 항목은 AA에서 아직 재생할 수 없습니다. "+
+            "공식 YT Music에서 공유받아 이름과 연결한 재생목록만 원본 앱에서 열 수 있습니다.");
         browseNote.setTextSize(13);
         browseNote.setTextColor(0xCCFFFFFF);
         browseNote.setPadding(0,8,0,16);
