@@ -22,9 +22,11 @@ Docs:
 ## 3. Source-only diagnostic in this branch
 - Added `PolarisYtmSessionIdentityProbe.java`, on-demand read-only check via *already-approved* notification listener and `MediaSessionManager.getActiveSessions`, filtered **only** to `com.google.android.apps.youtube.music`.
 - The Test08 phone YTM tab has a new `원본 YT Music 재생목록 ID 자동 노출 진단` button. Unlike the YTM playback bridge, it can inspect the original active session without switching/stopping local radio or NAS media.
-- It checks whether source metadata includes an opaque `MEDIA_ID` or `MEDIA_URI`, whether a playback queue and queue items are exposed, and whether **any URI is structurally an official** `https://music.youtube.com/playlist?list=<ID>` URL.
+- It checks opaque `MEDIA_ID`, raw metadata `MEDIA_URI`, the current `MediaDescription.getMediaUri()`, playback queue item URIs and active queue item ID (an opaque queue marker, never a playlist ID).
+- Accepts **structurally valid official YouTube / YouTube Music** `/playlist?list=<ID>` and `/watch?v=<actual 11-character video ID>&list=<ID>` URIs. The latter proves only a playlist **playback context** and never proves that the playlist belongs to the user's library. Bare opaque IDs cannot become playlist IDs.
+- Checks any discovered URL-derived ID against the previously user-confirmed Test07 shared-playlist bindings such as `citypop`. This is a read-only comparison; **nothing is auto-linked or imported**.
 - It prints no generic raw media URI, session extras values, cookies, tokens or song titles. Only explicitly verified *URL-format* `list` IDs can appear in diagnostics. Such validation is structural only; it does not verify server access or ownership.
-- Added `PolarisYtmSessionIdClassifier.java` and 14 offline test fixtures preventing accidental promotion of opaque media IDs, nonplaylist song URLs or lookalike domains to playlist IDs.
+- Added `PolarisYtmSessionIdClassifier.java` and **23 source-level JVM regression fixtures** for legitimate original playlist URLs, watch URLs with an explicit valid list context, opaque IDs, malformed parameters and lookalike domains. The initial 14 exact fixtures passed locally; the expanded 23 exact fixtures were then compiled with Java 21 targeting Java 17 (`javac --release 17`) and all passed. This tests only the pure Java parser, not live Android or YTM.
 - Existing Test07 original playlist-opening feature and share-link fallback remain unchanged.
 - Future CI workflow includes the new fixtures before Android assembly. **No APK build or PR created for this diagnostic branch**.
 
@@ -38,5 +40,5 @@ Docs:
 ## 5. Remaining limits
 - Active MediaSession is a playback context, not a browsable account-wide media library. Even discovering one media or queue ID is not proof of automated library access.
 - Android Auto may restrict background activity launching. Test07 only verified the foreground **phone** `ACTION_VIEW` opened the correct `citypop`; not AA autoplay.
-- The pure-Java regression test file is source code **prepared but not run** in the latest branch; previous Test07 CI suites already passed in Test07. Android build and physical Test08 are still pending.
+- **The updated 23 pure-Java URI-classifier fixtures actually passed in a local Java runtime.** Previous Test07 CI suites passed in Test07. Android source changes in Test08, its UI and MediaSession diagnostics have **not** been compiled, installed or device-tested.
 - Stable Polaris v0.58 on `main` is untouched.
