@@ -41,6 +41,10 @@ public class MainActivity extends AppCompatActivity {
     private MediaBrowserCompat browser;
     private MediaControllerCompat controller;
     private TextView status;
+    private TextView ytmNowText;
+    private TextView ytmProbeText;
+    private String ytmProbeReport="아직 진단하지 않았습니다.";
+    private PolarisYtmLibraryProbe ytmProbe;
     private TextView radioPlaybackButton;
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
@@ -232,6 +236,7 @@ public class MainActivity extends AppCompatActivity {
                                 updateNowPlayingState();
                                 updateNowPlayingModes();
                                 updateMp3Progress();
+                                updateYtmNow();
                             }
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
@@ -241,6 +246,7 @@ public class MainActivity extends AppCompatActivity {
                                 updateNowPlayingMetadata();
                                 updateNowPlayingModes();
                                 updateMp3Progress();
+                                updateYtmNow();
                             }
                         });
                         lastMetadata=controller.getMetadata();
@@ -362,11 +368,13 @@ public class MainActivity extends AppCompatActivity {
         tabsBar.removeAllViews();
         TextView t1=tab("라디오","radio".equals(currentPage));
         TextView t2=tab("YT NAS MUSIC","mp3".equals(currentPage));
-        TextView t3=tab("CAN","can".equals(currentPage));
-        addTab(t1); addTab(t2); addTab(t3);
+        TextView t3=tab("YT Music","ytm".equals(currentPage));
+        TextView t4=tab("CAN","can".equals(currentPage));
+        addTab(t1); addTab(t2); addTab(t3); addTab(t4);
         t1.setOnClickListener(v->showDomestic());
         t2.setOnClickListener(v->showMp3());
-        t3.setOnClickListener(v->showCan());
+        t3.setOnClickListener(v->showYtm());
+        t4.setOnClickListener(v->showCan());
     }
 
     private void base(String title){
@@ -376,6 +384,8 @@ public class MainActivity extends AppCompatActivity {
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         radioPlaybackButton=null;
+        ytmNowText=null;
+        ytmProbeText=null;
         if(!"radio".equals(currentPage)){
             TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         }
@@ -474,6 +484,15 @@ public class MainActivity extends AppCompatActivity {
         returnToSavedFromPlayer=false;
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
+        if(PolarisYtmBridge.MEDIA_ID.equals(id)){
+            selectedRadioId=null;
+            scheduleHandler.removeCallbacksAndMessages(null);
+            try{controller.getTransportControls().playFromMediaId(id,null);}
+            catch(Throwable e){
+                Toast.makeText(this,"YT Music 연결 오류",Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
         if(id!=null && (id.startsWith("mp3:")||id.startsWith("ftpmp3:")||
                        id.startsWith("favlocal:")||id.startsWith("favftp:"))){
             selectedRadioId=null;
@@ -657,14 +676,238 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showHome(){
-        currentPage="home"; base("Polaris Unbound");
-        String[] names={"국내라디오","해외라디오","MP3"};
-        for(String s:names){
-            TextView v=button(s); body.addView(v);
-            if(s.equals("국내라디오")) v.setOnClickListener(x->showDomestic());
-            else if(s.equals("해외라디오")) v.setOnClickListener(x->showForeign());
-            else v.setOnClickListener(x->showMp3());
+        // No duplicate 'home' index: the persistent source tabs ARE the home navigation.
+        showDomestic();
+    }
+
+    private void showYtm(){
+        currentPage="ytm";
+        base("YT Music 중계 · 통합 시험판");
+        TextView explanation=new TextView(this);
+        explanation.setText("YouTube Music에서 곡을 먼저 재생한 뒤 'YT Music 연결'을 누르세요. "
+            +"연결 후 폰과 Android Auto에서 곡 정보·앨범아트·재생 버튼을 공유합니다. "
+            +"음성 곡명 검색은 이번 시험에 포함하지 않았습니다.");
+        explanation.setTextColor(0xDDFFFFFF);
+        explanation.setTextSize(15);
+        explanation.setPadding(0,8,0,14);
+        body.addView(explanation);
+        TextView permission=button("YT Music 알림 접근 권한 설정");
+        permission.setOnClickListener(v->{
+            try{
+                startActivity(new Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+            }catch(Exception e){
+                Toast.makeText(this,"설정 메뉴를 열지 못했습니다",Toast.LENGTH_SHORT).show();
+            }
+        });
+        body.addView(permission);
+        TextView connect=button("▶  YT Music 연결");
+        connect.setOnClickListener(v->playId(PolarisYtmBridge.MEDIA_ID,"YT Music"));
+        body.addView(connect);
+        TextView launch=button("YouTube Music 앱 열기");
+        launch.setOnClickListener(v->{
+            try{
+                Intent open=getPackageManager().getLaunchIntentForPackage(PolarisYtmBridge.SOURCE);
+                if(open!=null)startActivity(open);
+                else Toast.makeText(this,"YouTube Music이 설치돼 있지 않습니다",Toast.LENGTH_SHORT).show();
+            }catch(Exception e){
+                Toast.makeText(this,"YouTube Music 실행 실패",Toast.LENGTH_SHORT).show();
+            }
+        });
+        body.addView(launch);
+
+        TextView ytmHome=button("홈 탐색 · 실제 온라인 추천");
+        ytmHome.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.HOME,"YT Music 홈"));
+        body.addView(ytmHome);
+
+        TextView ytmLibrary=button("보관함 탐색 · 원본 YT Music 화면");
+        ytmLibrary.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.LIBRARY,"YT Music 보관함"));
+        body.addView(ytmLibrary);
+
+        TextView accessibility=button("보관함 목록 읽기 권한 설정");
+        accessibility.setOnClickListener(v->{
+            try{
+                startActivity(new Intent(
+                    android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            }catch(Exception e){
+                Toast.makeText(this,"접근성 설정을 열지 못했습니다",Toast.LENGTH_SHORT).show();
+            }
+        });
+        body.addView(accessibility);
+        TextView browseNote=new TextView(this);
+        browseNote.setText("홈은 YouTube Music의 공개 온라인 데이터만 표시합니다. "
+            +"내 계정 보관함은 위 접근성 권한을 허용한 뒤 원본 YT Music에서 "
+            +"보관함 화면을 열어 실제로 표시된 이름만 가져옵니다. "
+            +"이름만 확보한 항목은 아직 AA에서 직접 재생할 수 없습니다.");
+        browseNote.setTextSize(13);
+        browseNote.setTextColor(0xCCFFFFFF);
+        browseNote.setPadding(0,8,0,16);
+        body.addView(browseNote);
+        ytmNowText=new TextView(this);
+        ytmNowText.setTextColor(0xFFFFFFFF);
+        ytmNowText.setTextSize(17);
+        ytmNowText.setPadding(0,16,0,18);
+        body.addView(ytmNowText);
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        TextView previous=button("◀◀");
+        TextView toggle=button("▶ / Ⅱ");
+        TextView next=button("▶▶");
+        row.addView(previous,new LinearLayout.LayoutParams(0,-2,1));
+        row.addView(toggle,new LinearLayout.LayoutParams(0,-2,1));
+        row.addView(next,new LinearLayout.LayoutParams(0,-2,1));
+        previous.setOnClickListener(v->{if(controller!=null)controller.getTransportControls().skipToPrevious();});
+        toggle.setOnClickListener(v->{
+            if(controller==null)return;
+            boolean playing=lastPlaybackState!=null&&
+                lastPlaybackState.getState()==PlaybackStateCompat.STATE_PLAYING;
+            if(playing)controller.getTransportControls().pause();
+            else controller.getTransportControls().play();
+        });
+        next.setOnClickListener(v->{if(controller!=null)controller.getTransportControls().skipToNext();});
+        body.addView(row);
+        String[] names={"👍 좋아요","👎 싫어요","⇄ 셔플","↻ 반복"};
+        String[] ids={"thumbs_up_action","thumbs_down_action","shuffle_action","loop_mode_action"};
+        for(int i=0;i<names.length;i+=2){
+            LinearLayout controls=new LinearLayout(this);
+            controls.setOrientation(LinearLayout.HORIZONTAL);
+            for(int j=i;j<i+2;j++){
+                final String action=ids[j];
+                TextView btn=button(names[j]);
+                btn.setOnClickListener(v->{
+                    if(controller!=null)controller.getTransportControls().sendCustomAction(action,null);
+                });
+                controls.addView(btn,new LinearLayout.LayoutParams(0,-2,1));
+            }
+            body.addView(controls);
         }
+        TextView note=new TextView(this);
+        note.setText("테스트 설치본은 기존 Polaris와 설정 저장소가 분리됩니다. "
+            +"YTM 재생 중계와 아래 보관함 조회 가능성 진단은 서로 독립적입니다.");
+        note.setTextColor(0xAAFFFFFF);
+        note.setTextSize(13);
+        note.setPadding(0,18,0,12);
+        body.addView(note);
+
+        TextView probeTitle=new TextView(this);
+        probeTitle.setText("YT Music 보관함 접근 진단 · Test 02");
+        probeTitle.setTextColor(Color.WHITE);
+        probeTitle.setTextSize(20);
+        probeTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        probeTitle.setPadding(0,24,0,8);
+        body.addView(probeTitle);
+
+        TextView probeInfo=new TextView(this);
+        probeInfo.setText("기기의 YT Music이 외부 앱에 공개한 MediaBrowser 서비스를 찾고 "
+            +"실제 목록을 읽을 수 있는지 확인합니다. 앨범이나 재생목록을 임의로 표시하지 않습니다.");
+        probeInfo.setTextSize(14);
+        probeInfo.setTextColor(0xCCFFFFFF);
+        body.addView(probeInfo);
+
+        TextView probeButton=button("보관함 접근 진단 실행");
+        body.addView(probeButton);
+        TextView copyButton=button("진단 결과 복사");
+        body.addView(copyButton);
+        ytmProbeText=new TextView(this);
+        ytmProbeText.setTextSize(13);
+        ytmProbeText.setTextColor(0xDDFFFFFF);
+        ytmProbeText.setTextIsSelectable(true);
+        ytmProbeText.setPadding(0,14,0,16);
+        ytmProbeText.setText(ytmProbeReport);
+        body.addView(ytmProbeText);
+
+        probeButton.setOnClickListener(v->{
+            if(ytmProbe!=null)ytmProbe.cancel();
+            ytmProbeReport="YT Music 미디어 서비스 검색 중… 최대 48초";
+            if(ytmProbeText!=null)ytmProbeText.setText(ytmProbeReport);
+            ytmProbe=new PolarisYtmLibraryProbe(this,result->{
+                ytmProbeReport=result;
+                android.util.Log.i("PolarisYtmProbe",result);
+                if(ytmProbeText!=null)ytmProbeText.setText(result);
+            });
+            ytmProbe.start();
+        });
+        copyButton.setOnClickListener(v->{
+            android.content.ClipboardManager clipboard=
+                (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+            if(clipboard!=null){
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("YT Music library probe",ytmProbeReport));
+                Toast.makeText(this,"진단 결과를 복사했습니다",Toast.LENGTH_SHORT).show();
+            }
+        });
+        updateYtmNow();
+    }
+
+    /** Phone-side browse uses the SAME catalog and media IDs as Android Auto. */
+    private void showYtmBrowse(String parent,String heading){
+        currentPage="ytm";
+        base(heading);
+        final LinearLayout pageBody=body;
+        TextView back=button("← YT Music");
+        back.setOnClickListener(v->showYtm());
+        body.addView(back);
+        TextView reload=button("↻ 이 목록 다시 조회");
+        reload.setOnClickListener(v->showYtmBrowse(parent,heading));
+        body.addView(reload);
+        TextView loading=new TextView(this);
+        loading.setText("원본 데이터 조회 중…");
+        loading.setTextColor(0xFFCCCCCC);
+        loading.setTextSize(15);
+        body.addView(loading);
+        final LinearLayout listing=new LinearLayout(this);
+        listing.setOrientation(LinearLayout.VERTICAL);
+        body.addView(listing);
+        PolarisYtmCatalog.get(this).load(parent,(children,error)->{
+            if(body!=pageBody || !"ytm".equals(currentPage))return;
+            loading.setText(error!=null?
+                "YT Music 조회 실패: "+error:
+                "실제 항목 "+children.size()+"개");
+            listing.removeAllViews();
+            if(children.isEmpty() && error==null){
+                TextView empty=new TextView(this);
+                empty.setText(parent.startsWith(PolarisYtmCatalog.CAPTURED)
+                    ? "원본 앱 화면에서 이름만 확인했습니다. 재생목록 ID는 미확인입니다."
+                    : PolarisYtmCatalog.LIBRARY.equals(parent)
+                        ? "보관함 수집 결과 0개. "+PolarisYtmSnapshot.diagnostics(this)+
+                          "\n원본 YT Music 보관함을 실제로 표시한 뒤 다시 조회하세요."
+                        : "서버에서 반환된 탐색 가능한 항목이 없습니다.");
+                empty.setTextColor(0xDDFFFFFF);
+                empty.setPadding(4,14,4,14);
+                listing.addView(empty);
+            }
+            for(android.support.v4.media.MediaBrowserCompat.MediaItem item:children){
+                final String id=item.getMediaId();
+                final String title=item.getDescription().getTitle()==null?"(제목 없음)":
+                    item.getDescription().getTitle().toString();
+                final CharSequence sub=item.getDescription().getSubtitle();
+                TextView control=button((item.isBrowsable()?"▸ ":"▶ ")+title+
+                    (sub==null?"":"\n"+sub));
+                listing.addView(control);
+                if(item.isBrowsable())
+                    control.setOnClickListener(v->showYtmBrowse(id,title));
+                else
+                    control.setOnClickListener(v->playId(id,title));
+            }
+        });
+    }
+
+    private void updateYtmNow(){
+        if(ytmNowText==null || !"ytm".equals(currentPage))return;
+        MediaMetadataCompat m=lastMetadata;
+        String mediaId=m==null?null:m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID);
+        if(!PolarisYtmBridge.MEDIA_ID.equals(mediaId)){
+            ytmNowText.setText("YT Music 연결 대기 · 위 '연결' 버튼을 눌러주세요.");
+            return;
+        }
+        String title=m.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+        String artist=m.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+        int state=lastPlaybackState==null?PlaybackStateCompat.STATE_NONE:
+            lastPlaybackState.getState();
+        ytmNowText.setText(String.valueOf(title)+"\n"+String.valueOf(artist)+
+            "\n"+(state==PlaybackStateCompat.STATE_PLAYING?"▶ 재생 중":
+                state==PlaybackStateCompat.STATE_PAUSED?"Ⅱ 일시정지":"연결 대기"));
     }
 
     private TextView radioSectionTitle(String text){
@@ -2566,6 +2809,7 @@ public class MainActivity extends AppCompatActivity {
         super.onBackPressed();
     }
     @Override protected void onDestroy(){
+        if(ytmProbe!=null)ytmProbe.cancel();
         progressHandler.removeCallbacksAndMessages(null);
         scheduleHandler.removeCallbacksAndMessages(null);
         scheduleExecutor.shutdownNow();
