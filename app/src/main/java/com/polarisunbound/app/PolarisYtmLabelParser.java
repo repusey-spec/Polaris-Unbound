@@ -29,7 +29,7 @@ final class PolarisYtmLabelParser {
     private static final String TYPES=
         "(자동\\s*재생목록|재생목록|플레이리스트|playlist|앨범|album|아티스트|artist|노래|song)";
     private static final Pattern COMBINED=Pattern.compile(
-        "^(.{1,150}?)[,，]\\s*"+TYPES+"(?=\\s|[•·ㆍ,:|，]|$).*",
+        "^(.{1,150}?)[,，•·]\\s*"+TYPES+"(?=\\s|[•·ㆍ,:|，]|$).*",
         Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
     private static final Pattern METADATA=Pattern.compile(
         "^\\s*"+TYPES+"(?=\\s|[•·ㆍ,:|，]|$).*",
@@ -87,7 +87,7 @@ final class PolarisYtmLabelParser {
     }
 
     private static String normalize(String text){
-        return text==null?"":text.replace('\u00a0',' ').trim();
+        return text==null?"":text.replace('\u00a0',' ').replace('\n',' ').replace('\r',' ').trim();
     }
 
     private static boolean validTitle(String title,String metadata){
