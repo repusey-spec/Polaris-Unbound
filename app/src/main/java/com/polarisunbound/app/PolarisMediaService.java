@@ -2871,11 +2871,16 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> x=new ArrayList<>();
         if(parent.equals("root")){
-            // Single AA index. No second duplicate 'home' source index.
+            // Android Auto owns the visual tabs. Separate the two source groups
+            // in the browse tree instead of claiming we can place custom bars.
+            x.add(folder("nav:primary","라디오 · CAN"));
+            x.add(folder("nav:music","NAS · YT Music"));
+        } else if(parent.equals("nav:primary")){
             x.add(folder("radio","라디오"));
+            x.add(folder("can","CAN"));
+        } else if(parent.equals("nav:music")){
             x.add(folder("mp3","YT NAS MUSIC"));
             x.add(folder("ytm","YT Music"));
-            x.add(folder("can","CAN"));
         } else if(parent.equals("ytm")){
             // Hush/Metrolist-inspired browse layout, populated ONLY with
             // real public YTM server results or user-approved visible UI labels.
