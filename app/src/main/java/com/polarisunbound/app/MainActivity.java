@@ -777,9 +777,9 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 final String report=dispatch.message+
-                    (dispatch.submitted?"\\n약 2초 후: "+after2+
-                        "\\n약 5초 후: "+after5+
-                        "\\n※ 세션의 곡·상태 갱신은 간접 증거이며 "+
+                    (dispatch.submitted?"\n약 2초 후: "+after2+
+                        "\n약 5초 후: "+after5+
+                        "\n※ 세션의 곡·상태 갱신은 간접 증거이며 "+
                         "AA 화면 유지와 Assistant 음성호출은 별도 검증이 필요합니다.":"");
                 runOnUiThread(()->{
                     ytmSearchBusy=false;
