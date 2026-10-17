@@ -98,6 +98,15 @@ final class PolarisYtmLabelParser {
         if(title.contains("•")||title.contains("·")||
             title.startsWith("android."))return false;
         String lower=title.toLowerCase(Locale.ROOT);
+        // Test05 showed accessibility UI labels masquerading as titles.
+        // Prefer dropping ambiguous controls to inventing a playlist.
+        if(lower.equals("고정됨")||lower.equals("고정")||
+            lower.equals("pinned")||lower.equals("pin")||
+            lower.equals("스마트 오프라인 저장 완료")||
+            lower.startsWith("오프라인 저장한 재생목록 표시")||
+            lower.startsWith("오프라인 저장한 곡 표시")||
+            lower.equals("show downloaded playlists")||
+            lower.equals("show downloaded songs"))return false;
         for(String nav:new String[]{"홈","보관함","플레이리스트","재생목록",
             "검색","최근 활동","최근 추가한 항목","오프라인 저장",
             "home","library","search","playlists","playlist"}){
