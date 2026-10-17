@@ -867,6 +867,13 @@ public class MainActivity extends AppCompatActivity {
      * Shared URL -> explicit title selection -> user confirmation.
      * Neither accessibility text nor playlist names can prove a video/list ID.
      */
+    private void notifyYtmLibraryChanged(String title){
+        Intent update=new Intent("com.polarisunbound.app.YTM_SNAPSHOT_UPDATED");
+        update.setPackage(getPackageName());
+        if(title!=null)update.putExtra("changed_title",title);
+        sendBroadcast(update);
+    }
+
     private void handleIncomingYtmShare(Intent intent){
         if(intent==null || !Intent.ACTION_SEND.equals(intent.getAction()) ||
             !"text/plain".equals(intent.getType()))return;
@@ -959,6 +966,7 @@ public class MainActivity extends AppCompatActivity {
             .setPositiveButton("이 목록 연결",(d,which)->{
                 boolean saved=PolarisYtmPlaylistBindings.bind(this,title,playlistId);
                 if(saved) {
+                    notifyYtmLibraryChanged(title);
                     Toast.makeText(this,"원본 재생목록 연결 저장됨",
                         Toast.LENGTH_SHORT).show();
                     showYtmBrowse(PolarisYtmCatalog.LIBRARY,"YT Music 보관함");
@@ -1007,6 +1015,7 @@ public class MainActivity extends AppCompatActivity {
                         .setMessage(title+"의 공유 링크 연결만 지웁니다. 원본 YT Music은 변경하지 않습니다.")
                         .setPositiveButton("해제",(d,w)->{
                             PolarisYtmPlaylistBindings.remove(this,title);
+                            notifyYtmLibraryChanged(title);
                             showYtmBrowse(PolarisYtmCatalog.LIBRARY,"YT Music 보관함");
                         })
                         .setNegativeButton("취소",null).show());
