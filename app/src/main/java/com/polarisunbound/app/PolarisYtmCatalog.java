@@ -151,25 +151,12 @@ final class PolarisYtmCatalog {
         JSONObject section=findHomeSectionList(response);
         JSONArray contents=section==null?null:section.optJSONArray("contents");
         List<Section> fresh=new ArrayList<>();
-        int renderers=0;
-        if(contents!=null)for(int i=0;i<contents.length() && fresh.size()<24;i++){
-            JSONObject item=contents.optJSONObject(i);
-            if(item==null)continue;
-            for(String type:new String[]{"musicCarouselShelfRenderer",
-                    "musicShelfRenderer","gridRenderer","musicCardShelfRenderer"}){
-                JSONObject renderer=item.optJSONObject(type);
-                if(renderer==null)continue;
-                renderers++;
-                String title=text(path(renderer,"header",
-                    "musicCarouselShelfBasicHeaderRenderer","title"));
-                if(title.isEmpty())title=text(path(renderer,"header",
-                    "musicShelfBasicHeaderRenderer","title"));
-                if(title.isEmpty())title=text(renderer.optJSONObject("title"));
-                // Do not fabricate titles or recommendations.
-                if(title.isEmpty())continue;
-                List<MediaBrowserCompat.MediaItem> rows=new ArrayList<>();
-                parseRows(renderer.optJSONArray("contents"),rows,null);
-                if(!rows.isEmpty())fresh.add(new Section(title,rows));
+        int[] renderers={0};
+        if(contents!=null){
+            for(int i=0;i<contents.length() && fresh.size()<24;i++){
+                JSONObject wrapper=contents.optJSONObject(i);
+                if(wrapper!=null)
+                    collectHomeSections(wrapper,fresh,renderers,0);
             }
         }
         homeSections=fresh;
@@ -181,11 +168,58 @@ final class PolarisYtmCatalog {
                 "; contentsKeys="+jsonKeys(response.optJSONObject("contents"))+
                 "; sectionNodes="+(contents==null?"missing":contents.length())+
                 "; nodeTypes="+firstNodeTypes(contents)+
-                "; shelfTypes="+renderers+
+                "; shelfTypes="+renderers[0]+
                 "; visitor="+(!visitorData.isEmpty())+
                 "; bootstrap="+bootstrapStatus);
         }
         Log.i(TAG,"public home sections="+fresh.size());
+    }
+
+    /**
+     * YT Music has used direct carousel rows and nested itemSectionRenderer
+     * wrappers. Only use genuine server-provided shelf titles and media IDs.
+     * This is a bounded search for known home shelf structures, never a
+     * generic traversal of user/profile data.
+     */
+    private static void collectHomeSections(JSONObject container,
+            List<Section> sections,int[] renderers,int depth){
+        if(container==null||sections.size()>=24||depth>6)return;
+        for(String type:new String[]{"musicCarouselShelfRenderer",
+                "musicShelfRenderer","gridRenderer","musicCardShelfRenderer"}){
+            JSONObject renderer=container.optJSONObject(type);
+            if(renderer==null)continue;
+            renderers[0]++;
+            String title=text(path(renderer,"header",
+                "musicCarouselShelfBasicHeaderRenderer","title"));
+            if(title.isEmpty())title=text(path(renderer,"header",
+                "musicCarouselShelfBasicHeaderRenderer","strapline"));
+            if(title.isEmpty())title=text(path(renderer,"header",
+                "musicShelfBasicHeaderRenderer","title"));
+            if(title.isEmpty())title=text(renderer.optJSONObject("title"));
+            if(title.isEmpty())continue;
+            JSONArray contents=renderer.optJSONArray("contents");
+            if(contents==null)contents=renderer.optJSONArray("items");
+            List<MediaBrowserCompat.MediaItem> tracks=new ArrayList<>();
+            parseRows(contents,tracks,null);
+            if(!tracks.isEmpty())sections.add(new Section(title,tracks));
+        }
+
+        // The Test 04 response had one section node but no direct shelves.
+        // Drill only into known section wrappers, preserving true source IDs.
+        for(String wrapper:new String[]{"itemSectionRenderer",
+                "sectionListRenderer","sectionListContinuation",
+                "tabRenderer","content"}){
+            JSONObject nested=container.optJSONObject(wrapper);
+            if(nested!=null)collectHomeSections(nested,sections,renderers,depth+1);
+        }
+        for(String arrayKey:new String[]{"contents","items","tabs"}){
+            JSONArray nested=container.optJSONArray(arrayKey);
+            if(nested==null)continue;
+            for(int i=0;i<nested.length() && i<100 && sections.size()<24;i++){
+                JSONObject child=nested.optJSONObject(i);
+                if(child!=null)collectHomeSections(child,sections,renderers,depth+1);
+            }
+        }
     }
 
     /** Both one-column and two-column Home variants exist. */
