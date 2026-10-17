@@ -35,3 +35,24 @@ The original Test 05 version scanned carousel/shelf/grid renderers but skipped `
 - Only the pure-Java label parser and its 14 regression fixtures have been executed in a JVM.
 - The updated Android YT Music Home service/parser, the user-interface collector, Android Auto UI, and APK **have not** been compiled or tested in a live Android installation at this checkpoint.
 - No new APK was requested or generated.
+
+
+## Next-step crosscheck — official YT Music playback handoff
+- **Source bug found:** previously `PolarisMediaService.onPlayFromMediaId()` called `enterYtmMode()` (which stops local radio/NAS) before attempting `startActivity()` for the selected YouTube Music link. A synchronous launch failure could silence a working audio source.
+- The callback now validates the real browse ID with `PolarisYtmDeepLink.urlFor()`, attempts official-app `ACTION_VIEW` first, and changes to YT Music mode **only if Android accepts the activity launch request**. Invalid IDs and synchronous exceptions leave the current source untouched. This **does not guarantee** Android Auto allowed the activity onscreen or that the target autoplays.
+- A separate pure Java test of 13 deep-link fixtures passed using the local `javac`/JVM environment, including valid songs, playlists, URL escaping, missing/invalid input and malicious parameters. Browse ID ownership or playback success cannot be proven by these fixtures.
+- Confirmed the existing 14 accessibility label fixtures also pass when locally run. These are unit-level regression results, **not** a successful YTM API call.
+- Full Android compilation, official YTM playback test, and APK packaging **still not done** for this branch.
+
+To repeat both host-level test suites:
+
+```bash
+mkdir -p /tmp/polaris-source-tests
+javac -encoding UTF-8 -d /tmp/polaris-source-tests \
+  app/src/main/java/com/polarisunbound/app/PolarisYtmLabelParser.java \
+  diagnostics/jvm/PolarisYtmLabelParserTest.java \
+  app/src/main/java/com/polarisunbound/app/PolarisYtmDeepLink.java \
+  diagnostics/jvm/PolarisYtmDeepLinkTest.java
+java -cp /tmp/polaris-source-tests com.polarisunbound.app.PolarisYtmLabelParserTest
+java -cp /tmp/polaris-source-tests com.polarisunbound.app.PolarisYtmDeepLinkTest
+```
