@@ -24,6 +24,16 @@ jobs:
         run: |
           base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
           keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
+      - name: Run YT Music Java parser and deep link unit tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/ytm-jvm-tests"
+          javac -encoding UTF-8 -d "$RUNNER_TEMP/ytm-jvm-tests" \
+            app/src/main/java/com/polarisunbound/app/PolarisYtmLabelParser.java \
+            diagnostics/jvm/PolarisYtmLabelParserTest.java \
+            app/src/main/java/com/polarisunbound/app/PolarisYtmDeepLink.java \
+            diagnostics/jvm/PolarisYtmDeepLinkTest.java
+          java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmLabelParserTest
+          java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmDeepLinkTest
       - name: Build isolated Polaris + YTM integration test
         run: gradle :app:assembleDebug
       - name: Verify separate test APK identity, signature and installer
