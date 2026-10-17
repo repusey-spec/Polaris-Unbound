@@ -31,6 +31,8 @@ final class PolarisYtmLabelParser {
     private static final Pattern COMBINED=Pattern.compile(
         "^(.{1,150}?)[,，•·]\\s*"+TYPES+"(?=\\s|[•·ㆍ,:|，]|$).*",
         Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
+    private static final Pattern TYPE_ONLY=Pattern.compile(
+        "^\\s*"+TYPES+"\\s*$",Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
     private static final Pattern METADATA=Pattern.compile(
         "^\\s*"+TYPES+"(?=\\s|[•·ㆍ,:|，]|$).*",
         Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
@@ -43,7 +45,8 @@ final class PolarisYtmLabelParser {
             String raw=normalize(labels.get(i));
             if(raw.isEmpty())continue;
             Matcher combined=COMBINED.matcher(raw);
-            if(combined.matches()) {
+            if(combined.matches() &&
+               !TYPE_ONLY.matcher(combined.group(1).trim()).matches()) {
                 String title=combined.group(1).trim();
                 String kind=kind(combined.group(2));
                 add(rows,seen,title,raw,kind);
