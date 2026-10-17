@@ -35,3 +35,15 @@
 - Share URLs not containing a direct `/playlist?list=` URL cannot be linked without new, separately tested handlers.
 - Automatically importing every personalized album/shelf, discovering all playlist IDs from Accessibility, or remotely starting playback from AA are not demonstrated by this workaround.
 - This is the **first reliable one-playlist identity proof path**, not a solution for account-wide Home/Library navigation.
+
+## Next source-validation checkpoint (2026-10-18)
+- Found and fixed a missing Android Auto browse refresh path: opt-in YTM accessibility snapshots already sent the package-scoped `YTM_SNAPSHOT_UPDATED` broadcast, but the media browser had **no receiver**. `PolarisMediaService` now registers a same-app, non-exported dynamic receiver while running, notifies `ytm:library` and an optionally changed captured playlist's children, and unregisters on destroy. MainActivity broadcasts after user-confirmed bind/unbind. When the AA browser is not running, the next browse starts from current saved data.
+- This refresh is an Android code path modification, **not yet compiled nor device-verified**. In particular, AA hosts may still cache their own pages and Android background activity launch restrictions remain unverified.
+- A strict share-to-original-app ID preservation regression test (`PolarisYtmShareRoundTripTest.java`) was added.
+- Actually ran Java 21 tests in a local sandbox after copying the current pure-Java branch code: **19 visible-label cases, 15 shared-link parser cases, and 7 ID round-trip cases**, all passed (41 in total). This covers pure Java behavior only. Live YTM share chooser, storage, manifest, MediaBrowserService and Activity have **not** been built/installed/tested in this branch.
+- The future CI workflow now includes all four JVM test entrypoints before Android compilation; **not triggered** because no APK build was requested.
+
+## Installation/build policy
+- Do not create a Test06 APK from the shorthand "next" alone.
+- When the user explicitly requests the Test06 APK, bump versionCode from 5905 to 5906, update app label and artifact/test CI identity, trigger isolated test PR build, confirm CI JVM tests + Gradle + signature + APK package ID, and test on phone before AA.
+- Stable v0.58 on main remains untouched.
