@@ -180,6 +180,7 @@ final class PolarisYtmCatalog {
                 "topKeys="+jsonKeys(response)+
                 "; contentsKeys="+jsonKeys(response.optJSONObject("contents"))+
                 "; sectionNodes="+(contents==null?"missing":contents.length())+
+                "; nodeTypes="+firstNodeTypes(contents)+
                 "; shelfTypes="+renderers+
                 "; visitor="+(!visitorData.isEmpty())+
                 "; bootstrap="+bootstrapStatus);
@@ -207,6 +208,27 @@ final class PolarisYtmCatalog {
         JSONObject continuation=path(root,
             "continuationContents","sectionListContinuation");
         return continuation!=null?continuation:root.optJSONObject("sectionListRenderer");
+    }
+
+    private static String firstNodeTypes(JSONArray contents){
+        if(contents==null)return "(none)";
+        StringBuilder result=new StringBuilder();
+        for(int i=0;i<contents.length() && i<4;i++){
+            if(i>0)result.append("; ");
+            JSONObject node=contents.optJSONObject(i);
+            result.append(i).append(":").append(jsonKeys(node));
+            if(node!=null){
+                JSONObject nested=node.optJSONObject("itemSectionRenderer");
+                if(nested!=null){
+                    JSONArray inner=nested.optJSONArray("contents");
+                    result.append(" nested=")
+                        .append(inner==null?"(none)":inner.length())
+                        .append(" first=").append(
+                            jsonKeys(inner==null?null:inner.optJSONObject(0)));
+                }
+            }
+        }
+        return result.toString();
     }
 
     private static String jsonKeys(JSONObject obj){
