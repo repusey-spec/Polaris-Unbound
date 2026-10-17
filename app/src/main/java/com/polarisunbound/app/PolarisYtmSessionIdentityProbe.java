@@ -84,7 +84,20 @@ final class PolarisYtmSessionIdentityProbe {
             result.append("원본 Media URI: ")
                 .append(metadataUri==null?"없음":
                     (listId==null?"있지만 공식 재생목록 주소 아님":
-                        "공식 재생목록 주소 확인")).append("\n");
+                        "공식 재생목록 문맥 ID 확인")).append("\n");
+
+            // A media app may expose its currently playing URI through the
+            // synthesized MediaDescription even without METADATA_KEY_MEDIA_URI.
+            // This is still read-only and restricted to the original YTM app.
+            MediaDescription current=metadata==null?null:metadata.getDescription();
+            Uri currentUri=current==null?null:current.getMediaUri();
+            String currentListId=PolarisYtmSessionIdClassifier.explicitPlaylistId(
+                currentUri==null?null:currentUri.toString());
+            if(currentListId!=null)verified.add(currentListId);
+            result.append("원본 재생 항목 설명 URI: ")
+                .append(currentUri==null?"없음":
+                    (currentListId==null?"있지만 공식 재생목록 주소 아님":
+                        "공식 재생목록 문맥 ID 확인")).append("\n");
 
             List<MediaSession.QueueItem> queue=chosen.getQueue();
             int count=queue==null?-1:queue.size();
@@ -110,6 +123,14 @@ final class PolarisYtmSessionIdentityProbe {
             result.append("검사한 큐 항목: ").append(Math.min(Math.max(count,0),200))
                 .append("개 / 개별 Media ID 노출: ").append(queueMediaIds)
                 .append("개 / Media URI: ").append(queueUris).append("개\n");
+            // Queue item IDs identify an item in the active session queue;
+            // they do not constitute YouTube playlist IDs.
+            if(playback!=null){
+                long activeId=playback.getActiveQueueItemId();
+                result.append("활성 큐 항목 ID: ")
+                    .append(activeId>=0?"노출됨 (재생목록 ID 아님)":
+                        "노출되지 않음").append("\n");
+            }
             result.append("공식 재생목록 주소가 확인된 큐 항목: ")
                 .append(queuePlaylistUrls).append("개\n");
 
@@ -126,12 +147,34 @@ final class PolarisYtmSessionIdentityProbe {
             }else{
                 result.append("공식 재생목록 ID 자동 확인: ")
                     .append(verified.size()).append("개\n");
-                for(String id:verified)result.append("검증된 list ID: ")
+                for(String id:verified)result.append("원본 URI의 list ID: ")
                     .append(id).append("\n");
+            }
+
+            // Test07 obtained citypop's real ID by a user-confirmed share.
+            // Compare source-exposed IDs against those independently proven
+            // links; a match is evidence, not permission to import a library.
+            java.util.LinkedHashMap<String,String> userLinked=
+                PolarisYtmPlaylistBindings.all(context);
+            int comparisons=0,matched=0;
+            for(java.util.Map.Entry<String,String> entry:userLinked.entrySet()){
+                comparisons++;
+                if(verified.contains(entry.getValue())){
+                    matched++;
+                    result.append("기존 공유 연결과 일치: ")
+                        .append(entry.getKey()).append("\n");
+                }
+            }
+            if(comparisons>0){
+                result.append("기존 공유 연결 ").append(comparisons)
+                    .append("개 중 ID 일치 ").append(matched)
+                    .append("개\n");
             }
             result.append("주의: 현재 재생 세션과 큐만 검사했습니다. ")
                 .append("전체 YT Music 보관함이나 개인화 홈을 조회한 결과는 아닙니다. ")
-                .append("추출한 내부 곡 ID를 재생목록 ID로 임의 변환하지 않습니다.");
+                .append("watch 링크의 list 값은 현재 재생 문맥일 뿐 ")
+                .append("사용자 보관함의 소유 목록이라는 증거는 아닙니다. ")
+                .append("내부 곡 ID를 재생목록 ID로 임의 변환하지 않습니다.");
         }catch(SecurityException denied){
             result.append("접근 거부: 알림 접근 권한/MediaSession 접근 상태 확인 필요");
         }catch(Exception e){
