@@ -2304,6 +2304,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==REQUEST_YTM_LOGIN){
+            if(resultCode==RESULT_OK)showYtm();
+            return;
+        }
         if(requestCode!=REQ_VOICE_SEARCH || resultCode!=RESULT_OK || data==null) return;
         ArrayList<String> results=data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if(results==null||results.isEmpty()) return;
@@ -2885,13 +2889,6 @@ public class MainActivity extends AppCompatActivity {
             });
         });
     }
-    @Override protected void onActivityResult(
-            int requestCode,int resultCode,Intent data){
-        super.onActivityResult(requestCode,resultCode,data);
-        if(requestCode==REQUEST_YTM_LOGIN&&resultCode==RESULT_OK)
-            showYtm();
-    }
-
     @Override public void onBackPressed(){
         if("ytm".equals(currentPage) &&
             currentYtmAccountBrowseParent!=null &&
