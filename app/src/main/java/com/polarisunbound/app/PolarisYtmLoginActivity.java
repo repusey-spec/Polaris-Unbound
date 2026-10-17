@@ -37,7 +37,7 @@ public final class PolarisYtmLoginActivity extends Activity {
         root.setPadding(18,18,18,14);
 
         TextView heading=new TextView(this);
-        heading.setText("Polaris · YT Music 별도 로그인 (Test 10)");
+        heading.setText("YT Music 계정 연결");
         heading.setTextSize(19);
         heading.setTextColor(Color.WHITE);
         root.addView(heading);
@@ -60,13 +60,15 @@ public final class PolarisYtmLoginActivity extends Activity {
         root.addView(status);
 
         confirm=new Button(this);
-        confirm.setText("로그인 상태 확인 → Polaris 보관함으로");
+        confirm.setText("내 플레이리스트로 이동");
         root.addView(confirm);
         confirm.setOnClickListener(v->{
             if(PolarisYtmAccountCatalog.hasLoginCookie()){
-                CookieManager.getInstance().flush();
-                setResult(RESULT_OK);
-                finish();
+                captureSelectedAccount(()->{
+                    CookieManager.getInstance().flush();
+                    setResult(RESULT_OK);
+                    finish();
+                });
             }else{
                 status.setText("로그인 인증 쿠키를 확인하지 못했습니다. "+
                     "music.youtube.com 로그인 완료를 확인하세요. "+
@@ -84,6 +86,7 @@ public final class PolarisYtmLoginActivity extends Activity {
                     "공식 YouTube Music 앱의 로그인 상태는 변경하지 않습니다.")
                 .setPositiveButton("삭제",(d,w)->{
                     CookieManager.getInstance().removeAllCookies(success->{
+                        PolarisYtmAccountSelection.clear(getApplicationContext());
                         CookieManager.getInstance().flush();
                         status.setText("Polaris 로그인 쿠키 삭제"+
                             (success?" 완료":" 요청 완료"));
@@ -132,6 +135,47 @@ public final class PolarisYtmLoginActivity extends Activity {
         setContentView(root);
         web.loadUrl(PolarisYtmAccountCatalog.hasLoginCookie()?
             URL:"https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com");
+    }
+
+    /**
+     * Read only numeric SESSION_INDEX and current brand-channel page
+     * identifier from Google's real logged-in WebView. Do not read,
+     * expose, save or report password/cookie/authorization tokens.
+     */
+    private void captureSelectedAccount(Runnable done){
+        if(web==null){
+            status.setText("웹 화면이 준비되지 않았습니다.");
+            return;
+        }
+        String current=web.getUrl();
+        Uri uri=current==null?null:Uri.parse(current);
+        if(uri==null || !"https".equalsIgnoreCase(uri.getScheme()) ||
+            !"music.youtube.com".equalsIgnoreCase(uri.getHost())){
+            status.setText("music.youtube.com 화면에서만 계정 정보를 확인할 수 있습니다.");
+            return;
+        }
+        String javascript="(function(){"+
+            "var c=(window.yt&&window.yt.config_)||null;"+
+            "if(!c)return null;"+
+            "return JSON.stringify({idx:String(c.SESSION_INDEX==null?0:c.SESSION_INDEX),"+
+            "ds:String(c.DATASYNC_ID||''),"+
+            "pg:String(c.DELEGATED_SESSION_ID||'')});"+
+            "})()";
+        web.evaluateJavascript(javascript,value->{
+            try{
+                if(value==null||"null".equals(value))throw new IllegalStateException();
+                String data=new org.json.JSONArray("["+value+"]").getString(0);
+                org.json.JSONObject account=new org.json.JSONObject(data);
+                PolarisYtmAccountSelection.save(getApplicationContext(),
+                    account.optString("idx","0"),
+                    account.optString("pg",""),
+                    account.optString("ds",""));
+                done.run();
+            }catch(Exception e){
+                status.setText("웹 페이지에서 계정·채널 정보를 확인하지 못했습니다. "+
+                    "YT Music 홈을 새로고침한 뒤 다시 눌러 주세요.");
+            }
+        });
     }
 
     @Override public void onBackPressed(){
