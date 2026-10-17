@@ -496,6 +496,16 @@ final class PolarisYtmCatalog {
             if(validId(videoId))
                 return playable(PLAY+Uri.encode(videoId),title,subtitle,art);
         }
+        // A Home mix/radio card can navigate with watchPlaylistEndpoint
+        // rather than browseEndpoint. This is a genuine server playlist ID;
+        // without this path My Supermix-like recommendations disappear.
+        JSONObject watchPlaylist=nav==null?null:
+            nav.optJSONObject("watchPlaylistEndpoint");
+        if(watchPlaylist!=null){
+            String playlistId=watchPlaylist.optString("playlistId","");
+            if(validId(playlistId))
+                return folder(PLAYLIST+Uri.encode(playlistId),title,subtitle,art);
+        }
         if(browse==null)return null;
         String browseId=browse.optString("browseId","");
         if(!validId(browseId))return null;
@@ -525,6 +535,21 @@ final class PolarisYtmCatalog {
         JSONObject playlistData=row.optJSONObject("playlistItemData");
         String videoId=playlistData==null?"":playlistData.optString("videoId","");
         if(videoId.isEmpty() && watch!=null)videoId=watch.optString("videoId","");
+        if(videoId.isEmpty()){
+            // YouTube frequently places the playable endpoint on the thumbnail
+            // overlay or a first-column title run, not on navigationEndpoint.
+            JSONObject overlayPlay=path(row,"overlay",
+                "musicItemThumbnailOverlayRenderer","content",
+                "musicPlayButtonRenderer","playNavigationEndpoint","watchEndpoint");
+            if(overlayPlay!=null)videoId=overlayPlay.optString("videoId","");
+        }
+        if(videoId.isEmpty()){
+            JSONArray titleRuns=pathArray(first,
+                "musicResponsiveListItemFlexColumnRenderer","text","runs");
+            JSONObject titleRun=at(titleRuns,0);
+            JSONObject fromTitle=path(titleRun,"navigationEndpoint","watchEndpoint");
+            if(fromTitle!=null)videoId=fromTitle.optString("videoId","");
+        }
         if(!validId(videoId))return null;
         String id=PLAY+Uri.encode(videoId);
         if(currentPlaylist!=null && validId(currentPlaylist))
