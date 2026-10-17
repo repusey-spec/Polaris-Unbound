@@ -275,6 +275,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         ytmBridge.play();
                         return;
                     }
+                    if(id!=null && (id.startsWith(PolarisYtmCatalog.PLAY) ||
+                            id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST) ||
+                            "ytm:openapp".equals(id))){
+                        enterYtmMode();
+                        openOriginalYtm(id);
+                        return;
+                    }
                     if(ytmMode && id!=null && !id.startsWith("can:"))
                         exitYtmMode(true);
                     if("can:ftp_upload".equals(id)){ uploadFtpFromAa("CAN","can"); return; }
@@ -567,6 +574,49 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         ytmMode=true;
         ytmBridge.start();
         notifyChildrenChanged("ytm");
+    }
+
+    /**
+     * An explicit YT Music URI is sent to the INSTALLED original YTM application.
+     * Opening an item is verified at source level; Android Auto/background
+     * launch policy and autoplay MUST be tested in the actual car.
+     */
+    private void openOriginalYtm(String id){
+        try{
+            Intent launch;
+            String uri=null;
+            if(id.startsWith(PolarisYtmCatalog.PLAY)){
+                String details=id.substring(PolarisYtmCatalog.PLAY.length());
+                String[] parts=details.split("\\?list=",2);
+                String videoId=Uri.decode(parts[0]);
+                if(!videoId.matches("[A-Za-z0-9_-]{6,20}"))return;
+                uri="https://music.youtube.com/watch?v="+Uri.encode(videoId);
+                if(parts.length==2){
+                    String playlist=Uri.decode(parts[1]);
+                    if(playlist.matches("[A-Za-z0-9_=-]{1,180}"))
+                        uri+="&list="+Uri.encode(playlist);
+                }
+            } else if(id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST)){
+                String playlist=Uri.decode(id.substring(
+                    PolarisYtmCatalog.OPEN_PLAYLIST.length()));
+                if(!playlist.matches("[A-Za-z0-9_=-]{1,180}"))return;
+                uri="https://music.youtube.com/playlist?list="+Uri.encode(playlist);
+            }
+            if(uri!=null){
+                launch=new Intent(Intent.ACTION_VIEW,Uri.parse(uri));
+                launch.setPackage(PolarisYtmBridge.SOURCE);
+            }else{
+                launch=getPackageManager().getLaunchIntentForPackage(
+                    PolarisYtmBridge.SOURCE);
+                if(launch==null){trace("YTM app not installed");return;}
+            }
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(launch);
+            trace("YTM source URI dispatched "+id);
+        }catch(Exception e){
+            trace("YTM source URI failed: "+e.getClass().getSimpleName()+
+                " "+e.getMessage());
+        }
     }
 
     private void exitYtmMode(boolean pauseSource){
@@ -2769,6 +2819,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onLoadChildren(String parent,Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
+        if(parent!=null && (PolarisYtmCatalog.HOME.equals(parent) ||
+                PolarisYtmCatalog.LIBRARY.equals(parent) ||
+                parent.startsWith(PolarisYtmCatalog.SHELF) ||
+                parent.startsWith(PolarisYtmCatalog.PLAYLIST) ||
+                parent.startsWith(PolarisYtmCatalog.BROWSE) ||
+                parent.startsWith(PolarisYtmCatalog.CAPTURED))){
+            result.detach();
+            PolarisYtmCatalog.get(this).load(parent,(children,error)->{
+                if(error!=null)trace("YTM catalog "+parent+" "+error);
+                result.sendResult(children);
+            });
+            return;
+        }
         if(isFtpMp3BrowserParent(parent)){
             loadFtpMp3ChildrenAsync(parent,result);
             return;
@@ -2781,8 +2844,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(folder("ytm","YT Music"));
             x.add(folder("can","CAN"));
         } else if(parent.equals("ytm")){
-            // Display only a real YTM current track, without inventing playlists.
-            // The diagnostic on the phone checks whether YTM offers browsable library data.
+            // Hush/Metrolist-inspired browse layout, populated ONLY with
+            // real public YTM server results or user-approved visible UI labels.
+            x.add(folder(PolarisYtmCatalog.HOME,"홈 · YT Music 공개 추천"));
+            x.add(folder(PolarisYtmCatalog.LIBRARY,"보관함 · 실제 화면에서 읽은 항목"));
+            // The original live YTM track is still mirrored as before.
             MediaMetadataCompat metadata=ytmBridge==null?null:ytmBridge.currentMetadata();
             String name=metadata==null?null:
                 metadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
