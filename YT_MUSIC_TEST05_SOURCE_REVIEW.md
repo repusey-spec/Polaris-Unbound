@@ -13,7 +13,7 @@
 - Cache merges genuine visible entries while scrolling; existing Test 04 replaced the entire library snapshot with only the most recently visible screen.
 
 ## Verified host-JVM fixture coverage
-The parser was compiled and exercised locally against **11 fixtures** (Korean and English labels, automatic playlists, embedded/bullet/multiline descriptions, album label, duplicate entries, mixed items, and invalid navigation-only content), all passed. This verifies only the pure Java label-classification logic. Android app compilation and live YT Music extraction remain unverified.
+The parser was compiled and exercised locally using `javac 21` against **14 fixtures**, all passed **after fixing a previously incorrect multiline test literal**. The initial exact GitHub test execution failed on a literal `\\n` (backslash + `n`) instead of a real newline; this was corrected, and three additional fixtures were added (offline automatic playlist, full-width punctuation, and navigation false-positive). This verifies only the pure Java label-classification logic. Android app compilation and live YT Music extraction remain unverified.
 
 To repeat the source-level JVM test from the repo:
 
@@ -27,3 +27,11 @@ java -cp /tmp/polaris-ytm-jvm com.polarisunbound.app.PolarisYtmLabelParserTest
 
 ## Next step and release gate
 Do **not** run GitHub Actions assembleDebug or ship Test05 APK without a specific APK-build command. The next deliverable after permission to build will be an isolated 5905 Test05 APK. Test on phone first, then wired Android Auto. Stable Polaris v0.58 stays untouched.
+
+## Additional Home parser review
+The original Test 05 version scanned carousel/shelf/grid renderers but skipped `watchPlaylistEndpoint` cards (such as mix suggestions) when they did not have a `browseEndpoint`. The source now maps **real** `watchPlaylistEndpoint.playlistId` to a browsable folder. Responsive song entries can also obtain their genuine video ID from the overlay play button or first title run. IDs are never fabricated.
+
+## Verification limitations
+- Only the pure-Java label parser and its 14 regression fixtures have been executed in a JVM.
+- The updated Android YT Music Home service/parser, the user-interface collector, Android Auto UI, and APK **have not** been compiled or tested in a live Android installation at this checkpoint.
+- No new APK was requested or generated.
