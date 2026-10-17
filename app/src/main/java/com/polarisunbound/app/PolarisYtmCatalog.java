@@ -98,9 +98,23 @@ final class PolarisYtmCatalog {
                 if (LIBRARY.equals(parent)) {
                     items=PolarisYtmSnapshot.items(context);
                 } else if (parent.startsWith(CAPTURED)) {
-                    // A UI snapshot has names but *not* a YT Music playlist ID.
-                    // Never claim this row is playable or silently select a different track.
-                    items=Collections.emptyList();
+                    // Only a user-confirmed, official share URL may add
+                    // navigation to original YT Music for a visible title.
+                    // Accessibility labels alone never become fabricated IDs.
+                    String label=Uri.decode(parent.substring(CAPTURED.length()));
+                    if(label.startsWith("playlist|")){
+                        String title=label.substring("playlist|".length());
+                        String linked=PolarisYtmPlaylistBindings.get(context,title);
+                        if(validId(linked)){
+                            List<MediaBrowserCompat.MediaItem> confirmed=new ArrayList<>();
+                            confirmed.add(playable(
+                                OPEN_PLAYLIST+Uri.encode(linked),
+                                "▶ 원본 YT Music에서 재생목록 열기",
+                                "사용자가 공유한 실제 재생목록 링크 · 자동 재생 미확인",
+                                null));
+                            items=confirmed;
+                        }
+                    }
                 } else if (HOME.equals(parent) || parent.startsWith(SHELF)) {
                     ensureHome();
                     if (HOME.equals(parent)) {
