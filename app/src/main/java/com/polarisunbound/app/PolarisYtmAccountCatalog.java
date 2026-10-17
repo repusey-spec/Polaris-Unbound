@@ -21,8 +21,10 @@ import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
@@ -54,11 +56,13 @@ final class PolarisYtmAccountCatalog {
 
     static PolarisYtmAccountCatalog get(Context context){
         if(singleton==null)synchronized(PolarisYtmAccountCatalog.class){
-            if(singleton==null)singleton=new PolarisYtmAccountCatalog();
+            if(singleton==null)singleton=new PolarisYtmAccountCatalog(context.getApplicationContext());
         }
         return singleton;
     }
 
+    private final Context context;
+    private PolarisYtmAccountCatalog(Context context){this.context=context;}
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
     private final Handler main=new Handler(Looper.getMainLooper());
 
@@ -76,19 +80,24 @@ final class PolarisYtmAccountCatalog {
                 }else if(!PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent)){
                     throw new IllegalArgumentException("지원되지 않는 계정 보관함 위치");
                 }
-                Auth auth=authenticated();
+                Auth auth=authenticated(context);
                 JSONObject cfg=webConfig(auth.cookie);
                 String browseId=playlist==null?"FEmusic_liked_playlists":"VL"+playlist;
                 String continuation=null;
-                String previousContinuation=null;
+                Set<String> requestedContinuations=new HashSet<>();
                 Map<String,MediaBrowserCompat.MediaItem> collected=new LinkedHashMap<>();
                 for(int page=0;page<PAGE_LIMIT && collected.size()<MAX_RESULTS;page++){
                     JSONObject response=api(auth,cfg,browseId,continuation);
+                    JSONObject appContext=response.optJSONObject("responseContext");
+                    JSONObject webContext=appContext==null?null:
+                        appContext.optJSONObject("mainAppWebResponseContext");
+                    if(webContext!=null&&webContext.optBoolean("loggedOut",false))
+                        throw new Unauthorized();
                     collectEntries(response,playlist,collected);
                     String next=findContinuation(response,0,new int[]{0});
-                    if(next==null||next.isEmpty()||next.equals(continuation)||
-                        next.equals(previousContinuation))break;
-                    previousContinuation=continuation;
+                    if(next==null||next.isEmpty() ||
+                        next.equals(continuation) ||
+                        !requestedContinuations.add(next))break;
                     continuation=next;
                 }
                 result.addAll(collected.values());
@@ -124,14 +133,25 @@ final class PolarisYtmAccountCatalog {
     private static final class Auth {
         final String cookie;
         final String sapisid;
-        Auth(String cookie,String sapisid){this.cookie=cookie;this.sapisid=sapisid;}
+        final String authIndex;
+        final String pageId;
+        Auth(String cookie,String sapisid,String authIndex,String pageId){
+            this.cookie=cookie;
+            this.sapisid=sapisid;
+            this.authIndex=authIndex;
+            this.pageId=pageId;
+        }
     }
 
-    private static Auth authenticated() throws Exception {
+    private static Auth authenticated(Context context) throws Exception {
         String cookie=CookieManager.getInstance().getCookie(MUSIC_ORIGIN);
         String sapisid=secretFromCookie(cookie);
         if(sapisid==null)throw new AuthMissing();
-        return new Auth(cookie,sapisid);
+        // The official WebView's currently selected account, rather than the
+        // hard-coded "0" which could silently load another channel's library.
+        String selected=PolarisYtmAccountSelection.authIndex(context);
+        String pageId=PolarisYtmAccountSelection.pageId(context);
+        return new Auth(cookie,sapisid,selected,pageId);
     }
 
     private static String secretFromCookie(String cookie){
@@ -222,8 +242,11 @@ final class PolarisYtmAccountCatalog {
             .put("clientName","WEB_REMIX").put("clientVersion",version)
             .put("hl","ko").put("gl","KR");
         if(!visitor.isEmpty())client.put("visitorData",visitor);
-        JSONObject body=new JSONObject()
-            .put("context",new JSONObject().put("client",client));
+        JSONObject requestContext=new JSONObject().put("client",client);
+        // Brand channels can need BOTH X-Goog-PageId and onBehalfOfUser.
+        if(auth.pageId!=null)requestContext.put("user",
+            new JSONObject().put("onBehalfOfUser",auth.pageId));
+        JSONObject body=new JSONObject().put("context",requestContext);
         if(continuation!=null)body.put("continuation",continuation);
         else body.put("browseId",browseId);
 
@@ -242,7 +265,9 @@ final class PolarisYtmAccountCatalog {
             connection.setRequestProperty("Origin",MUSIC_ORIGIN);
             connection.setRequestProperty("Referer",MUSIC_ORIGIN+"/");
             connection.setRequestProperty("X-Goog-Api-Format-Version","1");
-            connection.setRequestProperty("X-Goog-AuthUser","0");
+            connection.setRequestProperty("X-Goog-AuthUser",auth.authIndex);
+            if(auth.pageId!=null)
+                connection.setRequestProperty("X-Goog-PageId",auth.pageId);
             connection.setRequestProperty("X-YouTube-Client-Name","67");
             connection.setRequestProperty("X-YouTube-Client-Version",version);
             if(!visitor.isEmpty())
