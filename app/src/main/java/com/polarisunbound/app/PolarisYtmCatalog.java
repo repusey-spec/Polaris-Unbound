@@ -50,6 +50,8 @@ final class PolarisYtmCatalog {
 
     static final String HOME = "ytm:home";
     static final String LIBRARY = "ytm:library";
+    static final String ACCOUNT_LIBRARY = "ytm:account:library";
+    static final String ACCOUNT_PLAYLIST = "ytm:account:playlist:";
     static final String SHELF = "ytm:shelf:";
     static final String PLAYLIST = "ytm:playlist:";
     static final String BROWSE = "ytm:browse:";
@@ -91,6 +93,11 @@ final class PolarisYtmCatalog {
     }
 
     void load(String parent, Callback callback) {
+        if (ACCOUNT_LIBRARY.equals(parent) ||
+                (parent!=null && parent.startsWith(ACCOUNT_PLAYLIST))) {
+            PolarisYtmAccountCatalog.get(context).load(parent,callback::done);
+            return;
+        }
         worker.execute(() -> {
             List<MediaBrowserCompat.MediaItem> items=Collections.emptyList();
             String error=null;
