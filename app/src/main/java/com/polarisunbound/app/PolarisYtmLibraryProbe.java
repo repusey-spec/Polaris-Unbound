@@ -37,6 +37,8 @@ final class PolarisYtmLibraryProbe {
     private int nextIndex=0;
     private int tested=0;
     private int accessible=0;
+    private final List<String> pendingFolders=new ArrayList<>();
+    private int nextFolder=0;
     private boolean finished=false;
     private int generation=0;
     private Runnable timeout;
@@ -120,6 +122,8 @@ final class PolarisYtmLibraryProbe {
 
     private void startNext(){
         closeBrowser();
+        pendingFolders.clear();
+        nextFolder=0;
         if(nextIndex>=candidates.size()||tested>=MAX_SERVICES){
             report.append("\nSUMMARY: connected=").append(accessible)
                 .append(" / probed=").append(tested).append("\n");
@@ -160,12 +164,15 @@ final class PolarisYtmLibraryProbe {
                                                 .append(clean(d.getTitle()))
                                                 .append(" | id=").append(clean(d.getMediaId()))
                                                 .append("\n");
+                                            if(child.isBrowsable()&&d.getMediaId()!=null&&
+                                                pendingFolders.size()<3)
+                                                pendingFolders.add(d.getMediaId());
                                         }
                                         if(children.size()>MAX_ITEMS)
                                             report.append("  +").append(children.size()-MAX_ITEMS)
                                                 .append(" more not printed\n");
                                     }
-                                    startNext();
+                                    probeNextFolder(id);
                                 }
                                 @Override public void onError(String parent){
                                     if(finished||id!=generation)return;
@@ -194,14 +201,55 @@ final class PolarisYtmLibraryProbe {
             browser.connect();
             timeout=()->{
                 if(finished||id!=generation)return;
-                report.append("TIMEOUT: no browse result after 8 seconds\n");
+                report.append("TIMEOUT: browse incomplete after 12 seconds\n");
                 startNext();
             };
-            handler.postDelayed(timeout,8000L);
+            handler.postDelayed(timeout,12000L);
         }catch(Exception e){
             report.append("CONNECT EXCEPTION ").append(e.getClass().getSimpleName())
                 .append(" ").append(e.getMessage()).append("\n");
             startNext();
+        }
+    }
+
+    private void probeNextFolder(int id){
+        if(finished||id!=generation)return;
+        if(nextFolder>=pendingFolders.size()){
+            startNext();
+            return;
+        }
+        final String folderId=pendingFolders.get(nextFolder++);
+        report.append("SUBSCRIBE child=").append(clean(folderId)).append("\n");
+        try{
+            browser.subscribe(folderId,new MediaBrowserCompat.SubscriptionCallback(){
+                @Override public void onChildrenLoaded(String parent,
+                        List<MediaBrowserCompat.MediaItem> children){
+                    if(finished||id!=generation)return;
+                    report.append("  child count=")
+                        .append(children==null?"null":children.size()).append("\n");
+                    if(children!=null){
+                        int shown=0;
+                        for(MediaBrowserCompat.MediaItem child:children){
+                            if(shown++>=8)break;
+                            MediaDescriptionCompat desc=child.getDescription();
+                            report.append("    ")
+                                .append(child.isBrowsable()?"[FOLDER] ":"[PLAY] ")
+                                .append(clean(desc.getTitle()))
+                                .append(" | id=").append(clean(desc.getMediaId())).append("\n");
+                        }
+                    }
+                    probeNextFolder(id);
+                }
+                @Override public void onError(String parent){
+                    if(finished||id!=generation)return;
+                    report.append("  child LOAD ERROR\n");
+                    probeNextFolder(id);
+                }
+            });
+        }catch(Exception e){
+            report.append("  subscribe exception ")
+                .append(e.getClass().getSimpleName()).append("\n");
+            probeNextFolder(id);
         }
     }
 
