@@ -278,8 +278,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     if(id!=null && (id.startsWith(PolarisYtmCatalog.PLAY) ||
                             id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST) ||
                             "ytm:openapp".equals(id))){
-                        enterYtmMode();
-                        openOriginalYtm(id);
+                        // Do not interrupt live radio/MP3 until Android accepts
+                        // the original YT Music activity launch request.
+                        if(openOriginalYtm(id)) enterYtmMode();
+                        else trace("YTM launch rejected; existing source preserved");
                         return;
                     }
                     if(ytmMode && id!=null && !id.startsWith("can:"))
@@ -581,41 +583,40 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
      * Opening an item is verified at source level; Android Auto/background
      * launch policy and autoplay MUST be tested in the actual car.
      */
-    private void openOriginalYtm(String id){
+    /**
+     * Best-effort ACTION_VIEW dispatch to the installed official YT Music.
+     * A successful startActivity() call does NOT prove actual autoplay, nor
+     * guarantee activity visibility from Android Auto on Android 10+.
+     *
+     * Return false only when we can prove dispatch failed, so an invalid
+     * browse item never stops the currently playing radio/NAS source.
+     */
+    private boolean openOriginalYtm(String id){
         try{
             Intent launch;
-            String uri=null;
-            if(id.startsWith(PolarisYtmCatalog.PLAY)){
-                String details=id.substring(PolarisYtmCatalog.PLAY.length());
-                String[] parts=details.split("\\?list=",2);
-                String videoId=Uri.decode(parts[0]);
-                if(!videoId.matches("[A-Za-z0-9_-]{6,20}"))return;
-                uri="https://music.youtube.com/watch?v="+Uri.encode(videoId);
-                if(parts.length==2){
-                    String playlist=Uri.decode(parts[1]);
-                    if(playlist.matches("[A-Za-z0-9_=-]{1,180}"))
-                        uri+="&list="+Uri.encode(playlist);
-                }
-            } else if(id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST)){
-                String playlist=Uri.decode(id.substring(
-                    PolarisYtmCatalog.OPEN_PLAYLIST.length()));
-                if(!playlist.matches("[A-Za-z0-9_=-]{1,180}"))return;
-                uri="https://music.youtube.com/playlist?list="+Uri.encode(playlist);
-            }
+            String uri=PolarisYtmDeepLink.urlFor(id);
             if(uri!=null){
                 launch=new Intent(Intent.ACTION_VIEW,Uri.parse(uri));
                 launch.setPackage(PolarisYtmBridge.SOURCE);
-            }else{
+            }else if("ytm:openapp".equals(id)){
                 launch=getPackageManager().getLaunchIntentForPackage(
                     PolarisYtmBridge.SOURCE);
-                if(launch==null){trace("YTM app not installed");return;}
+                if(launch==null){
+                    trace("YTM app not installed");
+                    return false;
+                }
+            }else{
+                trace("YTM invalid browse ID; original source unchanged");
+                return false;
             }
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(launch);
-            trace("YTM source URI dispatched "+id);
+            trace("YTM launch requested: "+id);
+            return true;
         }catch(Exception e){
             trace("YTM source URI failed: "+e.getClass().getSimpleName()+
                 " "+e.getMessage());
+            return false;
         }
     }
 
