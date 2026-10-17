@@ -34,11 +34,14 @@ jobs:
             diagnostics/jvm/PolarisYtmDeepLinkTest.java \
             app/src/main/java/com/polarisunbound/app/PolarisYtmSharedPlaylist.java \
             diagnostics/jvm/PolarisYtmSharedPlaylistTest.java \
-            diagnostics/jvm/PolarisYtmShareRoundTripTest.java
+            diagnostics/jvm/PolarisYtmShareRoundTripTest.java \
+            app/src/main/java/com/polarisunbound/app/PolarisYtmSessionIdClassifier.java \
+            diagnostics/jvm/PolarisYtmSessionIdClassifierTest.java
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmLabelParserTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmDeepLinkTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmSharedPlaylistTest
           java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmShareRoundTripTest
+          java -cp "$RUNNER_TEMP/ytm-jvm-tests" com.polarisunbound.app.PolarisYtmSessionIdClassifierTest
       - name: Build isolated Polaris + YTM integration test
         run: gradle :app:assembleDebug
       - name: Verify separate test APK identity, signature and installer
