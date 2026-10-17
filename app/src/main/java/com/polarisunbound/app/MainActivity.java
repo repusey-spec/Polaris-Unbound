@@ -47,6 +47,9 @@ public class MainActivity extends AppCompatActivity {
     private String ytmProbeReport="아직 진단하지 않았습니다.";
     private TextView ytmIdentityText;
     private String ytmIdentityReport="아직 원본 YT Music MediaSession의 ID를 검사하지 않았습니다.";
+    private TextView ytmSearchText;
+    private String ytmSearchReport="아직 공식 YT Music 세션으로 검색 재생을 요청하지 않았습니다.";
+    private boolean ytmSearchBusy=false;
     private PolarisYtmLibraryProbe ytmProbe;
     private TextView radioPlaybackButton;
     private LinearLayout tabsBar;
@@ -398,6 +401,7 @@ public class MainActivity extends AppCompatActivity {
         ytmNowText=null;
         ytmProbeText=null;
         ytmIdentityText=null;
+        ytmSearchText=null;
         if(!"radio".equals(currentPage)){
             TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         }
@@ -698,7 +702,8 @@ public class MainActivity extends AppCompatActivity {
         TextView explanation=new TextView(this);
         explanation.setText("YouTube Music에서 곡을 먼저 재생한 뒤 'YT Music 연결'을 누르세요. "
             +"연결 후 폰과 Android Auto에서 곡 정보·앨범아트·재생 버튼을 공유합니다. "
-            +"음성 곡명 검색은 이번 시험에 포함하지 않았습니다.");
+            +"Test 09는 별도 입력한 검색어를 원본 YT Music의 활성 세션에 전달하는 시험입니다. "
+            +"Google Assistant 직접 음성호출과 AA 화면 고정은 아직 확인하지 않았습니다.");
         explanation.setTextColor(0xDDFFFFFF);
         explanation.setTextSize(15);
         explanation.setPadding(0,8,0,14);
@@ -715,6 +720,79 @@ public class MainActivity extends AppCompatActivity {
         TextView connect=button("▶  YT Music 연결");
         connect.setOnClickListener(v->playId(PolarisYtmBridge.MEDIA_ID,"YT Music"));
         body.addView(connect);
+
+        TextView searchHeader=new TextView(this);
+        searchHeader.setText("Test 09 · 원본 YT Music 백그라운드 검색 재생");
+        searchHeader.setTextColor(Color.WHITE);
+        searchHeader.setTextSize(17);
+        searchHeader.setPadding(0,16,0,8);
+        body.addView(searchHeader);
+        EditText ytmSearchInput=new EditText(this);
+        ytmSearchInput.setSingleLine(true);
+        ytmSearchInput.setHint("예: James Morrison You Give Me Something");
+        ytmSearchInput.setTextColor(Color.WHITE);
+        ytmSearchInput.setHintTextColor(0xFFAAAAAA);
+        ytmSearchInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        body.addView(ytmSearchInput);
+        TextView ytmSearchSend=button("▶ 원본 YT Music 세션에 검색 재생 요청");
+        body.addView(ytmSearchSend);
+        ytmSearchText=new TextView(this);
+        ytmSearchText.setText(ytmSearchReport);
+        ytmSearchText.setTextSize(13);
+        ytmSearchText.setTextColor(0xDDFFFFFF);
+        ytmSearchText.setTextIsSelectable(true);
+        ytmSearchText.setPadding(0,8,0,14);
+        final TextView searchReportView=ytmSearchText;
+        body.addView(searchReportView);
+        ytmSearchSend.setEnabled(!ytmSearchBusy);
+        ytmSearchSend.setOnClickListener(v->{
+            if(ytmSearchBusy)return;
+            String query=PolarisYtmSearchQuery.normalize(
+                ytmSearchInput.getText().toString());
+            if(query==null){
+                Toast.makeText(this,"검색어는 1~120자이며 제어 문자를 포함할 수 없습니다",
+                    Toast.LENGTH_LONG).show();
+                return;
+            }
+            ytmSearchBusy=true;
+            ytmSearchSend.setEnabled(false);
+            searchReportView.setText("공식 YT Music 활성 세션에 검색 재생을 요청하고 "+
+                "약 5초간 상태 변화를 확인합니다. YT Music 화면을 직접 열지 않습니다.");
+            ytmIdentityExecutor.execute(()->{
+                PolarisYtmSearchCommandProbe.DispatchResult dispatch=
+                    PolarisYtmSearchCommandProbe.dispatch(
+                        getApplicationContext(),query);
+                String after2="",after5="";
+                if(dispatch.submitted){
+                    try{
+                        Thread.sleep(1800L);
+                        after2=PolarisYtmSearchCommandProbe.inspect(
+                            getApplicationContext());
+                        Thread.sleep(2800L);
+                        after5=PolarisYtmSearchCommandProbe.inspect(
+                            getApplicationContext());
+                    }catch(InterruptedException interrupted){
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                final String report=dispatch.message+
+                    (dispatch.submitted?"\\n약 2초 후: "+after2+
+                        "\\n약 5초 후: "+after5+
+                        "\\n※ 세션의 곡·상태 갱신은 간접 증거이며 "+
+                        "AA 화면 유지와 Assistant 음성호출은 별도 검증이 필요합니다.":"");
+                runOnUiThread(()->{
+                    ytmSearchBusy=false;
+                    ytmSearchReport=report;
+                    if(!isFinishing()&&!isDestroyed() &&
+                        ytmSearchText==searchReportView){
+                        searchReportView.setText(report);
+                        ytmSearchSend.setEnabled(true);
+                    }
+                });
+            });
+        });
+
         TextView launch=button("YouTube Music 앱 열기");
         launch.setOnClickListener(v->{
             try{
