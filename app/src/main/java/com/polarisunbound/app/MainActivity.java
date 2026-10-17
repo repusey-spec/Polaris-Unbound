@@ -93,6 +93,8 @@ public class MainActivity extends AppCompatActivity {
     private int currentFtpMp3Offset=0;
     private boolean returnToFavoritesFromPlayer=false;
     private boolean returnToSavedFromPlayer=false;
+    private String currentYtmAccountBrowseParent=PolarisYtmCatalog.ACCOUNT_LIBRARY;
+    private static final int REQUEST_YTM_LOGIN=9311;
     private void choosePreset(int slot){
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle((slot+1)+"번 프리셋 변경 (기존 위치와 교환)")
@@ -420,7 +422,8 @@ public class MainActivity extends AppCompatActivity {
             body.addView(radioPlaybackButton,controlLp);
             updateRadioPlaybackButton(lastPlaybackState);
             updateRadioScheduleFromMetadata();
-        }else if("mp3".equals(currentPage)||"can".equals(currentPage)){
+        }else if("mp3".equals(currentPage)||"can".equals(currentPage)||
+                 "ytm".equals(currentPage)){
             status=null;
         }else{
             status=new TextView(this);
@@ -2816,7 +2819,21 @@ public class MainActivity extends AppCompatActivity {
             });
         });
     }
+    @Override protected void onActivityResult(
+            int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==REQUEST_YTM_LOGIN&&resultCode==RESULT_OK)
+            showYtm();
+    }
+
     @Override public void onBackPressed(){
+        if("ytm".equals(currentPage) &&
+            currentYtmAccountBrowseParent!=null &&
+            currentYtmAccountBrowseParent.startsWith(
+                PolarisYtmCatalog.ACCOUNT_PLAYLIST)){
+            showYtm();
+            return;
+        }
         if("mp3_now".equals(currentPage)){
             returnFromNowPlaying();
             return;
