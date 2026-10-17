@@ -870,7 +870,8 @@ public class MainActivity extends AppCompatActivity {
                 empty.setText(parent.startsWith(PolarisYtmCatalog.CAPTURED)
                     ? "원본 앱 화면에서 이름만 확인했습니다. 재생목록 ID는 미확인입니다."
                     : PolarisYtmCatalog.LIBRARY.equals(parent)
-                        ? "아직 수집된 보관함 항목이 없습니다. 원본 YT Music 보관함을 열고 돌아오세요."
+                        ? "보관함 수집 결과 0개. "+PolarisYtmSnapshot.diagnostics(this)+
+                          "\n원본 YT Music 보관함을 실제로 표시한 뒤 다시 조회하세요."
                         : "서버에서 반환된 탐색 가능한 항목이 없습니다.");
                 empty.setTextColor(0xDDFFFFFF);
                 empty.setPadding(4,14,4,14);
