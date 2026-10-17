@@ -92,6 +92,10 @@ final class PolarisYtmAccountCatalog {
                     continuation=next;
                 }
                 result.addAll(collected.values());
+                if(result.isEmpty())
+                    error="로그인은 확인됐지만 실제 "+(playlist==null?
+                        "플레이리스트":"곡")+" 항목을 읽지 못했습니다. "+
+                        "계정 선택 또는 응답 형식이 일치하지 않을 수 있습니다.";
             }catch(Exception ex){
                 // Do not surface exception messages; those might include
                 // request URLs/headers if a platform implementation changes.
@@ -205,6 +209,12 @@ final class PolarisYtmAccountCatalog {
             defaultVersion());
     }
 
+    private static String selectedAccountIndex(JSONObject cfg){
+        Object raw=cfg.opt("SESSION_INDEX");
+        String index=raw==null?"0":String.valueOf(raw);
+        return index.matches("[0-9]{1,2}")?index:"0";
+    }
+
     private static JSONObject api(Auth auth,JSONObject cfg,String browseId,
                                    String continuation) throws Exception {
         JSONObject clientCfg=path(cfg,"INNERTUBE_CONTEXT","client");
@@ -242,7 +252,11 @@ final class PolarisYtmAccountCatalog {
             connection.setRequestProperty("Origin",MUSIC_ORIGIN);
             connection.setRequestProperty("Referer",MUSIC_ORIGIN+"/");
             connection.setRequestProperty("X-Goog-Api-Format-Version","1");
-            connection.setRequestProperty("X-Goog-AuthUser","0");
+            connection.setRequestProperty("X-Goog-AuthUser",
+                selectedAccountIndex(cfg));
+            String delegated=cfg.optString("DELEGATED_SESSION_ID","");
+            if(delegated.matches("[A-Za-z0-9_-]{8,180}"))
+                connection.setRequestProperty("X-Goog-PageId",delegated);
             connection.setRequestProperty("X-YouTube-Client-Name","67");
             connection.setRequestProperty("X-YouTube-Client-Version",version);
             if(!visitor.isEmpty())
@@ -308,7 +322,16 @@ final class PolarisYtmAccountCatalog {
         if(row==null)return;
         JSONObject nav=row.optJSONObject("navigationEndpoint");
         String browse=nav==null?"":str(path(nav,"browseEndpoint"),"browseId");
-        // Only playlist browse IDs, not artist/album/category shelves.
+        if(!browse.startsWith("VL")){
+            JSONArray flex=row.optJSONArray("flexColumns");
+            browse=str(path(flex==null?null:flex.optJSONObject(0),
+                "musicResponsiveListItemFlexColumnRenderer","text",
+                "runs"),"browseId");
+        }
+        if(!browse.startsWith("VL")){
+            browse=findBrowseId(row,0,new int[]{0});
+        }
+        // Only real playlist browse IDs; do not invent placeholder titles.
         if(!browse.startsWith("VL"))return;
         String id=PolarisYtmAccountIds.playlist(browse);
         if(id==null||id.equals("LM")||id.equals("SE"))return;
@@ -384,6 +407,28 @@ final class PolarisYtmAccountCatalog {
             return out.toString().trim();
         }
         return obj.optString("simpleText","").trim();
+    }
+
+    private static String findBrowseId(Object value,int depth,int[] seen){
+        if(value==null||depth>15||seen[0]++>9000)return "";
+        if(value instanceof JSONArray){
+            JSONArray a=(JSONArray)value;
+            for(int i=0;i<a.length()&&i<100;i++){
+                String id=findBrowseId(a.opt(i),depth+1,seen);
+                if(id.startsWith("VL"))return id;
+            }
+            return "";
+        }
+        if(!(value instanceof JSONObject))return "";
+        JSONObject obj=(JSONObject)value;
+        String direct=str(obj.optJSONObject("browseEndpoint"),"browseId");
+        if(direct.startsWith("VL"))return direct;
+        JSONArray keys=obj.names();
+        if(keys!=null)for(int i=0;i<keys.length()&&i<60;i++){
+            String id=findBrowseId(obj.opt(keys.optString(i)),depth+1,seen);
+            if(id.startsWith("VL"))return id;
+        }
+        return "";
     }
 
     private static String findContinuation(Object value,int depth,int[] seen){
