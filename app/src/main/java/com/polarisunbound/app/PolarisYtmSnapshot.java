@@ -106,7 +106,9 @@ final class PolarisYtmSnapshot {
                 JSONObject row=arr.optJSONObject(i);
                 if(row==null)continue;
                 String title=row.optString("title","");
-                if(title.trim().isEmpty())continue;
+                // Old Test05 snapshots can contain UI controls. Never retain
+                // them just because they were cached before the parser fix.
+                if(!PolarisYtmLabelParser.validCapturedTitle(title))continue;
                 entries.add(new Entry(title,row.optString("subtitle",""),
                     row.optString("kind","")));
             }
