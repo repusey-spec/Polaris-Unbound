@@ -45,6 +45,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView ytmNowText;
     private TextView ytmProbeText;
     private String ytmProbeReport="아직 진단하지 않았습니다.";
+    private TextView ytmIdentityText;
+    private String ytmIdentityReport="아직 원본 YT Music MediaSession의 ID를 검사하지 않았습니다.";
     private PolarisYtmLibraryProbe ytmProbe;
     private TextView radioPlaybackButton;
     private LinearLayout tabsBar;
@@ -81,6 +83,7 @@ public class MainActivity extends AppCompatActivity {
     private final Handler scheduleHandler=new Handler(Looper.getMainLooper());
     private final ExecutorService scheduleExecutor=Executors.newSingleThreadExecutor();
     private final ExecutorService ftpExecutor=Executors.newSingleThreadExecutor();
+    private final ExecutorService ytmIdentityExecutor=Executors.newSingleThreadExecutor();
     private String selectedRadioId=null;
     private String currentPage="home";
     private String currentFtpMp3Path="";
@@ -394,6 +397,7 @@ public class MainActivity extends AppCompatActivity {
         radioPlaybackButton=null;
         ytmNowText=null;
         ytmProbeText=null;
+        ytmIdentityText=null;
         if(!"radio".equals(currentPage)){
             TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         }
@@ -732,6 +736,32 @@ public class MainActivity extends AppCompatActivity {
         ytmLibrary.setOnClickListener(v->showYtmBrowse(
             PolarisYtmCatalog.LIBRARY,"YT Music 보관함"));
         body.addView(ytmLibrary);
+
+        // Does NOT require any extra account/login permission: only reads
+        // already authorized official YTM MediaSession, when playing.
+        TextView identityProbe=button("원본 YT Music 재생목록 ID 자동 노출 진단");
+        body.addView(identityProbe);
+        ytmIdentityText=new TextView(this);
+        ytmIdentityText.setText(ytmIdentityReport);
+        ytmIdentityText.setTextColor(0xDDFFFFFF);
+        ytmIdentityText.setTextSize(13);
+        ytmIdentityText.setPadding(0,8,0,14);
+        ytmIdentityText.setTextIsSelectable(true);
+        final TextView identityOutput=ytmIdentityText;
+        body.addView(identityOutput);
+        identityProbe.setOnClickListener(v->{
+            identityOutput.setText("원본 YT Music의 공개 MediaSession 정보를 읽는 중…");
+            ytmIdentityExecutor.execute(()->{
+                String report=PolarisYtmSessionIdentityProbe.inspect(
+                    getApplicationContext());
+                runOnUiThread(()->{
+                    ytmIdentityReport=report;
+                    if(!isFinishing() && !isDestroyed() &&
+                        ytmIdentityText==identityOutput)
+                        identityOutput.setText(report);
+                });
+            });
+        });
 
         TextView sharedLink=button("재생목록 공유 링크 연결 · 시험");
         sharedLink.setOnClickListener(v->promptYtmShareLink());
@@ -2991,6 +3021,7 @@ public class MainActivity extends AppCompatActivity {
         scheduleHandler.removeCallbacksAndMessages(null);
         scheduleExecutor.shutdownNow();
         ftpExecutor.shutdownNow();
+        ytmIdentityExecutor.shutdownNow();
         if(browser!=null && browser.isConnected()) browser.disconnect(); super.onDestroy();
     }
 }
