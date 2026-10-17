@@ -918,11 +918,11 @@ public class MainActivity extends AppCompatActivity {
         }
         ArrayList<String> choices=new ArrayList<>(names);
         choices.add("＋ 직접 재생목록 이름 입력");
+        // AlertDialog's setMessage() and setItems() share the content slot:
+        // setting both shows the message and hides the selectable list.
+        // Test06 captured this exact failure on a real Galaxy phone.
         new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("공유된 재생목록 연결")
-            .setMessage("실제 공유 링크의 list ID를 확보했습니다. "+
-                "연결할 보관함 제목을 직접 선택하세요. "+
-                "목록에 없다면 마지막 항목에서 이름을 입력할 수 있습니다.")
+            .setTitle("공유 링크 확인됨 · 재생목록 선택")
             .setItems(choices.toArray(new String[0]),(d,which)->{
                 if(which==choices.size()-1)
                     promptYtmShareTitle(playlistId);
