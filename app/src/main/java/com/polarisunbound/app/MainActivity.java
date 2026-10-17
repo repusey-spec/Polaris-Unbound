@@ -53,6 +53,11 @@ public class MainActivity extends AppCompatActivity {
     private PolarisYtmLibraryProbe ytmProbe;
     private TextView radioPlaybackButton;
     private LinearLayout tabsBar;
+    private LinearLayout bottomSourceBar;
+    private LinearLayout sourceSubBar;
+    private HorizontalScrollView subNavScroll;
+    private String nasNav="home";
+    private String ytmNav="home";
     private FrameLayout pageHost;
     private TextView scheduleView;
     private LinearLayout miniPlayer;
@@ -364,36 +369,92 @@ public class MainActivity extends AppCompatActivity {
         tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
         root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
         pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
+        // Per-source navigation lives below content, never inside the top source index.
+        subNavScroll=new HorizontalScrollView(this);
+        subNavScroll.setHorizontalScrollBarEnabled(false);
+        subNavScroll.setFillViewport(false);
+        subNavScroll.setBackgroundColor(0xE620242C);
+        sourceSubBar=new LinearLayout(this);
+        sourceSubBar.setOrientation(LinearLayout.HORIZONTAL);
+        sourceSubBar.setPadding(dp(8),dp(5),dp(8),dp(5));
+        subNavScroll.addView(sourceSubBar,new HorizontalScrollView.LayoutParams(-2,-2));
+        root.addView(subNavScroll,new LinearLayout.LayoutParams(-1,-2));
+
         miniPlayer=buildMiniPlayer();
         miniPlayer.setVisibility(View.GONE);
         LinearLayout.LayoutParams miniLp=new LinearLayout.LayoutParams(-1,-2);
         miniLp.setMargins(dp(12),dp(4),dp(12),dp(8));
         root.addView(miniPlayer,miniLp);
+
+        // Persistent lower source index; independent of the upper Radio/CAN tabs.
+        bottomSourceBar=new LinearLayout(this);
+        bottomSourceBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomSourceBar.setPadding(dp(12),dp(5),dp(12),dp(8));
+        bottomSourceBar.setBackgroundColor(0xE620242C);
+        root.addView(bottomSourceBar,new LinearLayout.LayoutParams(-1,-2));
         shell.addView(root,new FrameLayout.LayoutParams(-1,-1));
         setContentView(shell);
     }
 
-    private void addTab(TextView v){
+    private void addSourceTab(LinearLayout bar,String label,boolean selected,Runnable action){
+        TextView item=tab(label,selected);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
-        lp.setMargins(6,0,6,0); tabsBar.addView(v,lp);
+        lp.setMargins(dp(4),0,dp(4),0);
+        bar.addView(item,lp);
+        item.setOnClickListener(v->action.run());
+    }
+
+    private void addSectionTab(String label,boolean selected,Runnable action){
+        TextView item=tab(label,selected);
+        item.setTextSize(13);
+        item.setPadding(dp(12),dp(11),dp(12),dp(11));
+        item.setMinWidth(dp(92));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,-2);
+        lp.setMargins(dp(3),0,dp(3),0);
+        sourceSubBar.addView(item,lp);
+        item.setOnClickListener(v->action.run());
     }
 
     private void refreshTabs(){
         tabsBar.removeAllViews();
-        TextView t1=tab("라디오","radio".equals(currentPage));
-        TextView t2=tab("YT NAS MUSIC","mp3".equals(currentPage));
-        TextView t3=tab("YT Music","ytm".equals(currentPage));
-        TextView t4=tab("CAN","can".equals(currentPage));
-        addTab(t1); addTab(t2); addTab(t3); addTab(t4);
-        t1.setOnClickListener(v->showDomestic());
-        t2.setOnClickListener(v->showMp3());
-        t3.setOnClickListener(v->showYtm());
-        t4.setOnClickListener(v->showCan());
+        bottomSourceBar.removeAllViews();
+        sourceSubBar.removeAllViews();
+        final boolean nas="mp3".equals(currentPage)||"mp3_now".equals(currentPage);
+        final boolean ytm="ytm".equals(currentPage);
+
+        // Upper index: only Radio and CAN.
+        addSourceTab(tabsBar,"라디오","radio".equals(currentPage),this::showDomestic);
+        addSourceTab(tabsBar,"CAN","can".equals(currentPage),this::showCan);
+
+        // Lower index: the two independent music libraries.
+        addSourceTab(bottomSourceBar,"YT NAS MUSIC",nas,this::showMp3);
+        addSourceTab(bottomSourceBar,"YT Music",ytm,this::showYtm);
+
+        subNavScroll.setVisibility(nas||ytm?View.VISIBLE:View.GONE);
+        if(nas){
+            addSectionTab("홈","home".equals(nasNav),this::showMp3);
+            addSectionTab("좋아요","favorites".equals(nasNav),this::showMp3Favorites);
+            addSectionTab("전체 곡","all".equals(nasNav),()->
+                showMp3Tracks("전체 곡",null,null,
+                    MediaStore.Audio.Media.TITLE+" COLLATE NOCASE ASC"));
+            addSectionTab("FTP","ftp".equals(nasNav),this::showMp3Ftp);
+            addSectionTab("저장곡","saved".equals(nasNav),this::showNasSavedSongs);
+            addSectionTab("앨범","albums".equals(nasNav),this::showMp3Albums);
+        }else if(ytm){
+            addSectionTab("홈","home".equals(ytmNav),this::showYtm);
+            addSectionTab("내 플레이리스트","playlists".equals(ytmNav),()->
+                showYtmBrowse(PolarisYtmCatalog.ACCOUNT_LIBRARY,"내 플레이리스트"));
+            addSectionTab("추천","recommend".equals(ytmNav),()->
+                showYtmBrowse(PolarisYtmCatalog.HOME,"YT Music 공개 추천"));
+            addSectionTab("화면 보관함","captured".equals(ytmNav),()->
+                showYtmBrowse(PolarisYtmCatalog.LIBRARY,"YT Music 화면에서 수집한 항목"));
+        }
     }
 
     private void base(String title){
         ensureShell();
         tabsBar.setVisibility(View.VISIBLE);
+        bottomSourceBar.setVisibility(View.VISIBLE);
         refreshTabs();
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
@@ -697,6 +758,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showYtm(){
+        ytmNav="home";
         currentPage="ytm";
         base("YT Music · 내 플레이리스트");
 
@@ -887,6 +949,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showYtmBrowse(String parent,String heading){
+        if(PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent) ||
+           parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST))
+            ytmNav="playlists";
+        else if(PolarisYtmCatalog.HOME.equals(parent) ||
+                parent.startsWith(PolarisYtmCatalog.SHELF))
+            ytmNav="recommend";
+        else if(PolarisYtmCatalog.LIBRARY.equals(parent) ||
+                parent.startsWith(PolarisYtmCatalog.CAPTURED))
+            ytmNav="captured";
         currentPage="ytm";
         base(heading);
         final LinearLayout pageBody=body;
@@ -1516,6 +1587,8 @@ public class MainActivity extends AppCompatActivity {
         ensureShell();
         currentPage="mp3_now";
         tabsBar.setVisibility(View.GONE);
+        subNavScroll.setVisibility(View.GONE);
+        bottomSourceBar.setVisibility(View.GONE);
         miniPlayer.setVisibility(View.GONE);
         pageHost.removeAllViews();
 
@@ -1850,6 +1923,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Show the persistent NAS manifest, independently of network/FTP state. */
     private void showNasSavedSongs(){
+        nasNav="saved";
         selectedRadioId=null;
         currentPage="mp3";
         base("NAS MUSIC · 저장된 곡");
@@ -1894,6 +1968,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMp3FtpDirectory(String relativePath,int offset){
+        nasNav="ftp";
         final String rel=relativePath==null?"":relativePath;
         final int pageOffset=Math.max(0,offset);
         currentFtpMp3Path=rel;
@@ -2205,6 +2280,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMp3(){
+        nasNav="home";
         selectedRadioId=null;
         scheduleHandler.removeCallbacksAndMessages(null);
         currentPage="mp3"; base("NAS MUSIC");
@@ -2470,6 +2546,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMp3Albums(){
+        nasNav="albums";
         currentPage="mp3"; base("앨범"); addMp3Back();
         String[] p={MediaStore.Audio.Albums._ID,MediaStore.Audio.Albums.ALBUM,MediaStore.Audio.Albums.ARTIST,MediaStore.Audio.Albums.NUMBER_OF_SONGS};
         try(Cursor c=getContentResolver().query(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,p,null,null,MediaStore.Audio.Albums.ALBUM+" COLLATE NOCASE ASC")){
@@ -2557,6 +2634,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMp3Tracks(String title,String extraSelection,String[] args,String sort){
+        if("전체 곡".equals(title)) nasNav="all";
         currentPage="mp3"; base(title); addMp3Back();
         addMp3TracksToBody(extraSelection,args,sort);
     }
@@ -2705,6 +2783,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMp3Favorites(){
+        nasNav="favorites";
         currentPage="mp3";
         base("좋아요");
         addMp3Back();
