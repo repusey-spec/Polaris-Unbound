@@ -2855,7 +2855,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 parent.startsWith(PolarisYtmCatalog.SHELF) ||
                 parent.startsWith(PolarisYtmCatalog.PLAYLIST) ||
                 parent.startsWith(PolarisYtmCatalog.BROWSE) ||
-                parent.startsWith(PolarisYtmCatalog.CAPTURED))){
+                parent.startsWith(PolarisYtmCatalog.CAPTURED) ||
+                PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent) ||
+                parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST))){
             result.detach();
             PolarisYtmCatalog.get(this).load(parent,(children,error)->{
                 if(error!=null)trace("YTM catalog "+parent+" "+error);
@@ -2877,6 +2879,8 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         } else if(parent.equals("ytm")){
             // Hush/Metrolist-inspired browse layout, populated ONLY with
             // real public YTM server results or user-approved visible UI labels.
+            x.add(folder(PolarisYtmCatalog.ACCOUNT_LIBRARY,
+                "내 플레이리스트 · Polaris 로그인 필요"));
             x.add(folder(PolarisYtmCatalog.HOME,"홈 · YT Music 공개 추천"));
             x.add(folder(PolarisYtmCatalog.LIBRARY,"보관함 · 실제 화면에서 읽은 항목"));
             // The original live YTM track is still mirrored as before.
