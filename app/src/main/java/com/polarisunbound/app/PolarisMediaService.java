@@ -2,6 +2,8 @@ package com.polarisunbound.app;
 
 import android.os.Bundle;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.media.AudioManager;
@@ -54,6 +56,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         i.putExtra("step",step);
         sendBroadcast(i);
     }
+    // Notify an active Android Auto browser after a genuine library capture
+    // or an explicit user-confirmed playlist-share link update.
+    private static final String ACTION_YTM_LIBRARY_CHANGED =
+        "com.polarisunbound.app.YTM_SNAPSHOT_UPDATED";
+    private boolean ytmLibraryReceiverRegistered = false;
+    private final BroadcastReceiver ytmLibraryReceiver = new BroadcastReceiver(){
+        @Override public void onReceive(Context ctx,Intent intent){
+            if(intent==null || !ACTION_YTM_LIBRARY_CHANGED.equals(intent.getAction()))
+                return;
+            notifyChildrenChanged(PolarisYtmCatalog.LIBRARY);
+            String changed=intent.getStringExtra("changed_title");
+            if(changed!=null && !changed.trim().isEmpty() &&
+                changed.length()<=150)
+                notifyChildrenChanged(PolarisYtmCatalog.CAPTURED+
+                    Uri.encode("playlist|"+changed));
+        }
+    };
     private MediaSessionCompat session;
     private PolarisYtmBridge ytmBridge;
     private boolean ytmMode=false;
@@ -212,6 +231,17 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
     @Override public void onCreate(){
         super.onCreate();
+        try{
+            IntentFilter filter=new IntentFilter(ACTION_YTM_LIBRARY_CHANGED);
+            if(Build.VERSION.SDK_INT>=33)
+                registerReceiver(ytmLibraryReceiver,filter,Context.RECEIVER_NOT_EXPORTED);
+            else
+                registerReceiver(ytmLibraryReceiver,filter);
+            ytmLibraryReceiverRegistered=true;
+        }catch(Exception e){
+            trace("YTM browse refresh receiver unavailable: "+
+                e.getClass().getSimpleName());
+        }
         getSharedPreferences("radio_presets",MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(radioPresetListener);
         ensurePlaybackChannel();
@@ -2956,6 +2986,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onDestroy(){
+        if(ytmLibraryReceiverRegistered){
+            try{unregisterReceiver(ytmLibraryReceiver);}catch(Exception ignored){}
+            ytmLibraryReceiverRegistered=false;
+        }
         if(ytmBridge!=null)ytmBridge.stop();
         getSharedPreferences("radio_presets",MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(radioPresetListener);
