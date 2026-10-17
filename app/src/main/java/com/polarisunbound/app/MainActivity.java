@@ -5,6 +5,7 @@ import android.content.*;
 import android.content.ContentUris;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.speech.RecognizerIntent;
