@@ -835,16 +835,65 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Compact controls are specific to the new account library view. */
+    private TextView ytmCompactAction(String title){
+        TextView view=new TextView(this);
+        view.setText(title);
+        view.setTextSize(15);
+        view.setTextColor(Color.WHITE);
+        view.setGravity(android.view.Gravity.CENTER);
+        view.setPadding(dp(12),dp(12),dp(12),dp(12));
+        GradientDrawable bg=new GradientDrawable();
+        bg.setColor(0xE628303C);
+        bg.setCornerRadius(dp(9));
+        bg.setStroke(dp(1),0x55FFFFFF);
+        view.setBackground(bg);
+        return view;
+    }
+
+    private TextView ytmCompactListRow(String title,CharSequence subtitle){
+        TextView row=new TextView(this);
+        row.setText(title+(subtitle==null||subtitle.length()==0?
+            "":"\n"+subtitle));
+        row.setTextSize(16);
+        row.setTextColor(Color.WHITE);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14),dp(12),dp(14),dp(12));
+        GradientDrawable bg=new GradientDrawable();
+        bg.setColor(0xD82C3038);
+        bg.setCornerRadius(dp(9));
+        row.setBackground(bg);
+        return row;
+    }
+
     private void showYtmBrowse(String parent,String heading){
         currentPage="ytm";
+        currentYtmAccountBrowseParent=parent;
+        final boolean accountRoot=PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent);
+        final boolean accountBrowse=accountRoot||
+            parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST);
         base(heading);
         final LinearLayout pageBody=body;
-        TextView back=button("← YT Music");
-        back.setOnClickListener(v->showYtm());
-        body.addView(back);
-        TextView reload=button("↻ 이 목록 다시 조회");
+        LinearLayout actions=new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        TextView back=ytmCompactAction(accountRoot?
+            (PolarisYtmAccountCatalog.hasLoginCookie()?"계정 관리":"계정 연결"):
+            "← 플레이리스트");
+        back.setOnClickListener(v->{
+            if(accountRoot){
+                startActivityForResult(new Intent(this,PolarisYtmLoginActivity.class),
+                    REQUEST_YTM_LOGIN);
+            }else showYtm();
+        });
+        TextView reload=ytmCompactAction("↻ 새로고침");
         reload.setOnClickListener(v->showYtmBrowse(parent,heading));
-        body.addView(reload);
+        LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,dp(46),1);
+        left.setMargins(0,0,dp(5),0);
+        LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,dp(46),1);
+        right.setMargins(dp(5),0,0,0);
+        actions.addView(back,left);
+        actions.addView(reload,right);
+        body.addView(actions);
         if(parent.startsWith(PolarisYtmCatalog.CAPTURED)){
             String named=Uri.decode(parent.substring(PolarisYtmCatalog.CAPTURED.length()));
             if(named.startsWith("playlist|")){
@@ -865,18 +914,33 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         TextView loading=new TextView(this);
-        loading.setText("원본 데이터 조회 중…");
+        loading.setText(accountBrowse?"내 YT Music 데이터 조회 중…":
+            "원본 데이터 조회 중…");
         loading.setTextColor(0xFFCCCCCC);
         loading.setTextSize(15);
         body.addView(loading);
         final LinearLayout listing=new LinearLayout(this);
         listing.setOrientation(LinearLayout.VERTICAL);
         body.addView(listing);
+        if(accountBrowse&&!PolarisYtmAccountCatalog.hasLoginCookie()){
+            loading.setText("YT Music 계정 연결이 필요합니다.");
+            return;
+        }
+        if(accountBrowse&&!PolarisYtmAccountSelection.hasSavedSelection(this)){
+            loading.setText("기존 웹 로그인은 유지됐지만 계정·채널 정보를 아직 읽지 못했습니다. "+
+                "위 ‘계정 관리’를 열어 ‘내 플레이리스트로 이동’을 한 번 눌러주세요.");
+            return;
+        }
         PolarisYtmCatalog.get(this).load(parent,(children,error)->{
             if(body!=pageBody || !"ytm".equals(currentPage))return;
             loading.setText(error!=null?
                 "YT Music 조회 실패: "+error:
-                "실제 항목 "+children.size()+"개");
+                (accountBrowse?
+                    (accountRoot?"재생목록 ":"곡 ")+children.size()+"개"+
+                    (accountRoot?" · 로그인 계정 "+PolarisYtmAccountSelection.authIndex(this)+
+                        (PolarisYtmAccountSelection.pageId(this)==null?
+                            " · 채널 ID 없음":" · 채널 ID 확인"):""):
+                    "실제 항목 "+children.size()+"개"));
             listing.removeAllViews();
             if(children.isEmpty() && error==null){
                 TextView empty=new TextView(this);
@@ -895,9 +959,11 @@ public class MainActivity extends AppCompatActivity {
                 final String title=item.getDescription().getTitle()==null?"(제목 없음)":
                     item.getDescription().getTitle().toString();
                 final CharSequence sub=item.getDescription().getSubtitle();
-                TextView control=button((item.isBrowsable()?"▸ ":"▶ ")+title+
-                    (sub==null?"":"\n"+sub));
-                listing.addView(control);
+                TextView control=ytmCompactListRow(
+                    (item.isBrowsable()?"▸ ":"▶ ")+title,sub);
+                LinearLayout.LayoutParams rowLp=new LinearLayout.LayoutParams(-1,-2);
+                rowLp.setMargins(0,dp(4),0,dp(4));
+                listing.addView(control,rowLp);
                 if(item.isBrowsable())
                     control.setOnClickListener(v->showYtmBrowse(id,title));
                 else
