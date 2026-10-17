@@ -8,8 +8,8 @@ android {
         applicationId = "com.polarisunbound.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 58
-        versionName = "0.58"
+        versionCode = 5909
+        versionName = "0.58-ytm-background-search-test.9"
     }
 
     signingConfigs {
@@ -23,6 +23,7 @@ android {
 
     buildTypes {
         getByName("debug") {
+            applicationIdSuffix = ".test"
             signingConfig = signingConfigs.getByName("stableDebug")
         }
     }
