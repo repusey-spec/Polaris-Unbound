@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ytm_accessibility_description">YT Music가 전면에 표시될 때 화면에 보이는 재생목록과 앨범 이름만 읽어 Polaris 시험판에 표시합니다. 재생목록 ID·로그인 쿠키는 읽지 않으며 자동 터치나 자동 스크롤도 하지 않습니다.</string>
+</resources>
