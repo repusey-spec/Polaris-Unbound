@@ -16,6 +16,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.TimeZone;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,6 +66,13 @@ final class PolarisYtmCatalog {
     private final Map<String,CacheEntry> cache = new LinkedHashMap<>();
     private List<Section> homeSections = Collections.emptyList();
     private long homeAt = 0;
+    private long bootstrapAt = 0;
+    private String visitorData = "";
+    private String apiKey = "";
+    private String clientVersion = "";
+    private String bootstrapStatus = "not attempted";
+    private static final String WEB_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0";
 
     private PolarisYtmCatalog(Context context) { this.context = context; }
     private static final class Section {
@@ -138,63 +148,184 @@ final class PolarisYtmCatalog {
         if (!homeSections.isEmpty() && System.currentTimeMillis()-homeAt<CACHE_MS)
             return;
         JSONObject response=request("FEmusic_home");
-        JSONObject sectionList=path(response,"contents",
-            "singleColumnBrowseResultsRenderer","tabs");
-        JSONArray tabs=sectionList==null?null:sectionList.optJSONArray("items");
-        // tabs is a JSON array, not an object. Handle YouTube's standard renderer.
-        JSONArray standardTabs=pathArray(response,"contents",
-            "singleColumnBrowseResultsRenderer","tabs");
-        JSONObject first=at(standardTabs,0);
-        JSONObject section=path(first,"tabRenderer","content","sectionListRenderer");
+        JSONObject section=findHomeSectionList(response);
         JSONArray contents=section==null?null:section.optJSONArray("contents");
         List<Section> fresh=new ArrayList<>();
-        if (contents!=null) for(int i=0;i<contents.length() && fresh.size()<24;i++) {
-            JSONObject shelf=object(contents.opt(i));
-            JSONObject renderer=shelf==null?null:shelf.optJSONObject("musicCarouselShelfRenderer");
-            if(renderer==null)continue;
-            String title=text(path(renderer,"header",
-                "musicCarouselShelfBasicHeaderRenderer","title"));
-            if(title.isEmpty())continue;
-            List<MediaBrowserCompat.MediaItem> items=parseTileList(
-                renderer.optJSONArray("contents"),null);
-            if(!items.isEmpty())fresh.add(new Section(title,items));
+        int renderers=0;
+        if(contents!=null)for(int i=0;i<contents.length() && fresh.size()<24;i++){
+            JSONObject item=contents.optJSONObject(i);
+            if(item==null)continue;
+            for(String type:new String[]{"musicCarouselShelfRenderer",
+                    "musicShelfRenderer","gridRenderer","musicCardShelfRenderer"}){
+                JSONObject renderer=item.optJSONObject(type);
+                if(renderer==null)continue;
+                renderers++;
+                String title=text(path(renderer,"header",
+                    "musicCarouselShelfBasicHeaderRenderer","title"));
+                if(title.isEmpty())title=text(path(renderer,"header",
+                    "musicShelfBasicHeaderRenderer","title"));
+                if(title.isEmpty())title=text(renderer.optJSONObject("title"));
+                // Do not fabricate titles or recommendations.
+                if(title.isEmpty())continue;
+                List<MediaBrowserCompat.MediaItem> rows=new ArrayList<>();
+                parseRows(renderer.optJSONArray("contents"),rows,null);
+                if(!rows.isEmpty())fresh.add(new Section(title,rows));
+            }
         }
         homeSections=fresh;
         homeAt=System.currentTimeMillis();
-        if(fresh.isEmpty())
-            throw new IllegalStateException("YT Music returned no public home shelves");
+        if(fresh.isEmpty()){
+            throw new IllegalStateException(
+                "YT Music home returned no usable browse shelves. "+
+                "topKeys="+jsonKeys(response)+
+                "; contentsKeys="+jsonKeys(response.optJSONObject("contents"))+
+                "; sectionNodes="+(contents==null?"missing":contents.length())+
+                "; shelfTypes="+renderers+
+                "; visitor="+(!visitorData.isEmpty())+
+                "; bootstrap="+bootstrapStatus);
+        }
         Log.i(TAG,"public home sections="+fresh.size());
+    }
+
+    /** Both one-column and two-column Home variants exist. */
+    private static JSONObject findHomeSectionList(JSONObject root){
+        JSONObject contents=root.optJSONObject("contents");
+        for(JSONObject renderer:new JSONObject[]{
+            contents==null?null:contents.optJSONObject("singleColumnBrowseResultsRenderer"),
+            contents==null?null:contents.optJSONObject("twoColumnBrowseResultsRenderer")}){
+            if(renderer==null)continue;
+            JSONArray tabs=renderer.optJSONArray("tabs");
+            if(tabs!=null)for(int i=0;i<tabs.length();i++){
+                JSONObject section=path(tabs.optJSONObject(i),
+                    "tabRenderer","content","sectionListRenderer");
+                if(section!=null)return section;
+            }
+            JSONObject secondary=path(renderer,
+                "secondaryContents","sectionListRenderer");
+            if(secondary!=null)return secondary;
+        }
+        JSONObject continuation=path(root,
+            "continuationContents","sectionListContinuation");
+        return continuation!=null?continuation:root.optJSONObject("sectionListRenderer");
+    }
+
+    private static String jsonKeys(JSONObject obj){
+        if(obj==null)return "(none)";
+        JSONArray names=obj.names();
+        if(names==null)return "[]";
+        StringBuilder text=new StringBuilder("[");
+        for(int i=0;i<names.length() && i<12;i++){
+            if(i>0)text.append(",");
+            text.append(names.optString(i));
+        }
+        return text.append("]").toString();
+    }
+
+    private static String defaultClientVersion(){
+        SimpleDateFormat formatter=new SimpleDateFormat("yyyyMMdd",Locale.US);
+        formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return "1."+formatter.format(new Date())+".01.00";
+    }
+
+    /**
+     * The anonymous ytmusicapi browser uses SOCS=CAI and first fetches
+     * VISITOR_DATA from public ytcfg. This reads public web configuration,
+     * never an installed app's login data, cookies, or personal information.
+     */
+    private void bootstrapWebVisitor(){
+        if(bootstrapAt>0 && System.currentTimeMillis()-bootstrapAt<CACHE_MS)
+            return;
+        bootstrapAt=System.currentTimeMillis();
+        clientVersion=defaultClientVersion();
+        bootstrapStatus="config unavailable";
+        HttpURLConnection connection=null;
+        try {
+            connection=(HttpURLConnection)new URL(
+                "https://music.youtube.com/").openConnection();
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(8000);
+            connection.setRequestProperty("Cookie","SOCS=CAI");
+            connection.setRequestProperty("Accept","text/html");
+            connection.setRequestProperty("User-Agent",WEB_USER_AGENT);
+            int status=connection.getResponseCode();
+            if(status!=200){
+                bootstrapStatus="website HTTP "+status;
+                return;
+            }
+            try(InputStream in=connection.getInputStream();
+                ByteArrayOutputStream output=new ByteArrayOutputStream()){
+                byte[] buf=new byte[8192];
+                int read;
+                while((read=in.read(buf))!=-1){
+                    if(output.size()+read>1024*1024)break;
+                    output.write(buf,0,read);
+                }
+                String html=output.toString("UTF-8");
+                int pos=0;
+                for(int tries=0;tries<12;tries++){
+                    int marker=html.indexOf("ytcfg.set(",pos);
+                    if(marker<0)break;
+                    pos=marker+10;
+                    int start=html.indexOf("{",pos);
+                    int end=html.indexOf(");",start);
+                    if(start<0||end<=start||end-start>200000)continue;
+                    JSONObject cfg;
+                    try{cfg=new JSONObject(html.substring(start,end));}
+                    catch(Exception ignored){continue;}
+                    String visitor=cfg.optString("VISITOR_DATA","");
+                    JSONObject cfgClient=path(cfg,"INNERTUBE_CONTEXT","client");
+                    if(visitor.isEmpty() && cfgClient!=null)
+                        visitor=cfgClient.optString("visitorData","");
+                    if(!visitor.isEmpty())visitorData=visitor;
+                    String version=cfg.optString("INNERTUBE_CONTEXT_CLIENT_VERSION","");
+                    if(version.isEmpty() && cfgClient!=null)
+                        version=cfgClient.optString("clientVersion","");
+                    if(version.matches("[0-9][0-9.]+"))clientVersion=version;
+                    String key=cfg.optString("INNERTUBE_API_KEY","");
+                    if(key.matches("[A-Za-z0-9_-]{20,80}"))apiKey=key;
+                }
+                bootstrapStatus="site HTTP 200, visitor="+(!visitorData.isEmpty());
+            }
+        }catch(Exception error){
+            bootstrapStatus="website "+error.getClass().getSimpleName();
+        }finally{
+            if(connection!=null)connection.disconnect();
+        }
     }
 
     private JSONObject request(String browseId) throws Exception {
         if(!validId(browseId))throw new IllegalArgumentException("invalid browseId");
-        String key="browse:"+browseId;
-        // Cache the response materialized as rows at the caller level, not private
-        // identity data. Live home shelves are cached separately in ensureHome().
-        URL url=new URL("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false");
+        bootstrapWebVisitor();
+        String endpoint="https://music.youtube.com/youtubei/v1/browse?prettyPrint=false";
+        if(!apiKey.isEmpty())endpoint+="&key="+apiKey;
+        URL url=new URL(endpoint);
         HttpURLConnection connection=(HttpURLConnection)url.openConnection();
         connection.setRequestMethod("POST");
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(15000);
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type","application/json; charset=UTF-8");
+        connection.setRequestProperty("Cookie","SOCS=CAI");
+        if(!visitorData.isEmpty())
+            connection.setRequestProperty("X-Goog-Visitor-Id",visitorData);
         connection.setRequestProperty("Accept","application/json");
         connection.setRequestProperty("Origin","https://music.youtube.com");
         connection.setRequestProperty("Referer","https://music.youtube.com/");
         connection.setRequestProperty("X-Goog-Api-Format-Version","1");
         connection.setRequestProperty("X-YouTube-Client-Name","67");
-        connection.setRequestProperty("X-YouTube-Client-Version","1.20260213.01.00");
-        connection.setRequestProperty("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0");
+        connection.setRequestProperty("X-YouTube-Client-Version",clientVersion);
+        connection.setRequestProperty("User-Agent",WEB_USER_AGENT);
         String country=Locale.getDefault().getCountry();
         String language=Locale.getDefault().getLanguage();
         JSONObject client=new JSONObject()
             .put("clientName","WEB_REMIX")
-            .put("clientVersion","1.20260213.01.00")
+            .put("clientVersion",clientVersion)
             .put("hl",language.isEmpty()?"ko":language)
             .put("gl",country.isEmpty()?"KR":country);
+        if(!visitorData.isEmpty())client.put("visitorData",visitorData);
         JSONObject body=new JSONObject()
-            .put("context",new JSONObject().put("client",client))
+            .put("context",new JSONObject().put("client",client)
+                .put("user",new JSONObject()))
             .put("browseId",browseId);
         try {
             byte[] bytes=body.toString().getBytes(StandardCharsets.UTF_8);
