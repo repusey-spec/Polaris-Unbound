@@ -35,7 +35,7 @@ public final class PolarisYtmLabelParserTest {
             Arrays.asList("citypop • 재생목록 • repusy • 트랙 49개"),
             1,"citypop","playlist");
         expect("multiline inline label",
-            Arrays.asList("citypop, 재생목록\\nrepusy · 49곡"),
+            Arrays.asList("citypop, 재생목록\nrepusy · 49곡"),
             1,"citypop","playlist");
         expect("English playlist",
             Arrays.asList("jazz","Playlist • repusy • 16 tracks"),
