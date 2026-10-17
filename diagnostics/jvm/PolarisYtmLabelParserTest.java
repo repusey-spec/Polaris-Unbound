@@ -51,6 +51,15 @@ public final class PolarisYtmLabelParserTest {
             Arrays.asList("citypop","재생목록 • repusy",
                 "citypop","재생목록 • repusy"),
             1,"citypop","playlist");
+        expect("offline saved automatic playlist",
+            Arrays.asList("오프라인 저장한 노래","자동 재생목록 · 469곡"),
+            1,"오프라인 저장한 노래","playlist");
+        expect("fullwidth middle dot metadata",
+            Arrays.asList("mood","재생목록ㆍrepusyㆍ트랙 7개"),
+            1,"mood","playlist");
+        expect("no fabricated title from navigation",
+            Arrays.asList("보관함","앨범 · artist"),
+            0,null,null);
         expect("navigation only",
             Arrays.asList("홈","보관함","검색","최근 활동"),
             0,null,null);
