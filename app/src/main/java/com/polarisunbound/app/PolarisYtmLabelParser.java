@@ -93,6 +93,10 @@ final class PolarisYtmLabelParser {
         return text==null?"":text.replace('\u00a0',' ').replace('\n',' ').replace('\r',' ').trim();
     }
 
+    static boolean validCapturedTitle(String title) {
+        return validTitle(normalize(title),"");
+    }
+
     private static boolean validTitle(String title,String metadata){
         if(title.isEmpty()||title.length()>150||title.equals(metadata))return false;
         if(title.contains("•")||title.contains("·")||
