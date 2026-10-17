@@ -2877,12 +2877,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(folder("ytm","YT Music"));
             x.add(folder("can","CAN"));
         } else if(parent.equals("ytm")){
-            // Hush/Metrolist-inspired browse layout, populated ONLY with
-            // real public YTM server results or user-approved visible UI labels.
-            x.add(folder(PolarisYtmCatalog.ACCOUNT_LIBRARY,
-                "내 플레이리스트 · Polaris 로그인 필요"));
-            x.add(folder(PolarisYtmCatalog.HOME,"홈 · YT Music 공개 추천"));
-            x.add(folder(PolarisYtmCatalog.LIBRARY,"보관함 · 실제 화면에서 읽은 항목"));
+            // Login occurs only on the phone. AA shows only the account
+            // playlist tree and the official YTM current-track relay.
+            x.add(folder(PolarisYtmCatalog.ACCOUNT_LIBRARY,"내 플레이리스트"));
             // The original live YTM track is still mirrored as before.
             MediaMetadataCompat metadata=ytmBridge==null?null:ytmBridge.currentMetadata();
             String name=metadata==null?null:
