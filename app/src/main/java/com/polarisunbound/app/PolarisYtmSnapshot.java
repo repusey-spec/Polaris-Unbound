@@ -52,8 +52,10 @@ final class PolarisYtmSnapshot {
             merged.put(e.kind+"|"+e.title,e);
         }
         for(Entry e:load(ctx)){
-            if(e!=null && e.title!=null)
-                merged.putIfAbsent(e.kind+"|"+e.title,e);
+            if(e!=null && e.title!=null){
+                String key=e.kind+"|"+e.title;
+                if(!merged.containsKey(key))merged.put(key,e);
+            }
         }
         JSONArray arr=new JSONArray();
         for(Entry e:merged.values()){
