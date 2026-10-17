@@ -698,7 +698,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void showYtm(){
         currentPage="ytm";
-        base("YT Music 중계 · 통합 시험판");
+        base("YT Music · 로그인 보관함 Test 10");
         TextView explanation=new TextView(this);
         explanation.setText("YouTube Music에서 곡을 먼저 재생한 뒤 'YT Music 연결'을 누르세요. "
             +"연결 후 폰과 Android Auto에서 곡 정보·앨범아트·재생 버튼을 공유합니다. "
@@ -720,6 +720,32 @@ public class MainActivity extends AppCompatActivity {
         TextView connect=button("▶  YT Music 연결");
         connect.setOnClickListener(v->playId(PolarisYtmBridge.MEDIA_ID,"YT Music"));
         body.addView(connect);
+
+        TextView accountHeading=new TextView(this);
+        accountHeading.setText("Test 10 · 내 재생목록 → 실제 곡 제목 → 원본 YTM");
+        accountHeading.setTextSize(18);
+        accountHeading.setTextColor(Color.WHITE);
+        accountHeading.setPadding(0,18,0,8);
+        body.addView(accountHeading);
+        TextView login=button("1. Polaris에서 YT Music 별도 로그인 / 계정 변경");
+        login.setOnClickListener(v->startActivity(
+            new Intent(this,PolarisYtmLoginActivity.class)));
+        body.addView(login);
+        TextView accountLibrary=button("2. 내 YT Music 플레이리스트 자동 조회");
+        accountLibrary.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.ACCOUNT_LIBRARY,"내 YT Music 플레이리스트"));
+        body.addView(accountLibrary);
+        TextView accountHint=new TextView(this);
+        accountHint.setText(
+            "로그인 후 2번을 누르면 실제 재생목록 ID를 조회합니다. "+
+            "목록에서 플리를 누르면 곡·가수 이름이 나오고, 곡 제목을 누르면 "+
+            "공식 YT Music에 정확한 watch 링크를 전달합니다. "+
+            "원본 앱이 재생을 자동 시작하는지, Polaris 화면이 유지되는지는 아직 검증 전입니다. "+
+            "로그인 세션은 Polaris WebView에만 보관됩니다.");
+        accountHint.setTextColor(0xDDFFFFFF);
+        accountHint.setTextSize(13);
+        accountHint.setPadding(0,6,0,14);
+        body.addView(accountHint);
 
         TextView searchHeader=new TextView(this);
         searchHeader.setText("Test 09 · 원본 YT Music 백그라운드 검색 재생");
