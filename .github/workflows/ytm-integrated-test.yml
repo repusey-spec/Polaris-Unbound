@@ -33,10 +33,10 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           test -n "$APK"
           "$APKSIGNER" verify --print-certs "$APK"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polarisunbound.app.test'.*versionCode='5901'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polarisunbound.app.test'.*versionCode='5902'"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-0.58-YTM-Integrated-Test-01
+          name: Polaris-0.58-YTM-Integrated-Test-02
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
