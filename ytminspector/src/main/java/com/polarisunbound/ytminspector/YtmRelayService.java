@@ -443,15 +443,29 @@ public final class YtmRelayService extends MediaBrowserServiceCompat {
             CharSequence error=playback.getErrorMessage();
             if(error!=null)ps.setErrorMessage(error);
         }
+        // Fixed AA display order: LIKE + DISLIKE | SHUFFLE + REPEAT.
+        // YouTube Music supplies custom actions in changing source order.
+        // Only include actions actually offered by the current YTM session.
         if(playback!=null&&playback.getCustomActions()!=null){
-            for(PlaybackState.CustomAction action:playback.getCustomActions()){
-                String id=action.getAction();
-                if("thumbs_up_action".equals(id)||"thumbs_down_action".equals(id)||
-                   "shuffle_action".equals(id)||"loop_mode_action".equals(id)){
+            final String[] orderedIds={
+                "thumbs_up_action","thumbs_down_action",
+                "shuffle_action","loop_mode_action"
+            };
+            final int[] icons={
+                R.drawable.ytm_thumb_up, R.drawable.ytm_thumb_down,
+                R.drawable.ytm_shuffle, R.drawable.ytm_repeat
+            };
+            for(int i=0;i<orderedIds.length;i++){
+                for(PlaybackState.CustomAction action:playback.getCustomActions()){
+                    if(!orderedIds[i].equals(action.getAction()))continue;
                     try{
                         ps.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                            id,action.getName(),android.R.drawable.ic_media_play).build());
-                    }catch(Exception ignored){}
+                            orderedIds[i],action.getName(),icons[i]).build());
+                    }catch(Exception e){
+                        record("BRIDGE CUSTOM ICON error "+orderedIds[i]+
+                            " / "+e.getClass().getSimpleName());
+                    }
+                    break;
                 }
             }
         }
