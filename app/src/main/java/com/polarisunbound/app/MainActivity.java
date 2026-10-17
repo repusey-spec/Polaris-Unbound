@@ -714,6 +714,36 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         body.addView(launch);
+
+        TextView ytmHome=button("홈 탐색 · 실제 온라인 추천");
+        ytmHome.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.HOME,"YT Music 홈"));
+        body.addView(ytmHome);
+
+        TextView ytmLibrary=button("보관함 탐색 · 원본 YT Music 화면");
+        ytmLibrary.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.LIBRARY,"YT Music 보관함"));
+        body.addView(ytmLibrary);
+
+        TextView accessibility=button("보관함 목록 읽기 권한 설정");
+        accessibility.setOnClickListener(v->{
+            try{
+                startActivity(new Intent(
+                    android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            }catch(Exception e){
+                Toast.makeText(this,"접근성 설정을 열지 못했습니다",Toast.LENGTH_SHORT).show();
+            }
+        });
+        body.addView(accessibility);
+        TextView browseNote=new TextView(this);
+        browseNote.setText("홈은 YouTube Music의 공개 온라인 데이터만 표시합니다. "
+            +"내 계정 보관함은 위 접근성 권한을 허용한 뒤 원본 YT Music에서 "
+            +"보관함 화면을 열어 실제로 표시된 이름만 가져옵니다. "
+            +"이름만 확보한 항목은 아직 AA에서 직접 재생할 수 없습니다.");
+        browseNote.setTextSize(13);
+        browseNote.setTextColor(0xCCFFFFFF);
+        browseNote.setPadding(0,8,0,16);
+        body.addView(browseNote);
         ytmNowText=new TextView(this);
         ytmNowText.setTextColor(0xFFFFFFFF);
         ytmNowText.setTextSize(17);
@@ -808,6 +838,58 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         updateYtmNow();
+    }
+
+    /** Phone-side browse uses the SAME catalog and media IDs as Android Auto. */
+    private void showYtmBrowse(String parent,String heading){
+        currentPage="ytm";
+        base(heading);
+        final LinearLayout pageBody=body;
+        TextView back=button("← YT Music");
+        back.setOnClickListener(v->showYtm());
+        body.addView(back);
+        TextView reload=button("↻ 이 목록 다시 조회");
+        reload.setOnClickListener(v->showYtmBrowse(parent,heading));
+        body.addView(reload);
+        TextView loading=new TextView(this);
+        loading.setText("원본 데이터 조회 중…");
+        loading.setTextColor(0xFFCCCCCC);
+        loading.setTextSize(15);
+        body.addView(loading);
+        final LinearLayout listing=new LinearLayout(this);
+        listing.setOrientation(LinearLayout.VERTICAL);
+        body.addView(listing);
+        PolarisYtmCatalog.get(this).load(parent,(children,error)->{
+            if(body!=pageBody || !"ytm".equals(currentPage))return;
+            loading.setText(error!=null?
+                "YT Music 조회 실패: "+error:
+                "실제 항목 "+children.size()+"개");
+            listing.removeAllViews();
+            if(children.isEmpty() && error==null){
+                TextView empty=new TextView(this);
+                empty.setText(parent.startsWith(PolarisYtmCatalog.CAPTURED)
+                    ? "원본 앱 화면에서 이름만 확인했습니다. 재생목록 ID는 미확인입니다."
+                    : PolarisYtmCatalog.LIBRARY.equals(parent)
+                        ? "아직 수집된 보관함 항목이 없습니다. 원본 YT Music 보관함을 열고 돌아오세요."
+                        : "서버에서 반환된 탐색 가능한 항목이 없습니다.");
+                empty.setTextColor(0xDDFFFFFF);
+                empty.setPadding(4,14,4,14);
+                listing.addView(empty);
+            }
+            for(android.support.v4.media.MediaBrowserCompat.MediaItem item:children){
+                final String id=item.getMediaId();
+                final String title=item.getDescription().getTitle()==null?"(제목 없음)":
+                    item.getDescription().getTitle().toString();
+                final CharSequence sub=item.getDescription().getSubtitle();
+                TextView control=button((item.isBrowsable()?"▸ ":"▶ ")+title+
+                    (sub==null?"":"\n"+sub));
+                listing.addView(control);
+                if(item.isBrowsable())
+                    control.setOnClickListener(v->showYtmBrowse(id,title));
+                else
+                    control.setOnClickListener(v->playId(id,title));
+            }
+        });
     }
 
     private void updateYtmNow(){
