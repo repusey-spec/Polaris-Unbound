@@ -1,4 +1,4 @@
-name: Polaris YTM Share Playlist Test 06 APK
+name: Polaris YTM Share Chooser Test 07 APK
 
 on:
   pull_request:
@@ -48,10 +48,10 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           test -n "$APK"
           "$APKSIGNER" verify --print-certs "$APK"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polarisunbound.app.test'.*versionCode='5906'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polarisunbound.app.test'.*versionCode='5907'"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-0.58-YTM-Share-Playlist-Test-06
+          name: Polaris-0.58-YTM-Share-Chooser-Test-07
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
