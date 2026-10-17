@@ -52,7 +52,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean ytmSearchBusy=false;
     private PolarisYtmLibraryProbe ytmProbe;
     private TextView radioPlaybackButton;
+    // Two persistent source indexes: Radio/CAN on top, NAS/YT Music at bottom.
     private LinearLayout tabsBar;
+    private LinearLayout bottomSourceBar;
     private FrameLayout pageHost;
     private TextView scheduleView;
     private LinearLayout miniPlayer;
@@ -369,31 +371,48 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout.LayoutParams miniLp=new LinearLayout.LayoutParams(-1,-2);
         miniLp.setMargins(dp(12),dp(4),dp(12),dp(8));
         root.addView(miniPlayer,miniLp);
+        // Keep NAS and YT Music directly accessible from every source page.
+        // The lower index is outside pageHost, so list refreshes cannot erase it.
+        bottomSourceBar=new LinearLayout(this);
+        bottomSourceBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomSourceBar.setPadding(dp(12),dp(4),dp(12),dp(10));
+        root.addView(bottomSourceBar,new LinearLayout.LayoutParams(-1,-2));
         shell.addView(root,new FrameLayout.LayoutParams(-1,-1));
         setContentView(shell);
     }
 
-    private void addTab(TextView v){
+    private void addSourceTab(LinearLayout destination,TextView item){
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);
-        lp.setMargins(6,0,6,0); tabsBar.addView(v,lp);
+        lp.setMargins(dp(4),0,dp(4),0);
+        destination.addView(item,lp);
     }
 
     private void refreshTabs(){
+        // Source-level navigation is NOT nested inside any source's content.
         tabsBar.removeAllViews();
-        TextView t1=tab("라디오","radio".equals(currentPage));
-        TextView t2=tab("YT NAS MUSIC","mp3".equals(currentPage));
-        TextView t3=tab("YT Music","ytm".equals(currentPage));
-        TextView t4=tab("CAN","can".equals(currentPage));
-        addTab(t1); addTab(t2); addTab(t3); addTab(t4);
-        t1.setOnClickListener(v->showDomestic());
-        t2.setOnClickListener(v->showMp3());
-        t3.setOnClickListener(v->showYtm());
-        t4.setOnClickListener(v->showCan());
+        bottomSourceBar.removeAllViews();
+
+        TextView radio=tab("라디오","radio".equals(currentPage));
+        TextView can=tab("CAN","can".equals(currentPage));
+        addSourceTab(tabsBar,radio);
+        addSourceTab(tabsBar,can);
+
+        TextView nas=tab("YT NAS MUSIC",
+            "mp3".equals(currentPage) || "mp3_now".equals(currentPage));
+        TextView yt=tab("YT Music","ytm".equals(currentPage));
+        addSourceTab(bottomSourceBar,nas);
+        addSourceTab(bottomSourceBar,yt);
+
+        radio.setOnClickListener(v->showDomestic());
+        can.setOnClickListener(v->showCan());
+        nas.setOnClickListener(v->showMp3());
+        yt.setOnClickListener(v->showYtm());
     }
 
     private void base(String title){
         ensureShell();
         tabsBar.setVisibility(View.VISIBLE);
+        bottomSourceBar.setVisibility(View.VISIBLE);
         refreshTabs();
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
@@ -1516,6 +1535,7 @@ public class MainActivity extends AppCompatActivity {
         ensureShell();
         currentPage="mp3_now";
         tabsBar.setVisibility(View.GONE);
+        bottomSourceBar.setVisibility(View.GONE);
         miniPlayer.setVisibility(View.GONE);
         pageHost.removeAllViews();
 
