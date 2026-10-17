@@ -134,7 +134,7 @@ final class PolarisYtmSnapshot {
                 .build();
             items.add(new MediaBrowserCompat.MediaItem(d,
                 MediaBrowserCompat.MediaItem.FLAG_BROWSABLE));
-            displayed.add(entry.title);
+            if("playlist".equals(entry.kind))displayed.add(entry.title);
         }
         // User-provided name, backed by a genuine shared playlist link, is
         // legitimate even when that item was not visible to Accessibility.
