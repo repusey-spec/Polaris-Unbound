@@ -307,6 +307,37 @@ final class PolarisYtmBridge {
             handler.postDelayed(()->refresh(),250);
         }catch(Exception e){listener.onTrace("YTM command "+label+" failed "+e);}
     }
+    /**
+     * Phone-only no-activity playback request. This is safe to try only when
+     * the installed YT Music exposes ACTION_PLAY_FROM_URI on an active session.
+     *
+     * A successful dispatch is NOT proof the source accepted the URI or
+     * actually selected the requested track/playlist.
+     */
+    boolean tryPlayFromUriInBackground(android.net.Uri uri){
+        if(uri==null)return false;
+        MediaController target=best();
+        if(target==null){
+            listener.onTrace("YTM background URI unavailable: no active YTM session");
+            return false;
+        }
+        PlaybackState state=target.getPlaybackState();
+        if(state==null || (state.getActions() & PlaybackState.ACTION_PLAY_FROM_URI)==0){
+            listener.onTrace("YTM background URI unavailable: action not supported");
+            return false;
+        }
+        try{
+            target.getTransportControls().playFromUri(uri,Bundle.EMPTY);
+            listener.onTrace("YTM background URI command dispatched, playback unverified");
+            handler.postDelayed(()->refresh(),500);
+            return true;
+        }catch(Exception e){
+            listener.onTrace("YTM background URI dispatch failed: "+
+                e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
     void play(){forward("PLAY",PlaybackState.ACTION_PLAY,t->t.play());}
     void pause(){forward("PAUSE",PlaybackState.ACTION_PAUSE,t->t.pause());}
     void next(){forward("NEXT",PlaybackState.ACTION_SKIP_TO_NEXT,t->t.skipToNext());}
