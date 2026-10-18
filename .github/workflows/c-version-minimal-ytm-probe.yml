@@ -1,4 +1,4 @@
-name: Polaris C04 Search Diagnostic APK
+name: Polaris C05 Typed YT Music Search APK
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - 'c-version/**'
       - '.github/workflows/c-version-minimal-ytm-probe.yml'
   push:
-    branches: [ 'experiment/c-version-04-on-device-search-diagnostics' ]
+    branches: [ 'experiment/c-version-05-correct-music-results' ]
   workflow_dispatch:
 
 jobs:
@@ -39,8 +39,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/c02-tests"
           javac -encoding UTF-8 -d "$RUNNER_TEMP/c02-tests" \
             c-version/app/src/main/java/com/polaris/cprobe/SongSelector.java \
-            c-version/tests/SongSelectorCliTest.java
+            c-version/tests/SongSelectorCliTest.java \
+            c-version/app/src/main/java/com/polaris/cprobe/MusicRowType.java \
+            c-version/tests/MusicRowTypeCliTest.java
           java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.SongSelectorCliTest
+          java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.MusicRowTypeCliTest
       - name: Restore persistent debug signing key
         run: |
           set -euo pipefail
@@ -55,13 +58,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='5'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='6'"
           "$APKSIGNER" verify --print-certs "$APK"
           test -s "$APK"
           ls -lh "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-C04-YTM-Search-Diagnostics
+          name: Polaris-C05-YTM-Music-Search
           path: c-version/app/build/outputs/apk/debug/*.apk
           retention-days: 30
           if-no-files-found: error
