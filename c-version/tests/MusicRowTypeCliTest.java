@@ -27,6 +27,21 @@ public final class MusicRowTypeCliTest {
         }
         if(!MusicRowType.canBeSong("성시경"))
             throw new AssertionError("Filtered song with artist label is valid");
-        System.out.println("C05 type classification: 13 fixtures + 5 safety checks OK");
+
+        // The musicVideoType field is the source of truth if supplied.
+        if(!"song".equals(MusicRowType.resolve("성시경",
+                "MUSIC_VIDEO_TYPE_ATV",false)))
+            throw new AssertionError("Unfiltered YTM ATV must be accepted");
+        if(!"episode".equals(MusicRowType.resolve("성시경",
+                "MUSIC_VIDEO_TYPE_PODCAST_EPISODE",true)))
+            throw new AssertionError("Podcast must be rejected even in songs filter");
+        if(!"video".equals(MusicRowType.resolve("성시경",
+                "MUSIC_VIDEO_TYPE_OMV",true)))
+            throw new AssertionError("Music video is not a filtered song");
+        if(!"song".equals(MusicRowType.resolve("성시경","",true)))
+            throw new AssertionError("Filtered song with untyped singer first run");
+        if(!"unknown".equals(MusicRowType.resolve("성시경","",false)))
+            throw new AssertionError("Untyped general result should not be played");
+        System.out.println("C06 row type: 13 label fixtures + 5 safety + 5 videoType OK");
     }
 }
