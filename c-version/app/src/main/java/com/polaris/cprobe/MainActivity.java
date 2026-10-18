@@ -35,6 +35,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -54,6 +57,10 @@ public final class MainActivity extends Activity {
     private static final String SONGS_FILTER =
         "EgWKAQIIAWoKEAMQBBAJEAoQEA==";
     private static final int MAX_JSON_BYTES = 3 * 1024 * 1024;
+    private static final int MAX_BOOTSTRAP_BYTES = 2 * 1024 * 1024;
+    private static final String WEB_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private EditText text;
@@ -248,86 +255,196 @@ public final class MainActivity extends Activity {
         return "unknown";
     }
 
-    private static SearchOutcome searchMatchingSong(String query) throws Exception {
-        java.util.LinkedHashMap<String,SongSelector.Candidate> candidates =
-            new java.util.LinkedHashMap<>();
-        List<String> attempts=new ArrayList<>();
-        Exception firstFailure=null;
-        java.util.LinkedHashSet<String> queries=new java.util.LinkedHashSet<>();
-        queries.add(query);
-
-        String[] parts=query.trim().split("\\s+");
-        if(parts.length>=2){
-            String last=parts[parts.length-1];
-            if(last.length()>2 &&
-               (last.endsWith("는")||last.endsWith("은")||
-                last.endsWith("을")||last.endsWith("를")))
-                queries.add(query.substring(0,query.length()-1));
-            // Some regional YTM results vary with term order. Retry only
-            // after BOTH original-query search passes fail. Do not guess IDs.
-            if(parts.length==2){
-                queries.add(parts[1]+" "+parts[0]);
-                queries.add(parts[0]+" \""+parts[1]+"\"");
-            }
+    private static final class SearchClient {
+        final String apiKey, version, visitorId, label;
+        SearchClient(String apiKey,String version,String visitorId,String label){
+            this.apiKey=apiKey;
+            this.version=version;
+            this.visitorId=visitorId;
+            this.label=label;
         }
-        int pass=0;
-        for(String q:queries){
-            for(boolean filtered:new boolean[]{true,false}){
-                pass++;
-                ScanStats stats=new ScanStats();
-                try{
-                    List<SongSelector.Candidate> collected=
-                        collectSongs(postYtmSearch(q,filtered),stats);
-                    for(SongSelector.Candidate item:collected)
-                        candidates.putIfAbsent(item.id,item);
+    }
 
-                    attempts.add("#"+pass+" ["+(filtered?"노래":"전체")+"] \""+
-                        q+"\" : 원본항목 "+stats.allRows+
-                        " / 곡ID "+stats.validVideoIds+
-                        " / 가수누락 "+stats.emptyArtists+
-                        " / 수집 "+stats.accepted+
-                        " / 누적 "+candidates.size());
+    private static final SearchClient LEGACY_CLIENT = new SearchClient(
+        YTM_PUBLIC_KEY,CLIENT_VERSION,"","기존");
 
-                    SongSelector.Selection match=SongSelector.select(query,
-                        new ArrayList<>(candidates.values()));
-                    if(match!=null){
-                        Log.i(TAG,"C04 exact candidate chosen: "+
-                            match.song.title+" / "+match.song.artist+
-                            " / score="+match.score);
-                        return new SearchOutcome(match.song,"");
-                    }
-                }catch(Exception e){
-                    if(firstFailure==null)firstFailure=e;
-                    attempts.add("#"+pass+" ["+(filtered?"노래":"전체")+
-                        "] \""+q+"\" : 오류 "+e.getClass().getSimpleName()+
-                        " "+safeError(e.getMessage()));
-                    Log.w(TAG,"C04 search pass "+pass+" failed",e);
+    private static String htmlConfig(String html,String key) {
+        Matcher matcher=Pattern.compile(
+            "\"" + Pattern.quote(key) + "\"\\s*:\\s*\"([^\"]{1,256})\"")
+            .matcher(html);
+        return matcher.find()?matcher.group(1):"";
+    }
+
+    /** Anonymous music.youtube.com session bootstrap: never read login cookies. */
+    private static SearchClient discoverPublicWebClient() throws Exception {
+        HttpURLConnection http=(HttpURLConnection)
+            new URL("https://music.youtube.com/").openConnection();
+        http.setRequestMethod("GET");
+        http.setConnectTimeout(8000);
+        http.setReadTimeout(8000);
+        http.setRequestProperty("User-Agent",WEB_USER_AGENT);
+        http.setRequestProperty("Accept","text/html");
+        try {
+            int code=http.getResponseCode();
+            if(code!=200)throw new IOException("YTM bootstrap HTTP "+code);
+            String html;
+            try(InputStream input=http.getInputStream();
+                ByteArrayOutputStream output=new ByteArrayOutputStream()){
+                byte[] bytes=new byte[8192];
+                int n;
+                while((n=input.read(bytes))!=-1){
+                    if(output.size()+n>MAX_BOOTSTRAP_BYTES)
+                        throw new IOException("YTM bootstrap too large");
+                    output.write(bytes,0,n);
                 }
+                html=output.toString(StandardCharsets.UTF_8.name());
+            }
+            String key=htmlConfig(html,"INNERTUBE_API_KEY");
+            String version=htmlConfig(html,"INNERTUBE_CONTEXT_CLIENT_VERSION");
+            if(version.isEmpty())version=htmlConfig(html,"clientVersion");
+            String visitor=htmlConfig(html,"VISITOR_DATA");
+            if(visitor.isEmpty())visitor=htmlConfig(html,"visitorData");
+            if(!key.matches("[A-Za-z0-9_-]{30,100}") ||
+                    !version.matches("[0-9][A-Za-z0-9._-]{4,60}"))
+                throw new IOException("YTM bootstrap client config missing");
+            if(!visitor.matches("[A-Za-z0-9_%-]{8,512}"))visitor="";
+            return new SearchClient(key,version,visitor,"새 세션");
+        } finally {http.disconnect();}
+    }
+
+    private static SongSelector.Candidate collectAttempt(
+            String original,String q,boolean filtered,
+            SearchClient client,String country,String language,
+            Map<String,SongSelector.Candidate> merged,
+            List<String> diagnostics,int pass){
+        ScanStats stats=new ScanStats();
+        String label="#"+pass+" "+client.label+" "+country+" ["+
+            (filtered?"노래":"전체")+"] \""+q+"\"";
+        try {
+            JSONObject response=postYtmSearch(q,filtered,client,country,language);
+            List<SongSelector.Candidate> items=collectSongs(response,stats);
+            for(SongSelector.Candidate song:items)
+                merged.putIfAbsent(song.id,song);
+            StringBuilder status=new StringBuilder(label).append(" : ")
+                .append("목록 ").append(stats.allRows)
+                .append(" / 음악폴더 ").append(stats.musicShelves)
+                .append(" / 카드 ").append(stats.twoRowItems)
+                .append(" / 노래 ").append(stats.songRows)
+                .append(" / 영상 ").append(stats.videoRows)
+                .append(" / 에피소드 ").append(stats.episodeRows)
+                .append(" / 기타 ").append(stats.unknownRows)
+                .append(" / ID ").append(stats.validVideoIds)
+                .append(" / 음악수집 ").append(stats.accepted)
+                .append(" / 누적 ").append(merged.size());
+            if(stats.allRows==0)
+                status.append(" / 응답최상위 ").append(rootKeys(response));
+            diagnostics.add(status.toString());
+            SongSelector.Selection chosen=SongSelector.select(original,
+                new ArrayList<>(merged.values()));
+            if(chosen!=null){
+                Log.i(TAG,"C05 matched "+chosen.song.title+
+                    " / "+chosen.song.artist+" score="+chosen.score);
+                return chosen.song;
+            }
+        } catch(Exception ex){
+            diagnostics.add(label+" : 응답/파싱 오류 "+
+                ex.getClass().getSimpleName()+" "+safeError(ex.getMessage()));
+            Log.w(TAG,"C05 search "+label+" failed",ex);
+        }
+        return null;
+    }
+
+    private static String rootKeys(JSONObject json){
+        List<String> keys=new ArrayList<>();
+        Iterator<String> iterator=json.keys();
+        while(iterator.hasNext() && keys.size()<8)
+            keys.add(iterator.next());
+        return keys.toString();
+    }
+
+    private static SearchOutcome searchMatchingSong(String query) throws Exception {
+        // Never fabricate a song ID and never play the first arbitrary video.
+        Map<String,SongSelector.Candidate> songs=new LinkedHashMap<>();
+        List<String> attempts=new ArrayList<>();
+        int pass=0;
+        SongSelector.Candidate selected;
+
+        // Stage 1: the C01-compatible public client that returned only
+        // podcast episodes on the user's phone, though it worked in CI.
+        for(boolean filtered:new boolean[]{true,false}){
+            selected=collectAttempt(query,query,filtered,LEGACY_CLIENT,
+                "KR","ko",songs,attempts,++pass);
+            if(selected!=null)return new SearchOutcome(selected,"");
+        }
+
+        // Stage 2: bootstrap current public WEB_REMIX key, client version
+        // and visitor token from the official YT Music webpage.
+        SearchClient live=null;
+        try{
+            live=discoverPublicWebClient();
+            attempts.add("음악 웹 클라이언트: 최신 버전 확인"+
+                (live.visitorId.isEmpty()?" (방문자 ID 없음)":" (방문자 ID 있음)"));
+        }catch(Exception e){
+            attempts.add("음악 웹 클라이언트 갱신 실패: "+
+                e.getClass().getSimpleName());
+        }
+        if(live!=null) {
+            for(boolean filtered:new boolean[]{true,false}){
+                selected=collectAttempt(query,query,filtered,live,
+                    "KR","ko",songs,attempts,++pass);
+                if(selected!=null)return new SearchOutcome(selected,"");
             }
         }
 
-        StringBuilder report=new StringBuilder();
-        report.append("검색 시도별 결과\n");
-        for(String step:attempts)report.append(step).append('\n');
+        // Stage 3: a second country/language view can expose actual songs
+        // when the local anonymous results unexpectedly contain podcasts.
+        SearchClient fallback=live==null?LEGACY_CLIENT:live;
+        for(boolean filtered:new boolean[]{true,false}){
+            selected=collectAttempt(query,query,filtered,fallback,
+                "US","en",songs,attempts,++pass);
+            if(selected!=null)return new SearchOutcome(selected,"");
+        }
 
-        report.append("\n수집된 곡 ID: ").append(candidates.size()).append("개\n");
-        if(candidates.isEmpty() && firstFailure!=null)
-            report.append("첫 실패: ").append(firstFailure.getClass().getSimpleName())
-                .append(" ").append(safeError(firstFailure.getMessage())).append('\n');
+        // Stage 4: only a couple of safe query variants, with exact matching
+        // always applied to the ORIGINAL user text.
+        String[] parts=query.trim().split("\\s+");
+        LinkedHashSet<String> variants=new LinkedHashSet<>();
+        if(parts.length==2){
+            variants.add(parts[1]+" "+parts[0]);
+            variants.add(parts[0]+" \""+parts[1]+"\"");
+        }
+        if(parts.length>=2) {
+            String tail=parts[parts.length-1];
+            if(tail.length()>2 && (tail.endsWith("는")||
+                    tail.endsWith("은")||tail.endsWith("을")||
+                    tail.endsWith("를")))
+                variants.add(query.substring(0,query.length()-1));
+        }
+        for(String variant:variants){
+            selected=collectAttempt(query,variant,true,fallback,
+                "KR","ko",songs,attempts,++pass);
+            if(selected!=null)return new SearchOutcome(selected,"");
+            if(pass>=9)break;
+        }
 
-        List<SongSelector.Candidate> ranked=new ArrayList<>(candidates.values());
+        StringBuilder report=new StringBuilder("검색 단계별 결과\n");
+        for(String status:attempts)
+            report.append(status).append('\n');
+        report.append("\n음악 후보 총 ").append(songs.size()).append("개\n");
+        List<SongSelector.Candidate> ranked=new ArrayList<>(songs.values());
         ranked.sort((x,y)->Integer.compare(
             SongSelector.inspectScore(query,y),
             SongSelector.inspectScore(query,x)));
-        report.append("\n상위 검색 결과 (곡명 / 가수 / 점수)\n");
+        report.append("\n음악 후보 (곡명 / 가수 / 일치 점수)\n");
         for(int i=0;i<Math.min(12,ranked.size());i++){
-            SongSelector.Candidate c=ranked.get(i);
+            SongSelector.Candidate item=ranked.get(i);
             report.append(i+1).append(". ")
-                .append(c.title).append(" / ").append(c.artist)
-                .append(" / ").append(SongSelector.inspectScore(query,c))
+                .append(item.title).append(" / ").append(item.artist)
+                .append(" / ").append(SongSelector.inspectScore(query,item))
                 .append('\n');
         }
-        if(ranked.isEmpty())report.append("(수집된 곡 없음)\n");
+        if(ranked.isEmpty())report.append("(수집된 음악 후보 없음)\n");
+        report.append("\n로그인은 시도하지 않았고 임의 곡도 실행하지 않았습니다.");
         return new SearchOutcome(null,report.toString());
     }
 
@@ -340,13 +457,15 @@ public final class MainActivity extends Activity {
         return "";
     }
 
-    private static JSONObject postYtmSearch(String query, boolean songsOnly)
-        throws Exception {
+    private static JSONObject postYtmSearch(String query,boolean songsOnly,
+            SearchClient cfg,String country,String language)throws Exception {
         JSONObject client = new JSONObject()
             .put("clientName", "WEB_REMIX")
-            .put("clientVersion", CLIENT_VERSION)
-            .put("hl", "ko")
-            .put("gl", "KR");
+            .put("clientVersion",cfg.version)
+            .put("hl",language)
+            .put("gl",country);
+        if(!cfg.visitorId.isEmpty())
+            client.put("visitorData",cfg.visitorId);
         JSONObject context = new JSONObject().put("client", client);
         JSONObject payload = new JSONObject()
             .put("context", context)
@@ -354,22 +473,24 @@ public final class MainActivity extends Activity {
         if(songsOnly) payload.put("params", SONGS_FILTER);
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
 
-        HttpURLConnection http = (HttpURLConnection) new URL(YTM_SEARCH)
+        HttpURLConnection http = (HttpURLConnection) new URL(YTM_SEARCH+"&key="+cfg.apiKey)
             .openConnection();
         http.setRequestMethod("POST");
         http.setConnectTimeout(10000);
         http.setReadTimeout(12000);
         http.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
         http.setRequestProperty("Accept", "application/json");
-        http.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.6");
+        http.setRequestProperty("Accept-Language",
+            language.equals("ko")?"ko-KR,ko;q=0.9,en;q=0.6":
+                "en-US,en;q=0.9,ko;q=0.6");
         http.setRequestProperty("X-YouTube-Client-Name", "67");
-        http.setRequestProperty("X-YouTube-Client-Version", CLIENT_VERSION);
-        http.setRequestProperty("X-Goog-Api-Key", YTM_PUBLIC_KEY);
+        http.setRequestProperty("X-YouTube-Client-Version",cfg.version);
+        http.setRequestProperty("X-Goog-Api-Key",cfg.apiKey);
+        if(!cfg.visitorId.isEmpty())
+            http.setRequestProperty("X-Goog-Visitor-Id",cfg.visitorId);
         http.setRequestProperty("Origin", "https://music.youtube.com");
         http.setRequestProperty("Referer", "https://music.youtube.com/");
-        http.setRequestProperty("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36");
+        http.setRequestProperty("User-Agent",WEB_USER_AGENT);
         http.setDoOutput(true);
         try {
             try(OutputStream output = http.getOutputStream()) {
