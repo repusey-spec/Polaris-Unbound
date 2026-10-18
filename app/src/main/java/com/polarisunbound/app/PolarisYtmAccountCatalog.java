@@ -2,11 +2,13 @@ package com.polarisunbound.app;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaDescriptionCompat;
 import android.webkit.CookieManager;
+import androidx.media.utils.MediaConstants;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -502,10 +504,20 @@ final class PolarisYtmAccountCatalog {
         return null;
     }
 
+    // Account browser results are deliberately text-only for Android Auto.
+    // No invented thumbnail URL or broken album-art placeholders.
+    // The separate YT Music MediaSession still mirrors real playing artwork.
+    private static Bundle textListHints(){
+        Bundle hints=new Bundle();
+        hints.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+        hints.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,1);
+        return hints;
+    }
+
     private static MediaBrowserCompat.MediaItem folder(
             String id,String title,String subtitle){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
-            .setMediaId(id).setTitle(title);
+            .setMediaId(id).setTitle(title).setExtras(textListHints());
         if(subtitle!=null&&!subtitle.isEmpty())b.setSubtitle(subtitle);
         return new MediaBrowserCompat.MediaItem(b.build(),
             MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
@@ -514,7 +526,7 @@ final class PolarisYtmAccountCatalog {
     private static MediaBrowserCompat.MediaItem playable(
             String id,String title,String artist){
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
-            .setMediaId(id).setTitle(title);
+            .setMediaId(id).setTitle(title).setExtras(textListHints());
         if(artist!=null&&!artist.isEmpty())b.setSubtitle(artist);
         return new MediaBrowserCompat.MediaItem(b.build(),
             MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
