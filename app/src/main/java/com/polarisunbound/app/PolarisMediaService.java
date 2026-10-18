@@ -2857,7 +2857,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 parent.startsWith(PolarisYtmCatalog.BROWSE) ||
                 parent.startsWith(PolarisYtmCatalog.CAPTURED) ||
                 PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent) ||
-                parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST))){
+                PolarisYtmCatalog.ACCOUNT_SONGS.equals(parent) ||
+                PolarisYtmCatalog.ACCOUNT_LIKED.equals(parent) ||
+                PolarisYtmCatalog.ACCOUNT_ALBUMS.equals(parent) ||
+                parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST) ||
+                parent.startsWith(PolarisYtmCatalog.ACCOUNT_ALBUM))){
             result.detach();
             PolarisYtmCatalog.get(this).load(parent,(children,error)->{
                 if(error!=null)trace("YTM catalog "+parent+" "+error);
@@ -2885,7 +2889,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             // Hush/Metrolist-inspired browse layout, populated ONLY with
             // real public YTM server results or user-approved visible UI labels.
             x.add(folder(PolarisYtmCatalog.ACCOUNT_LIBRARY,
-                "내 플레이리스트 · Polaris 로그인 필요"));
+                "내 플레이리스트"));
+            x.add(folder(PolarisYtmCatalog.ACCOUNT_SONGS,
+                "저장한 노래"));
+            x.add(folder(PolarisYtmCatalog.ACCOUNT_LIKED,
+                "좋아요 표시한 음악"));
+            x.add(folder(PolarisYtmCatalog.ACCOUNT_ALBUMS,
+                "보관함 앨범"));
             x.add(folder(PolarisYtmCatalog.HOME,"홈 · YT Music 공개 추천"));
             x.add(folder(PolarisYtmCatalog.LIBRARY,"보관함 · 실제 화면에서 읽은 항목"));
             // The original live YTM track is still mirrored as before.
