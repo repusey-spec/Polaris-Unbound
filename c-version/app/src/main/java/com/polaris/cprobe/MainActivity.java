@@ -240,19 +240,8 @@ public final class MainActivity extends Activity {
         JSONObject text=x==null?null:x.optJSONObject("text");
         JSONArray runs=text==null?null:text.optJSONArray("runs");
         JSONObject first=runs==null?null:runs.optJSONObject(0);
-        String label=first==null?"":first.optString("text","").trim();
-        if(label.equalsIgnoreCase("Song")||label.equalsIgnoreCase("Songs")||
-           label.equals("노래")||label.equals("곡"))return "song";
-        if(label.equalsIgnoreCase("Video")||
-           label.equalsIgnoreCase("Videos")||label.equals("동영상")||
-           label.equals("뮤직비디오")||label.equalsIgnoreCase("Music video"))
-            return "video";
-        if(label.equalsIgnoreCase("Episode")||
-           label.equalsIgnoreCase("Episodes")||label.equals("에피소드")||
-           label.equals("팟캐스트")||label.equalsIgnoreCase("Podcast")||
-           label.equalsIgnoreCase("Podcast episode"))
-            return "episode";
-        return "unknown";
+        return MusicRowType.classify(
+            first==null?"":first.optString("text",""));
     }
 
     private static final class SearchClient {
