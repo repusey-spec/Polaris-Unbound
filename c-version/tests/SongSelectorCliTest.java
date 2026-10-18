@@ -51,6 +51,31 @@ public final class SongSelectorCliTest {
         SongSelector.Candidate exact=song("IIIIIIIIIII","너에게는","성시경",3);
         wants("성시경 너에게는","IIIIIIIIIII",rightSung,exact);
 
-        System.out.println("C02 singer/title matching: 11 fixtures OK");
+        // Verified against actual anonymous YT Music API response fields
+        // printed by the CI diagnostic for the user's two failing searches.
+        SongSelector.Candidate realSung=song("JJJJJJJJJJJ",
+            "너에게 To You","성시경",0);
+        SongSelector.Candidate realWrong=song("KKKKKKKKKKK",
+            "연연","성시경",1);
+        wants("성시경 너에게는","JJJJJJJJJJJ",
+            realWrong,realSung,wrongCover);
+
+        SongSelector.Candidate seotaijiOriginal=new SongSelector.Candidate(
+            "LLLLLLLLLLL","To You","Seo Taiji and Boys",
+            "Seotaiji and Boys II",0);
+        SongSelector.Candidate seotaijiLive=new SongSelector.Candidate(
+            "MMMMMMMMMMM","너에게","서태지",
+            "Seotaiji Live Tour Zero 04",1);
+        wants("서태지 너에게","LLLLLLLLLLL",
+            seotaijiLive,seotaijiOriginal,wrongCover);
+        wants("서태지 너에게","LLLLLLLLLLL",
+            seotaijiOriginal,seotaijiLive,wrongCover);
+        wants("성시경 너에게는",null,realWrong,wrongCover);
+        // Never match an unrelated Korean extension of "너에게".
+        SongSelector.Candidate unrelated=song("NNNNNNNNNNN",
+            "너에게로 가는 길","성시경",1);
+        wants("성시경 너에게",null,unrelated,wrongCover);
+
+        System.out.println("C03 singer/title matching: 16 fixtures OK");
     }
 }
