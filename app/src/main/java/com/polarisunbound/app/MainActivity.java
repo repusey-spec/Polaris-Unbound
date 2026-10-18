@@ -58,8 +58,6 @@ public class MainActivity extends AppCompatActivity {
     private HorizontalScrollView subNavScroll;
     private String nasNav="home";
     private String ytmNav="home";
-    // Remember which library was last selected when leaving the Media section.
-    private String lastMediaSource="ytm";
     private FrameLayout pageHost;
     private TextView scheduleView;
     private LinearLayout miniPlayer;
@@ -470,9 +468,6 @@ public class MainActivity extends AppCompatActivity {
         final boolean nas="mp3".equals(currentPage)||"mp3_now".equals(currentPage);
         final boolean ytm="ytm".equals(currentPage);
         final boolean media=nas||ytm;
-        if(nas)lastMediaSource="nas";
-        else if(ytm)lastMediaSource="ytm";
-
         // Top index: Radio | Media | CAN. Media is a source group, not a player.
         addSourceTab(tabsBar,"라디오","radio".equals(currentPage),this::showDomestic);
         addSourceTab(tabsBar,"미디어",media,this::showMedia);
@@ -827,10 +822,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMedia(){
-        // Preserve the last selected Media source when returning from Radio/CAN.
-        if("ytm".equals(currentPage)||"mp3".equals(currentPage))return;
-        if("nas".equals(lastMediaSource))showMp3();
-        else showYtm();
+        // YT Music is the default Media landing page on the phone.
+        // NAS Music remains available as the second source selector.
+        if(!"ytm".equals(currentPage))showYtm();
     }
 
     private void showYtm(){
