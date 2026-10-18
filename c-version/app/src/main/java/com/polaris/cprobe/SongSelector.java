@@ -13,11 +13,16 @@ final class SongSelector {
         final String id;
         final String title;
         final String artist;
+        final String album;
         final int rank;
         Candidate(String id, String title, String artist, int rank) {
+            this(id,title,artist,"",rank);
+        }
+        Candidate(String id, String title, String artist, String album, int rank) {
             this.id = id;
             this.title = title == null ? "" : title;
             this.artist = artist == null ? "" : artist;
+            this.album = album == null ? "" : album;
             this.rank = rank;
         }
     }
@@ -41,34 +46,60 @@ final class SongSelector {
     private static boolean isArtistMatch(String requested, String artist) {
         if(requested.isEmpty() || artist.isEmpty()) return false;
         if(artist.equals(requested)) return true;
-        // The credit "서태지와 아이들" must accept "서태지".
+        // Accept published bilingual credits as the same performer.
+        // The actual YT Music search returned Seo Taiji and Boys when the
+        // Korean query was 서태지, and 서태지 for a 2004 live version.
+        if((requested.equals("서태지")||requested.equals("서태지와아이들")) &&
+           (artist.contains("seotaiji")||artist.contains("seotaeji")||
+            artist.contains("서태지"))) return true;
         return requested.length() >= 2 && artist.contains(requested);
     }
 
-    private static int titleScore(String wanted, String actual) {
-        if(wanted.isEmpty() || actual.isEmpty()) return -10000;
-        if(actual.equals(wanted)) return 140;
-        // Korean particles are common in spoken queries: "너에게는" -> "너에게".
-        if(wanted.length() > 2) {
-            for(String particle : new String[]{"는", "은", "을", "를"}) {
-                if(wanted.endsWith(particle) &&
-                   actual.equals(wanted.substring(0, wanted.length()-particle.length())))
-                    return 121;
+    private static int titleScore(String wanted, String actual,
+                                  String artist) {
+        if(wanted.isEmpty() || actual.isEmpty())return -10000;
+        if(actual.equals(wanted))return 140;
+        // Alternate English title in the verified Seo Taiji studio track.
+        // Only permit this alias for the corresponding credited artist.
+        boolean isSeotaiji=artist.contains("seotaiji") ||
+            artist.contains("seotaeji") || artist.contains("서태지");
+        if(isSeotaiji && wanted.equals("너에게") && actual.equals("toyou"))
+            return 137;
+        String core=wanted;
+        if(core.length()>2)for(String particle:new String[]{"는","은","을","를"}){
+            if(core.endsWith(particle)){
+                core=core.substring(0,core.length()-particle.length());
+                break;
             }
         }
-        // A listed title may have a suffix such as "(2013 Remastered)".
-        if(actual.startsWith(wanted) && wanted.length() >= 3) return 105;
-        // A partial track title is weaker; do not use it unless artist matches.
-        if(wanted.length() >= 4 && actual.contains(wanted)) return 80;
+        if(!core.equals(wanted)&&actual.equals(core))return 125;
+
+        // Real response: "너에게 To You" (성시경).
+        // Allow a Korean title followed by its *Latin-script translation*,
+        // but reject unrelated Korean extensions such as "너에게로 가는 길".
+        if(core.length()>=3 && actual.startsWith(core)){
+            String suffix=actual.substring(core.length());
+            if(suffix.matches("[a-z]{3,36}"))return 127;
+        }
+        if(actual.startsWith(wanted) && wanted.length()>=3){
+            String suffix=actual.substring(wanted.length());
+            if(suffix.matches("[a-z]{3,36}"))return 127;
+        }
+        // Allow an explicit version suffix with a known music-specific tag.
+        if(actual.startsWith(wanted) && wanted.length()>=3 &&
+           (actual.contains("remaster") || actual.contains("리마스터")))
+            return 108;
         return -10000;
     }
 
-    private static int versionPenalty(String originalQuery, String candidateTitle) {
-        String q = norm(originalQuery), t = norm(candidateTitle);
-        int penalty = 0;
-        for(String term : new String[]{"live","cover","remix","karaoke",
-            "instrumental","inst","노래방","커버","라이브","리믹스"}) {
-            if(t.contains(term) && !q.contains(term)) penalty += 14;
+    private static int versionPenalty(String originalQuery, Candidate candidate) {
+        String q=norm(originalQuery);
+        String title=norm(candidate.title),album=norm(candidate.album);
+        int penalty=0;
+        for(String term:new String[]{"live","라이브","concert","공연",
+                "karaoke","노래방","cover","커버","remix","리믹스"}) {
+            if(!q.contains(term)&&(title.contains(term)||album.contains(term)))
+                penalty+=72;
         }
         return penalty;
     }
@@ -84,7 +115,7 @@ final class SongSelector {
         int best = -10000;
         if(parts.length == 1) {
             // Without an artist, only an exact or close title can match.
-            int t = titleScore(norm(rawQuery), title);
+            int t = titleScore(norm(rawQuery), title, artist);
             if(t >= 105) best = t + 40;
         } else {
             // Support "성시경 너에게" and multi-word artists such as
@@ -99,13 +130,13 @@ final class SongSelector {
                 String a = norm(requestedArtist.toString());
                 String t = norm(requestedTitle.toString());
                 if(!isArtistMatch(a, artist)) continue;
-                int ts = titleScore(t, title);
+                int ts = titleScore(t, title, artist);
                 if(ts < 80) continue;
                 int artistScore = artist.equals(a) ? 125 : 105;
                 best = Math.max(best, artistScore + ts);
             }
         }
-        return best <= 0 ? best : best - versionPenalty(rawQuery, c.title);
+        return best <= 0 ? best : best - versionPenalty(rawQuery, c);
     }
 
     /**
