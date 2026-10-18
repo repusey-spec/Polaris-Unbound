@@ -22,3 +22,18 @@ gradle --no-daemon assembleDebug
 APK: `c-version/app/build/outputs/apk/debug/app-debug.apk` (debug signed).
 
 For meaningful testing on the phone, first have the official YouTube Music app installed and signed in (if its track requires Premium). Type an unambiguous song/artist such as `Clazziquai Maybe Baby` and tap Execute. Observe whether the official player actually starts the requested song; if it only displays an album/search page, record that as a **playback failure**.
+
+## C02.1 install fix
+
+C01 (package `com.polaris.cprobe`) and the first C02 (same package but a different ephemeral debug signing key) could not coexist or update. The first C02 caused Android to show **앱이 설치되지 않음** on a device that had C01 installed. The v2 and v1 APK certificate SHA-256 values are different.
+
+C02.1 now uses the **distinct package** `com.polaris.cprobe.c02`, so it installs **beside C01**, without uninstalling or overwriting it. Version is `C02.1-install-fixed`, versionCode 3. Search, matching and official YT Music deep-link logic are unchanged. The CI build always restores the existing stable debug signing key from `.github/polaris-debug.keystore.b64` and signs the C02.1 build with it, so future C02.x APKs with this same package/signing method can update normally.
+
+For a local build first restore the repository debug signing key:
+
+```bash
+base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
+gradle --no-daemon -p c-version :app:assembleDebug
+```
+
+Please do not delete the working C01 until C02.1 passes device tests.
