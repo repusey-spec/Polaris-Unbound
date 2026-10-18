@@ -81,6 +81,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView ytmPlayerTitle;
     private TextView ytmPlayerArtist;
     private TextView ytmPlayerPlayPause;
+    private TextView ytmPlayerPrevious;
+    private TextView ytmPlayerNext;
     private TextView ytmPlayerLike;
     private TextView ytmPlayerDislike;
     private TextView ytmPlayerShuffle;
@@ -1113,6 +1115,324 @@ public class MainActivity extends AppCompatActivity {
                     });
             }
         });
+    }
+
+
+    /** Open the official YT Music MediaSession as a Polaris PHONE player UI.
+     * Keep the existing browse ScrollView instance to preserve its scroll position.
+     * Never launch YT Music or replace the verified Test 16 playback source here.
+     */
+    private void showYtmPlayer(){
+        if(!"ytm".equals(currentPage)||!isYtmMetadata(lastMetadata)){
+            Toast.makeText(this,"YT Music 재생 세션이 연결되지 않았습니다.",
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ensureShell();
+        ytmReturnView=pageHost.getChildCount()>0?pageHost.getChildAt(0):null;
+        if(ytmReturnView!=null)pageHost.removeView(ytmReturnView);
+        currentPage="ytm_now";
+        tabsBar.setVisibility(View.GONE);
+        bottomSourceBar.setVisibility(View.GONE);
+        subNavScroll.setVisibility(View.GONE);
+        miniPlayer.setVisibility(View.GONE);
+        pageHost.removeAllViews();
+
+        PlayerSwipeScrollView scroll=new PlayerSwipeScrollView(this);
+        LinearLayout root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(22),dp(8),dp(22),dp(26));
+
+        TextView collapse=playerIconButton("⌄",34);
+        collapse.setGravity(android.view.Gravity.LEFT|android.view.Gravity.CENTER_VERTICAL);
+        collapse.setContentDescription("YT Music 목록으로 돌아가기");
+        collapse.setOnClickListener(v->returnFromYtmPlayer());
+        root.addView(collapse,new LinearLayout.LayoutParams(dp(64),dp(52)));
+
+        TextView caption=new TextView(this);
+        caption.setText("YT Music · 공식 앱 재생");
+        caption.setTextSize(13);
+        caption.setTextColor(0xCCFFFFFF);
+        caption.setGravity(android.view.Gravity.CENTER);
+        root.addView(caption,new LinearLayout.LayoutParams(-1,dp(36)));
+
+        FrameLayout artFrame=new FrameLayout(this);
+        artFrame.setBackground(roundedBg(0xFF303038,22));
+        artFrame.setClipToOutline(true);
+        ytmPlayerArt=new ImageView(this);
+        ytmPlayerArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        artFrame.addView(ytmPlayerArt,new FrameLayout.LayoutParams(-1,-1));
+        int artSize=Math.min(
+            getResources().getDisplayMetrics().widthPixels-dp(44),dp(420));
+        LinearLayout.LayoutParams artLp=new LinearLayout.LayoutParams(artSize,artSize);
+        artLp.gravity=android.view.Gravity.CENTER_HORIZONTAL;
+        artLp.setMargins(0,dp(6),0,dp(22));
+        root.addView(artFrame,artLp);
+
+        ytmPlayerTitle=new TextView(this);
+        ytmPlayerTitle.setTextSize(27);
+        ytmPlayerTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        ytmPlayerTitle.setTextColor(Color.WHITE);
+        ytmPlayerTitle.setSingleLine(true);
+        ytmPlayerTitle.setHorizontallyScrolling(true);
+        ytmPlayerTitle.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
+        ytmPlayerTitle.setMarqueeRepeatLimit(-1);
+        ytmPlayerTitle.setSelected(true);
+        root.addView(ytmPlayerTitle,new LinearLayout.LayoutParams(-1,dp(44)));
+
+        ytmPlayerArtist=new TextView(this);
+        ytmPlayerArtist.setTextSize(18);
+        ytmPlayerArtist.setTextColor(0xCCFFFFFF);
+        ytmPlayerArtist.setSingleLine(true);
+        ytmPlayerArtist.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        root.addView(ytmPlayerArtist,new LinearLayout.LayoutParams(-1,dp(38)));
+
+        // Only forward actions the official YT Music MediaSession exposes.
+        LinearLayout reactions=new LinearLayout(this);
+        reactions.setOrientation(LinearLayout.HORIZONTAL);
+        ytmPlayerLike=playerIconButton("좋아요",16);
+        ytmPlayerDislike=playerIconButton("싫어요",16);
+        setThumbButtonIcon(ytmPlayerLike,R.drawable.ic_thumb_up_player,false,false);
+        setThumbButtonIcon(ytmPlayerDislike,R.drawable.ic_thumb_down_player,false,true);
+        ytmPlayerLike.setBackground(roundedBg(0x6637373F,28));
+        ytmPlayerDislike.setBackground(roundedBg(0x6637373F,28));
+        ytmPlayerLike.setOnClickListener(v->sendYtmCustom("thumbs_up_action"));
+        ytmPlayerDislike.setOnClickListener(v->sendYtmCustom("thumbs_down_action"));
+        LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,dp(52),1);
+        left.setMargins(0,0,dp(6),0);
+        reactions.addView(ytmPlayerLike,left);
+        LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,dp(52),1);
+        right.setMargins(dp(6),0,0,0);
+        reactions.addView(ytmPlayerDislike,right);
+        root.addView(reactions,new LinearLayout.LayoutParams(-1,-2));
+
+        LinearLayout progressBlock=new LinearLayout(this);
+        progressBlock.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams blockLp=new LinearLayout.LayoutParams(-1,-2);
+        blockLp.setMargins(0,dp(22),0,0);
+        ytmPlayerProgress=new SeekBar(this);
+        ytmPlayerProgress.setMax(1000);
+        ytmPlayerProgress.setProgress(0);
+        ytmPlayerProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar bar,int value,boolean user){
+                if(user && ytmUserSeeking && ytmPlayerElapsed!=null){
+                    long duration=ytmDurationMs();
+                    if(duration>0)
+                        ytmPlayerElapsed.setText(formatTime(duration*value/1000L));
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar){
+                ytmUserSeeking=true;
+            }
+            @Override public void onStopTrackingTouch(SeekBar bar){
+                long duration=ytmDurationMs();
+                if(controller!=null && duration>0 && ytmHasAction(
+                        PlaybackStateCompat.ACTION_SEEK_TO))
+                    controller.getTransportControls().seekTo(
+                        duration*bar.getProgress()/1000L);
+                ytmUserSeeking=false;
+                updateYtmPlayerProgress();
+            }
+        });
+        progressBlock.addView(ytmPlayerProgress,
+            new LinearLayout.LayoutParams(-1,dp(34)));
+        LinearLayout times=new LinearLayout(this);
+        times.setOrientation(LinearLayout.HORIZONTAL);
+        ytmPlayerElapsed=playerIconButton("0:00",12);
+        ytmPlayerDuration=playerIconButton("--:--",12);
+        ytmPlayerElapsed.setGravity(android.view.Gravity.LEFT);
+        ytmPlayerDuration.setGravity(android.view.Gravity.RIGHT);
+        times.addView(ytmPlayerElapsed,new LinearLayout.LayoutParams(0,-2,1));
+        times.addView(ytmPlayerDuration,new LinearLayout.LayoutParams(0,-2,1));
+        progressBlock.addView(times,new LinearLayout.LayoutParams(-1,-2));
+        root.addView(progressBlock,blockLp);
+
+        LinearLayout controls=new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(android.view.Gravity.CENTER);
+        controls.setPadding(0,dp(14),0,0);
+        ytmPlayerShuffle=playerIconButton("🔀",24);
+        ytmPlayerPrevious=playerIconButton("◀|",28);
+        ytmPlayerPlayPause=playerIconButton("▶",34);
+        ytmPlayerNext=playerIconButton("|▶",28);
+        ytmPlayerRepeat=playerIconButton("↻",28);
+        ytmPlayerPlayPause.setBackground(roundedBg(0xFFF7F7F7,40));
+        ytmPlayerPlayPause.setTextColor(Color.BLACK);
+        ytmPlayerShuffle.setOnClickListener(v->sendYtmCustom("shuffle_action"));
+        ytmPlayerRepeat.setOnClickListener(v->sendYtmCustom("loop_mode_action"));
+        ytmPlayerPrevious.setOnClickListener(v->{
+            if(controller!=null && ytmHasAction(PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS))
+                controller.getTransportControls().skipToPrevious();
+        });
+        ytmPlayerNext.setOnClickListener(v->{
+            if(controller!=null && ytmHasAction(PlaybackStateCompat.ACTION_SKIP_TO_NEXT))
+                controller.getTransportControls().skipToNext();
+        });
+        ytmPlayerPlayPause.setOnClickListener(v->{
+            if(controller==null)return;
+            int state=lastPlaybackState==null?PlaybackStateCompat.STATE_NONE:
+                lastPlaybackState.getState();
+            if(state==PlaybackStateCompat.STATE_PLAYING ||
+                state==PlaybackStateCompat.STATE_BUFFERING){
+                if(ytmHasAction(PlaybackStateCompat.ACTION_PAUSE))
+                    controller.getTransportControls().pause();
+            }else if(ytmHasAction(PlaybackStateCompat.ACTION_PLAY))
+                controller.getTransportControls().play();
+        });
+        controls.addView(ytmPlayerShuffle,new LinearLayout.LayoutParams(0,dp(68),1));
+        controls.addView(ytmPlayerPrevious,new LinearLayout.LayoutParams(0,dp(68),1));
+        LinearLayout.LayoutParams centerLp=new LinearLayout.LayoutParams(dp(78),dp(78));
+        centerLp.setMargins(dp(5),0,dp(5),0);
+        controls.addView(ytmPlayerPlayPause,centerLp);
+        controls.addView(ytmPlayerNext,new LinearLayout.LayoutParams(0,dp(68),1));
+        controls.addView(ytmPlayerRepeat,new LinearLayout.LayoutParams(0,dp(68),1));
+        root.addView(controls,new LinearLayout.LayoutParams(-1,-2));
+
+        scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
+        pageHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+        updateYtmPlayerMetadata();
+        updateYtmPlayerState();
+        progressHandler.removeCallbacks(progressTick);
+        progressHandler.post(progressTick);
+    }
+
+    private void returnFromYtmPlayer(){
+        if(!"ytm_now".equals(currentPage))return;
+        progressHandler.removeCallbacks(progressTick);
+        pageHost.removeAllViews();
+        currentPage="ytm";
+        tabsBar.setVisibility(View.VISIBLE);
+        refreshTabs();
+        if(ytmReturnView!=null)
+            pageHost.addView(ytmReturnView,new FrameLayout.LayoutParams(-1,-1));
+        else {
+            showYtm();
+            return;
+        }
+        ytmReturnView=null;
+        ytmPlayerProgress=null;
+        ytmUserSeeking=false;
+        updateMiniPlayerMetadata();
+        updateMiniPlayerState();
+        updateYtmNow();
+    }
+
+    private boolean ytmHasAction(long action){
+        PlaybackStateCompat state=lastPlaybackState;
+        if(state==null&&controller!=null)state=controller.getPlaybackState();
+        return isYtmMetadata(lastMetadata)&&state!=null &&
+            (state.getActions()&action)!=0;
+    }
+
+    private boolean ytmHasCustom(String action){
+        PlaybackStateCompat state=lastPlaybackState;
+        if(state==null&&controller!=null)state=controller.getPlaybackState();
+        if(!isYtmMetadata(lastMetadata)||state==null ||
+                state.getCustomActions()==null)return false;
+        for(PlaybackStateCompat.CustomAction a:state.getCustomActions())
+            if(action.equals(a.getAction()))return true;
+        return false;
+    }
+
+    private void sendYtmCustom(String action){
+        if(controller!=null&&ytmHasCustom(action))
+            controller.getTransportControls().sendCustomAction(action,null);
+    }
+
+    private long ytmDurationMs(){
+        MediaMetadataCompat m=lastMetadata;
+        return isYtmMetadata(m)?
+            Math.max(0L,m.getLong(MediaMetadataCompat.METADATA_KEY_DURATION)):0L;
+    }
+
+    private long ytmPositionMs(){
+        PlaybackStateCompat state=lastPlaybackState;
+        if(state==null&&controller!=null)state=controller.getPlaybackState();
+        if(state==null)return 0L;
+        long position=Math.max(0L,state.getPosition());
+        if(state.getState()==PlaybackStateCompat.STATE_PLAYING &&
+                state.getLastPositionUpdateTime()>0){
+            long elapsed=Math.max(0L,android.os.SystemClock.elapsedRealtime()-
+                state.getLastPositionUpdateTime());
+            position+=Math.max(0L,Math.round(elapsed*state.getPlaybackSpeed()));
+        }
+        long duration=ytmDurationMs();
+        return duration>0?Math.min(position,duration):position;
+    }
+
+    private void updateYtmPlayerProgress(){
+        if(!"ytm_now".equals(currentPage)||ytmPlayerProgress==null)return;
+        long duration=ytmDurationMs();
+        long position=ytmPositionMs();
+        if(!ytmUserSeeking){
+            int progress=duration>0?
+                (int)Math.min(1000L,(position*1000L)/duration):0;
+            ytmPlayerProgress.setProgress(progress);
+            if(ytmPlayerElapsed!=null)
+                ytmPlayerElapsed.setText(formatTime(position));
+        }
+        if(ytmPlayerDuration!=null)
+            ytmPlayerDuration.setText(duration>0?formatTime(duration):"--:--");
+        ytmPlayerProgress.setEnabled(duration>0 &&
+            ytmHasAction(PlaybackStateCompat.ACTION_SEEK_TO));
+    }
+
+    private void updateYtmPlayerMetadata(){
+        if(!"ytm_now".equals(currentPage))return;
+        MediaMetadataCompat m=lastMetadata;
+        if(!isYtmMetadata(m))return;
+        if(ytmPlayerTitle!=null){
+            String title=m.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+            ytmPlayerTitle.setText(title==null||title.isEmpty()?
+                "YT Music 재생 대기":title);
+        }
+        if(ytmPlayerArtist!=null){
+            String artist=m.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
+            String album=m.getString(MediaMetadataCompat.METADATA_KEY_ALBUM);
+            ytmPlayerArtist.setText((artist==null?"":artist)+
+                (album==null||album.isEmpty()?"":" · "+album));
+        }
+        if(ytmPlayerArt!=null){
+            Bitmap art=m.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
+            ytmPlayerArt.setImageBitmap(art);
+        }
+        updateYtmPlayerState();
+    }
+
+    private void updateYtmPlayerState(){
+        if(!"ytm_now".equals(currentPage))return;
+        PlaybackStateCompat state=lastPlaybackState;
+        int code=state==null?PlaybackStateCompat.STATE_NONE:state.getState();
+        boolean playing=code==PlaybackStateCompat.STATE_PLAYING ||
+            code==PlaybackStateCompat.STATE_BUFFERING;
+        if(ytmPlayerPlayPause!=null){
+            ytmPlayerPlayPause.setText(playing?"❚❚":"▶");
+            boolean enabled=ytmHasAction(playing?
+                PlaybackStateCompat.ACTION_PAUSE:PlaybackStateCompat.ACTION_PLAY);
+            ytmPlayerPlayPause.setEnabled(enabled);
+            ytmPlayerPlayPause.setAlpha(enabled?1f:0.45f);
+        }
+        if(ytmPlayerPrevious!=null){
+            boolean enabled=ytmHasAction(PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS);
+            ytmPlayerPrevious.setEnabled(enabled);
+            ytmPlayerPrevious.setAlpha(enabled?1f:0.35f);
+        }
+        if(ytmPlayerNext!=null){
+            boolean enabled=ytmHasAction(PlaybackStateCompat.ACTION_SKIP_TO_NEXT);
+            ytmPlayerNext.setEnabled(enabled);
+            ytmPlayerNext.setAlpha(enabled?1f:0.35f);
+        }
+        TextView[] buttons={ytmPlayerLike,ytmPlayerDislike,
+            ytmPlayerShuffle,ytmPlayerRepeat};
+        String[] actions={"thumbs_up_action","thumbs_down_action",
+            "shuffle_action","loop_mode_action"};
+        for(int i=0;i<buttons.length;i++){
+            if(buttons[i]==null)continue;
+            boolean available=ytmHasCustom(actions[i]);
+            buttons[i].setEnabled(available);
+            buttons[i].setAlpha(available?1f:0.35f);
+        }
+        updateYtmPlayerProgress();
     }
 
     private void updateYtmNow(){
