@@ -569,8 +569,19 @@ public class MainActivity extends AppCompatActivity {
                           "ytm:openapp".equals(id)))){
             selectedRadioId=null;
             scheduleHandler.removeCallbacksAndMessages(null);
-            try{controller.getTransportControls().playFromMediaId(id,null);}
-            catch(Throwable e){
+            try{
+                // Phone list selections request a background MediaSession route
+                // first. The service retains the verified ACTION_VIEW fallback
+                // if YT Music does not advertise PLAY_FROM_URI.
+                Bundle request=null;
+                if(id!=null && (id.startsWith(PolarisYtmCatalog.PLAY) ||
+                        id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST))){
+                    request=new Bundle();
+                    request.putBoolean(
+                        PolarisMediaService.EXTRA_YTM_PHONE_BACKGROUND,true);
+                }
+                controller.getTransportControls().playFromMediaId(id,request);
+            }catch(Throwable e){
                 Toast.makeText(this,"YT Music 연결 오류",Toast.LENGTH_SHORT).show();
             }
             return;
