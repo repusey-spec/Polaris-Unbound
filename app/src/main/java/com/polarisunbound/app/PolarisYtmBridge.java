@@ -193,7 +193,21 @@ final class PolarisYtmBridge {
         int state=ps==null?PlaybackState.STATE_NONE:ps.getState();
         long srcActions=ps==null?0:ps.getActions();
         String metadataSig=valid(title)+"|"+valid(artist)+"|"+valid(album)+"|"+duration;
-        if(!metadataSig.equals(lastMetadataSignature)||lastMetadata==null){
+        Bitmap sourceArt=null;
+        if(md!=null){
+            try{
+                sourceArt=md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+                if(sourceArt==null)sourceArt=md.getBitmap(MediaMetadata.METADATA_KEY_ART);
+            }catch(Exception ignored){}
+        }
+        // Official YTM can publish the title *before* the album bitmap.
+        // Text fields alone cannot be used as the metadata cache key.
+        boolean sameTrack=metadataSig.equals(lastMetadataSignature);
+        Bitmap previousArt=lastMetadata==null?null:
+            lastMetadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
+        boolean lateArtwork=sameTrack && sourceArt!=null && previousArt==null;
+        boolean rebuildMetadata=!sameTrack||lastMetadata==null||lateArtwork;
+        if(rebuildMetadata){
             lastMetadataSignature=metadataSig;
             MediaMetadataCompat.Builder builder=new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID,MEDIA_ID)
@@ -201,21 +215,18 @@ final class PolarisYtmBridge {
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,valid(artist))
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM,valid(album))
                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION,Math.max(0,duration));
-            if(md!=null){
-                Bitmap artwork=md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
-                if(artwork==null)artwork=md.getBitmap(MediaMetadata.METADATA_KEY_ART);
-                if(artwork!=null){
-                    try{
-                        int width=artwork.getWidth(),height=artwork.getHeight();
-                        if(width>256||height>256){
-                            double scale=Math.min(256d/width,256d/height);
-                            artwork=Bitmap.createScaledBitmap(artwork,
-                                Math.max(1,(int)(width*scale)),
-                                Math.max(1,(int)(height*scale)),true);
-                        }
-                        builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,artwork);
-                    }catch(Exception ignored){}
-                }
+            Bitmap artwork=sourceArt!=null?sourceArt:(sameTrack?previousArt:null);
+            if(artwork!=null){
+                try{
+                    int width=artwork.getWidth(),height=artwork.getHeight();
+                    if(width>256||height>256){
+                        double scale=Math.min(256d/width,256d/height);
+                        artwork=Bitmap.createScaledBitmap(artwork,
+                            Math.max(1,(int)(width*scale)),
+                            Math.max(1,(int)(height*scale)),true);
+                    }
+                    builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,artwork);
+                }catch(Exception ignored){}
             }
             lastMetadata=builder.build();
             listener.onBrowserChildrenChanged();
@@ -266,7 +277,7 @@ final class PolarisYtmBridge {
         if(lastReportedPlaying&&expected>=0)
             expected+=Math.round((now-lastReportedAt)*lastReportedSpeed);
         boolean seekOrDrift=expected<0||Math.abs(position-expected)>2500;
-        if(!stateSignature.equals(lastStateSignature)||seekOrDrift){
+        if(rebuildMetadata||!stateSignature.equals(lastStateSignature)||seekOrDrift){
             lastStateSignature=stateSignature;
             lastReportedPosition=position;
             lastReportedAt=now;
