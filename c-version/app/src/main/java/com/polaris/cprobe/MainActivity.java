@@ -304,10 +304,11 @@ public final class MainActivity extends Activity {
                     JSONArray columns = renderer.optJSONArray("flexColumns");
                     String title = columns == null ? "" : firstText(columns.optJSONObject(0));
                     String artist = columns == null ? "" : firstArtist(columns);
+                    String album = columns == null ? "" : firstAlbum(columns);
                     if(!title.isEmpty() && !artist.isEmpty() &&
                             !result.containsKey(id)) {
                         result.put(id, new SongSelector.Candidate(
-                            id, title, artist, result.size()));
+                            id, title, artist, album, result.size()));
                     }
                 }
             }
@@ -364,6 +365,31 @@ public final class MainActivity extends Activity {
             }
         }
         return android.text.TextUtils.join(" · ",credited);
+    }
+
+    private static String firstAlbum(JSONArray columns) {
+        if(columns.length()<=1)return "";
+        JSONObject col=columns.optJSONObject(1);
+        JSONObject flex=col==null?null:
+            col.optJSONObject("musicResponsiveListItemFlexColumnRenderer");
+        JSONObject text=flex==null?null:flex.optJSONObject("text");
+        JSONArray runs=text==null?null:text.optJSONArray("runs");
+        if(runs==null)return "";
+        boolean artistSeen=false;
+        for(int i=0;i<runs.length();i++) {
+            JSONObject run=runs.optJSONObject(i);
+            if(run==null)continue;
+            String label=run.optString("text","").trim();
+            if(!isLikelyArtist(label))continue;
+            if(!artistSeen){
+                artistSeen=true;
+                continue;
+            }
+            // The next meaningful run in the official song search result
+            // is its album. Penalize live albums when selecting studio tracks.
+            return label;
+        }
+        return "";
     }
 
     private static boolean isLikelyArtist(String text) {
