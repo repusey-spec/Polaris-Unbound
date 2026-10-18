@@ -62,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     private List<MediaBrowserCompat.MediaItem> ytmHomePlaylistCache=
         Collections.emptyList();
     private long ytmHomePlaylistCachedAt=0L;
+    private boolean ytmRefreshAfterAccount=false;
     private FrameLayout pageHost;
     private TextView scheduleView;
     private LinearLayout miniPlayer;
@@ -319,6 +320,15 @@ public class MainActivity extends AppCompatActivity {
         showDomestic();
         requestAudioPermission();
         handleIncomingYtmShare(getIntent());
+    }
+
+    @Override protected void onResume(){
+        super.onResume();
+        if(ytmRefreshAfterAccount){
+            ytmRefreshAfterAccount=false;
+            if("ytm".equals(currentPage)&&"home".equals(ytmNav))
+                showYtm();
+        }
     }
 
     @Override protected void onNewIntent(Intent intent){
@@ -866,8 +876,14 @@ public class MainActivity extends AppCompatActivity {
         account.setTextColor(Color.WHITE);
         account.setGravity(android.view.Gravity.CENTER);
         account.setContentDescription("YT Music 계정 로그인 및 변경");
-        account.setOnClickListener(v->startActivity(
-            new Intent(this,PolarisYtmLoginActivity.class)));
+        account.setOnClickListener(v->{
+            // A different signed-in account must never see stale tiles
+            // from the previous account while a new request is loading.
+            ytmHomePlaylistCache=Collections.emptyList();
+            ytmHomePlaylistCachedAt=0L;
+            ytmRefreshAfterAccount=true;
+            startActivity(new Intent(this,PolarisYtmLoginActivity.class));
+        });
         heading.addView(account,new LinearLayout.LayoutParams(dp(88),dp(50)));
         body.addView(heading,new LinearLayout.LayoutParams(-1,-2));
 
@@ -979,7 +995,8 @@ public class MainActivity extends AppCompatActivity {
         note.setText("내 플레이리스트 조회 중…");
         PolarisYtmCatalog.get(this).load(PolarisYtmCatalog.ACCOUNT_LIBRARY,
             (items,error)->{
-                if(body!=homeBody||!"ytm".equals(currentPage)||
+                if(body!=homeBody||
+                    (!"ytm".equals(currentPage)&&!"ytm_now".equals(currentPage))||
                         !"home".equals(ytmNav))return;
                 if(error!=null){
                     note.setText("플레이리스트 조회 실패: "+error+
