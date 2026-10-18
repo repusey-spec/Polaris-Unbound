@@ -203,66 +203,111 @@ public final class MainActivity extends Activity {
     private static final class SearchOutcome {
         final SongSelector.Candidate song;
         final String diagnostic;
-        SearchOutcome(SongSelector.Candidate song, String diagnostic) {
+        SearchOutcome(SongSelector.Candidate song,String diagnostic){
             this.song=song;
             this.diagnostic=diagnostic;
         }
     }
 
-    private static SearchOutcome findMatch(String query,
-                                            List<SongSelector.Candidate> candidates) {
-        SongSelector.Selection match=SongSelector.select(query,candidates);
-        if(match!=null) return new SearchOutcome(match.song,"");
-        StringBuilder details=new StringBuilder("후보 ").append(candidates.size()).append("개");
-        // Show actual parsed fields if C03 cannot match. This differentiates
-        // a genuinely absent song from an incorrectly parsed YTM response.
-        for(int i=0;i<Math.min(2,candidates.size());i++) {
-            SongSelector.Candidate c=candidates.get(i);
-            details.append(" / ").append(c.title).append(" - ").append(c.artist);
-        }
-        return new SearchOutcome(null,details.toString());
+    private static final class ScanStats {
+        int allRows;
+        int validVideoIds;
+        int missingVideoIds;
+        int emptyTitles;
+        int emptyArtists;
+        int accepted;
     }
 
-    private static SearchOutcome searchMatchingSong(String query)
-        throws Exception {
+    private static SearchOutcome searchMatchingSong(String query) throws Exception {
         java.util.LinkedHashMap<String,SongSelector.Candidate> candidates =
             new java.util.LinkedHashMap<>();
-        Exception firstError=null;
-
-        String[] originalParts=query.trim().split("\\s+");
-        List<String> queries=new ArrayList<>();
+        List<String> attempts=new ArrayList<>();
+        Exception firstFailure=null;
+        java.util.LinkedHashSet<String> queries=new java.util.LinkedHashSet<>();
         queries.add(query);
-        // First attempt an unchanged C01-compatible song search. On failure
-        // broaden to search's other categories. Do NOT autoplay the first hit.
-        if(originalParts.length>=2) {
-            String last=originalParts[originalParts.length-1];
+
+        String[] parts=query.trim().split("\\s+");
+        if(parts.length>=2){
+            String last=parts[parts.length-1];
             if(last.length()>2 &&
                (last.endsWith("는")||last.endsWith("은")||
-                last.endsWith("을")||last.endsWith("를"))) {
+                last.endsWith("을")||last.endsWith("를")))
                 queries.add(query.substring(0,query.length()-1));
+            // Some regional YTM results vary with term order. Retry only
+            // after BOTH original-query search passes fail. Do not guess IDs.
+            if(parts.length==2){
+                queries.add(parts[1]+" "+parts[0]);
+                queries.add(parts[0]+" \""+parts[1]+"\"");
             }
         }
-        for(String requestQuery:queries) {
-            for(boolean filtered:new boolean[]{true,false}) {
-                try {
-                    List<SongSelector.Candidate> results =
-                        collectSongs(postYtmSearch(requestQuery,filtered));
-                    for(SongSelector.Candidate item:results)
+        int pass=0;
+        for(String q:queries){
+            for(boolean filtered:new boolean[]{true,false}){
+                pass++;
+                ScanStats stats=new ScanStats();
+                try{
+                    List<SongSelector.Candidate> collected=
+                        collectSongs(postYtmSearch(q,filtered),stats);
+                    for(SongSelector.Candidate item:collected)
                         candidates.putIfAbsent(item.id,item);
-                    SearchOutcome match=findMatch(query,
+
+                    attempts.add("#"+pass+" ["+(filtered?"노래":"전체")+"] \""+
+                        q+"\" : 원본항목 "+stats.allRows+
+                        " / 곡ID "+stats.validVideoIds+
+                        " / 가수누락 "+stats.emptyArtists+
+                        " / 수집 "+stats.accepted+
+                        " / 누적 "+candidates.size());
+
+                    SongSelector.Selection match=SongSelector.select(query,
                         new ArrayList<>(candidates.values()));
-                    if(match.song!=null) return match;
-                } catch(Exception e) {
-                    if(firstError==null) firstError=e;
-                    Log.w(TAG,"Search pass failed filtered="+filtered+
-                        " query=" + requestQuery,e);
+                    if(match!=null){
+                        Log.i(TAG,"C04 exact candidate chosen: "+
+                            match.song.title+" / "+match.song.artist+
+                            " / score="+match.score);
+                        return new SearchOutcome(match.song,"");
+                    }
+                }catch(Exception e){
+                    if(firstFailure==null)firstFailure=e;
+                    attempts.add("#"+pass+" ["+(filtered?"노래":"전체")+
+                        "] \""+q+"\" : 오류 "+e.getClass().getSimpleName()+
+                        " "+safeError(e.getMessage()));
+                    Log.w(TAG,"C04 search pass "+pass+" failed",e);
                 }
             }
         }
-        if(candidates.isEmpty()&&firstError!=null)throw firstError;
-        SearchOutcome noMatch=findMatch(query,new ArrayList<>(candidates.values()));
-        Log.i(TAG,"C03 no strict match: "+noMatch.diagnostic);
-        return noMatch;
+
+        StringBuilder report=new StringBuilder();
+        report.append("검색 시도별 결과\n");
+        for(String step:attempts)report.append(step).append('\n');
+
+        report.append("\n수집된 곡 ID: ").append(candidates.size()).append("개\n");
+        if(candidates.isEmpty() && firstFailure!=null)
+            report.append("첫 실패: ").append(firstFailure.getClass().getSimpleName())
+                .append(" ").append(safeError(firstFailure.getMessage())).append('\n');
+
+        List<SongSelector.Candidate> ranked=new ArrayList<>(candidates.values());
+        ranked.sort((x,y)->Integer.compare(
+            SongSelector.inspectScore(query,y),
+            SongSelector.inspectScore(query,x)));
+        report.append("\n상위 검색 결과 (곡명 / 가수 / 점수)\n");
+        for(int i=0;i<Math.min(12,ranked.size());i++){
+            SongSelector.Candidate c=ranked.get(i);
+            report.append(i+1).append(". ")
+                .append(c.title).append(" / ").append(c.artist)
+                .append(" / ").append(SongSelector.inspectScore(query,c))
+                .append('\n');
+        }
+        if(ranked.isEmpty())report.append("(수집된 곡 없음)\n");
+        return new SearchOutcome(null,report.toString());
+    }
+
+    private static String safeError(String input){
+        if(input==null)return "";
+        // Error is local-only in a user-approved diagnostic dialog. Avoid
+        // exposing request URLs or verbose authentication/network internals.
+        if(input.matches("YT Music HTTP [1-5][0-9]{2}"))
+            return input;
+        return "";
     }
 
     private static JSONObject postYtmSearch(String query, boolean songsOnly)
@@ -319,43 +364,51 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static List<SongSelector.Candidate> collectSongs(JSONObject response) {
-        Map<String,SongSelector.Candidate> byId = new LinkedHashMap<>();
-        walk(response, new int[]{0}, 0, byId);
+    private static List<SongSelector.Candidate> collectSongs(
+            JSONObject response,ScanStats stats){
+        Map<String,SongSelector.Candidate> byId=new LinkedHashMap<>();
+        walk(response,new int[]{0},0,byId,stats);
         return new ArrayList<>(byId.values());
     }
 
-    private static void walk(Object node, int[] visited, int depth,
-                             Map<String,SongSelector.Candidate> result) {
-        if(node == null || depth > 32 || ++visited[0] > 30000 ||
-           result.size() >= 100) return;
-        if(node instanceof JSONObject) {
-            JSONObject object = (JSONObject) node;
-            JSONObject renderer = object.optJSONObject("musicResponsiveListItemRenderer");
-            if(renderer != null) {
-                String id = findVideoId(renderer);
-                if(isVideoId(id)) {
-                    JSONArray columns = renderer.optJSONArray("flexColumns");
-                    String title = columns == null ? "" : firstText(columns.optJSONObject(0));
-                    String artist = columns == null ? "" : firstArtist(columns);
-                    String album = columns == null ? "" : firstAlbum(columns);
-                    if(!title.isEmpty() && !artist.isEmpty() &&
-                            !result.containsKey(id)) {
-                        result.put(id, new SongSelector.Candidate(
-                            id, title, artist, album, result.size()));
+    private static void walk(Object node,int[] visited,int depth,
+            Map<String,SongSelector.Candidate> result,ScanStats stats){
+        if(node==null || depth>32 || ++visited[0]>30000 ||
+                result.size()>=100)return;
+        if(node instanceof JSONObject){
+            JSONObject object=(JSONObject)node;
+            JSONObject renderer=object.optJSONObject("musicResponsiveListItemRenderer");
+            if(renderer!=null){
+                stats.allRows++;
+                String id=findVideoId(renderer);
+                if(isVideoId(id)){
+                    stats.validVideoIds++;
+                    JSONArray columns=renderer.optJSONArray("flexColumns");
+                    String title=columns==null?"":
+                        firstText(columns.optJSONObject(0));
+                    String artist=columns==null?"":
+                        firstArtist(columns);
+                    String album=columns==null?"":
+                        firstAlbum(columns);
+                    if(title.isEmpty())stats.emptyTitles++;
+                    if(artist.isEmpty())stats.emptyArtists++;
+                    if(!title.isEmpty()&&!artist.isEmpty()&&!result.containsKey(id)){
+                        result.put(id,new SongSelector.Candidate(
+                            id,title,artist,album,result.size()));
+                        stats.accepted++;
                     }
-                }
+                }else stats.missingVideoIds++;
             }
-            Iterator<String> keys = object.keys();
-            while(keys.hasNext()) {
-                walk(object.opt(keys.next()), visited, depth + 1, result);
-                if(result.size() >= 100) return;
+            Iterator<String> keys=object.keys();
+            while(keys.hasNext()){
+                walk(object.opt(keys.next()),visited,depth+1,result,stats);
+                if(result.size()>=100)return;
             }
-        } else if(node instanceof JSONArray) {
-            JSONArray arr = (JSONArray) node;
-            for(int i=0; i<arr.length(); i++) {
-                walk(arr.opt(i), visited, depth + 1, result);
-                if(result.size() >= 100) return;
+        }else if(node instanceof JSONArray){
+            JSONArray arr=(JSONArray)node;
+            for(int i=0;i<arr.length();i++){
+                walk(arr.opt(i),visited,depth+1,result,stats);
+                if(result.size()>=100)return;
             }
         }
     }
