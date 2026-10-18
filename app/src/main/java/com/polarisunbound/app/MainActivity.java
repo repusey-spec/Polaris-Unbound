@@ -58,6 +58,10 @@ public class MainActivity extends AppCompatActivity {
     private HorizontalScrollView subNavScroll;
     private String nasNav="home";
     private String ytmNav="home";
+    // Cache only verified account playlist folder items; never fabricate tiles.
+    private List<MediaBrowserCompat.MediaItem> ytmHomePlaylistCache=
+        Collections.emptyList();
+    private long ytmHomePlaylistCachedAt=0L;
     private FrameLayout pageHost;
     private TextView scheduleView;
     private LinearLayout miniPlayer;
@@ -833,70 +837,161 @@ public class MainActivity extends AppCompatActivity {
     private void showYtm(){
         ytmNav="home";
         currentPage="ytm";
-        base("YT Music · 계정 보관함");
+        base("YT Music");
+        final LinearLayout homeBody=body;
 
-        TextView library=button("내 플레이리스트");
-        library.setOnClickListener(v->showYtmBrowse(
-            PolarisYtmCatalog.ACCOUNT_LIBRARY,"내 플레이리스트"));
-        body.addView(library);
+        // A compact account control replaces the old duplicate list/transport
+        // buttons. Keep account switching accessible without taking a tile.
+        LinearLayout heading=new LinearLayout(this);
+        heading.setOrientation(LinearLayout.HORIZONTAL);
+        heading.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView headingText=new TextView(this);
+        headingText.setText("내 음악");
+        headingText.setTextColor(Color.WHITE);
+        headingText.setTextSize(20);
+        headingText.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        heading.addView(headingText,new LinearLayout.LayoutParams(0,dp(50),1));
 
-        TextView songs=button("저장한 노래");
-        songs.setOnClickListener(v->showYtmBrowse(
-            PolarisYtmCatalog.ACCOUNT_SONGS,"저장한 노래"));
-        body.addView(songs);
+        TextView reload=new TextView(this);
+        reload.setText("↻");
+        reload.setTextSize(24);
+        reload.setTextColor(Color.WHITE);
+        reload.setGravity(android.view.Gravity.CENTER);
+        reload.setContentDescription("보관함 타일 새로고침");
+        heading.addView(reload,new LinearLayout.LayoutParams(dp(52),dp(50)));
 
-        TextView likes=button("좋아요 표시한 음악");
-        likes.setOnClickListener(v->showYtmBrowse(
-            PolarisYtmCatalog.ACCOUNT_LIKED,"좋아요 표시한 음악"));
-        body.addView(likes);
-
-        TextView login=button("계정 로그인 · 변경");
-        login.setOnClickListener(v->startActivity(
+        TextView account=new TextView(this);
+        account.setText("⚙ 계정");
+        account.setTextSize(15);
+        account.setTextColor(Color.WHITE);
+        account.setGravity(android.view.Gravity.CENTER);
+        account.setContentDescription("YT Music 계정 로그인 및 변경");
+        account.setOnClickListener(v->startActivity(
             new Intent(this,PolarisYtmLoginActivity.class)));
-        body.addView(login);
+        heading.addView(account,new LinearLayout.LayoutParams(dp(88),dp(50)));
+        body.addView(heading,new LinearLayout.LayoutParams(-1,-2));
 
-        TextView statusNote=new TextView(this);
-        statusNote.setText(PolarisYtmAccountCatalog.hasLoginCookie()?
-            "Polaris 계정 로그인 확인됨 · 목록이 비어 있으면 계정을 확인하세요.":
-            "로그인이 필요합니다. '계정 로그인 · 변경'을 먼저 누르세요.");
-        statusNote.setTextColor(0xDDFFFFFF);
-        statusNote.setTextSize(13);
-        statusNote.setPadding(0,10,0,14);
-        body.addView(statusNote);
+        LinearLayout grid=new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        body.addView(grid,new LinearLayout.LayoutParams(-1,-2));
 
-        ytmNowText=new TextView(this);
-        ytmNowText.setTextColor(Color.WHITE);
-        ytmNowText.setTextSize(16);
-        ytmNowText.setPadding(0,10,0,14);
-        body.addView(ytmNowText);
+        TextView loadNote=new TextView(this);
+        loadNote.setTextColor(0xCCFFFFFF);
+        loadNote.setTextSize(13);
+        loadNote.setPadding(dp(5),dp(12),dp(5),dp(12));
+        body.addView(loadNote,new LinearLayout.LayoutParams(-1,-2));
 
-        LinearLayout controls=new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        TextView prev=button("◀◀");
-        TextView play=button("▶ / Ⅱ");
-        TextView next=button("▶▶");
-        controls.addView(prev,new LinearLayout.LayoutParams(0,-2,1));
-        controls.addView(play,new LinearLayout.LayoutParams(0,-2,1));
-        controls.addView(next,new LinearLayout.LayoutParams(0,-2,1));
-        prev.setOnClickListener(v->{
-            if(controller!=null)controller.getTransportControls().skipToPrevious();
-        });
-        play.setOnClickListener(v->{
-            if(controller==null)return;
-            boolean playing=lastPlaybackState!=null &&
-                lastPlaybackState.getState()==PlaybackStateCompat.STATE_PLAYING;
-            if(playing)controller.getTransportControls().pause();
-            else controller.getTransportControls().play();
-        });
-        next.setOnClickListener(v->{
-            if(controller!=null)controller.getTransportControls().skipToNext();
-        });
-        body.addView(controls);
+        renderYtmHomeTiles(grid,ytmHomePlaylistCache);
+        reload.setOnClickListener(v->loadYtmHomePlaylists(
+            grid,loadNote,homeBody,true));
+        loadYtmHomePlaylists(grid,loadNote,homeBody,false);
+        updateMiniPlayerMetadata();
+        updateMiniPlayerState();
+    }
 
-        TextView connect=button("원본 YT Music 재생 연결");
-        connect.setOnClickListener(v->playId(PolarisYtmBridge.MEDIA_ID,"YT Music"));
-        body.addView(connect);
-        updateYtmNow();
+    private LinearLayout ytmHomeTile(String mark,String name,String description,
+                                     Runnable action){
+        LinearLayout card=new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(14),dp(9),dp(10),dp(9));
+        card.setBackground(roundedBg(0xF0373943,18));
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setContentDescription(name);
+        card.setOnClickListener(v->action.run());
+
+        TextView symbol=new TextView(this);
+        symbol.setText(mark);
+        symbol.setTextColor(0xFFB6D8F5);
+        symbol.setTextSize(23);
+        card.addView(symbol,new LinearLayout.LayoutParams(-1,dp(31)));
+
+        TextView title=new TextView(this);
+        title.setText(name);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(16);
+        title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        title.setMaxLines(2);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        card.addView(title,new LinearLayout.LayoutParams(-1,-2));
+
+        TextView sub=new TextView(this);
+        sub.setText(description==null?"":description);
+        sub.setTextColor(0xBCFFFFFF);
+        sub.setTextSize(12);
+        sub.setSingleLine(true);
+        sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        card.addView(sub,new LinearLayout.LayoutParams(-1,-2));
+        return card;
+    }
+
+    private void renderYtmHomeTiles(LinearLayout grid,
+                        List<MediaBrowserCompat.MediaItem> playlists){
+        grid.removeAllViews();
+        List<LinearLayout> cards=new ArrayList<>();
+        cards.add(ytmHomeTile("♥","좋아요 음악","좋아요 표시한 곡",
+            ()->showYtmBrowse(PolarisYtmCatalog.ACCOUNT_LIKED,
+                "좋아요 표시한 음악")));
+        cards.add(ytmHomeTile("♫","저장한 노래","내 보관함",
+            ()->showYtmBrowse(PolarisYtmCatalog.ACCOUNT_SONGS,"저장한 노래")));
+        if(playlists!=null){
+            for(MediaBrowserCompat.MediaItem item:playlists){
+                if(item==null||!item.isBrowsable()||item.getMediaId()==null||
+                        !item.getMediaId().startsWith(
+                            PolarisYtmCatalog.ACCOUNT_PLAYLIST))continue;
+                final String id=item.getMediaId();
+                final CharSequence name=item.getDescription().getTitle();
+                final CharSequence subtitle=item.getDescription().getSubtitle();
+                final String title=name==null?"(제목 없음)":name.toString();
+                cards.add(ytmHomeTile("▤",title,
+                    subtitle==null?"내 플레이리스트":subtitle.toString(),
+                    ()->showYtmBrowse(id,title)));
+            }
+        }
+        for(int i=0;i<cards.size();i+=2){
+            LinearLayout row=new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rowParams=new LinearLayout.LayoutParams(-1,-2);
+            rowParams.setMargins(0,0,0,dp(10));
+            for(int col=0;col<2;col++){
+                LinearLayout.LayoutParams cardParams=new LinearLayout.LayoutParams(
+                    0,dp(122),1);
+                cardParams.setMargins(dp(5),0,dp(5),0);
+                if(i+col<cards.size())row.addView(cards.get(i+col),cardParams);
+                else row.addView(new View(this),cardParams);
+            }
+            grid.addView(row,rowParams);
+        }
+    }
+
+    private void loadYtmHomePlaylists(LinearLayout grid,TextView note,
+                                      LinearLayout homeBody,boolean force){
+        if(!PolarisYtmAccountCatalog.hasLoginCookie()){
+            note.setText("계정 로그인이 필요합니다. 위 '계정'에서 로그인하세요.");
+            return;
+        }
+        long age=android.os.SystemClock.elapsedRealtime()-ytmHomePlaylistCachedAt;
+        if(!force && ytmHomePlaylistCachedAt>0 && age>=0 && age<300000L){
+            note.setText("");
+            return;
+        }
+        note.setText("내 플레이리스트 조회 중…");
+        PolarisYtmCatalog.get(this).load(PolarisYtmCatalog.ACCOUNT_LIBRARY,
+            (items,error)->{
+                if(body!=homeBody||!"ytm".equals(currentPage)||
+                        !"home".equals(ytmNav))return;
+                if(error!=null){
+                    note.setText("플레이리스트 조회 실패: "+error+
+                        " · 위 새로고침을 눌러 다시 시도하세요.");
+                    return;
+                }
+                ytmHomePlaylistCache=new ArrayList<>(items);
+                ytmHomePlaylistCachedAt=android.os.SystemClock.elapsedRealtime();
+                renderYtmHomeTiles(grid,ytmHomePlaylistCache);
+                note.setText(items.isEmpty()?
+                    "계정에서 확인된 플레이리스트가 없습니다.":"");
+            });
     }
 
     /** Phone-side browse uses the SAME catalog and media IDs as Android Auto. */
