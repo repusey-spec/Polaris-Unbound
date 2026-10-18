@@ -139,6 +139,12 @@ final class SongSelector {
         return best <= 0 ? best : best - versionPenalty(rawQuery, c);
     }
 
+    // Diagnostic read-only score: the same scorer used for selection.
+    // This does NOT lower matching thresholds or auto-play wrong songs.
+    static int inspectScore(String query,Candidate candidate){
+        return score(query,candidate);
+    }
+
     /**
      * Never select the first arbitrary result. Require a strong title match
      * and, when supplied, a match against the *actual artist field*.
