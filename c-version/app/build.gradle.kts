@@ -10,8 +10,8 @@ android {
         applicationId = "com.polaris.cprobe.c02"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "C03-parse-and-diagnose"
+        versionCode = 5
+        versionName = "C04-on-device-search-diagnostics"
     }
 
     // CI restores the repository's existing debug signing key before build.
