@@ -7,7 +7,7 @@
     </queries>
 
     <application
-        android:label="Polaris C04"
+        android:label="Polaris C05"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
