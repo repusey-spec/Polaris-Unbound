@@ -951,20 +951,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void openOriginalYtmFromPhone(String mediaId){
-        String uri=PolarisYtmDeepLink.urlFor(mediaId);
-        if(uri==null){
+        if(PolarisYtmDeepLink.urlFor(mediaId)==null){
             Toast.makeText(this,"검증되지 않은 원본 링크입니다",
                 Toast.LENGTH_LONG).show();
             return;
         }
-        try{
-            Intent open=new Intent(Intent.ACTION_VIEW,Uri.parse(uri));
-            open.setPackage(PolarisYtmBridge.SOURCE);
-            startActivity(open);
-        }catch(Exception e){
-            Toast.makeText(this,"원본 YT Music 앱에서 링크를 열지 못했습니다",
-                Toast.LENGTH_LONG).show();
-        }
+        // Use the SAME Polaris MediaSession routing as Android Auto.
+        // The old direct ACTION_VIEW opened YTM without enterYtmMode(),
+        // leaving the visible 'stop' button controlling local audio only.
+        // Service onPlayFromMediaId launches the official YTM activity and
+        // starts the official-session bridge for pause/next/previous.
+        playId(mediaId,"YT Music");
     }
 
     private void showYtmBrowse(String parent,String heading){
