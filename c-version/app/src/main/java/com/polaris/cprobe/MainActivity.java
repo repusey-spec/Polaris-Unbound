@@ -328,6 +328,9 @@ public final class MainActivity extends Activity {
     private static String firstArtist(JSONArray columns) {
         if(columns.length()<=1)return "";
         List<String> credited=new ArrayList<>();
+        // YT Music supplies mixed "Song · singer · album · duration" runs.
+        // Verified artist navigation is authoritative; unlinked artists are
+        // accepted only in the FIRST plausible singer position.
         for(int i=1;i<Math.min(4,columns.length());i++) {
             JSONObject col=columns.optJSONObject(i);
             JSONObject flex=col==null?null:
@@ -337,9 +340,11 @@ public final class MainActivity extends Activity {
             JSONArray runs=text.optJSONArray("runs");
             if(runs==null) {
                 String simple=text.optString("simpleText","").trim();
-                if(isLikelyArtist(simple))credited.add(simple);
+                if(i==1 && isLikelyArtist(simple) && credited.isEmpty())
+                    credited.add(simple);
                 continue;
             }
+            boolean sawArtistInColumn=false;
             for(int j=0;j<runs.length();j++) {
                 JSONObject run=runs.optJSONObject(j);
                 if(run==null)continue;
@@ -348,9 +353,14 @@ public final class MainActivity extends Activity {
                 JSONObject nav=run.optJSONObject("navigationEndpoint");
                 JSONObject browse=nav==null?null:nav.optJSONObject("browseEndpoint");
                 String browseId=browse==null?"":browse.optString("browseId","");
-                if(browseId.startsWith("MPRE") || browseId.startsWith("MPRD"))
-                    continue; // Album, not an artist.
+                if(browseId.startsWith("MPRE") ||
+                   browseId.startsWith("MPRD"))break; // Album is not a singer.
+                boolean verified=browseId.startsWith("MPLA") ||
+                    browseId.startsWith("UC") ||
+                    browseId.toLowerCase(java.util.Locale.ROOT).contains("artist");
+                if(!verified && (sawArtistInColumn||i>1))continue;
                 if(!credited.contains(value))credited.add(value);
+                sawArtistInColumn=true;
             }
         }
         return android.text.TextUtils.join(" · ",credited);
