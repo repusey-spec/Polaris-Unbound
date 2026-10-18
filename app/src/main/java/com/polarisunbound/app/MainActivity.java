@@ -531,7 +531,10 @@ public class MainActivity extends AppCompatActivity {
             body.addView(radioPlaybackButton,controlLp);
             updateRadioPlaybackButton(lastPlaybackState);
             updateRadioScheduleFromMetadata();
-        }else if("mp3".equals(currentPage)||"can".equals(currentPage)){
+        }else if("mp3".equals(currentPage)||"can".equals(currentPage)||
+                 "ytm".equals(currentPage)){
+            // YT Music uses the shared mini/full player; do not duplicate
+            // the legacy status and giant stop button above every list.
             status=null;
         }else{
             status=new TextView(this);
