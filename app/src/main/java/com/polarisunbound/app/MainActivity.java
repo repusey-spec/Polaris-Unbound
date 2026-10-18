@@ -80,6 +80,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView nowPlayerPlayPause;
     // YT Music controls are independent of the existing NAS full player.
     private View ytmReturnView;
+    private String ytmPendingSelectionTitle=null;
+    private String ytmPreviousSongTitle=null;
     private ImageView ytmPlayerArt;
     private TextView ytmPlayerTitle;
     private TextView ytmPlayerArtist;
@@ -308,6 +310,16 @@ public class MainActivity extends AppCompatActivity {
                             }
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
+                                if(ytmPendingSelectionTitle!=null && isYtmMetadata(metadata)){
+                                    String currentTitle=metadata.getString(
+                                        MediaMetadataCompat.METADATA_KEY_TITLE);
+                                    // Ignore the old session and non-track placeholders.
+                                    if(currentTitle!=null && !currentTitle.isEmpty() &&
+                                            !currentTitle.equals(ytmPreviousSongTitle) &&
+                                            !currentTitle.startsWith("YT Music에서 음악을 재생") &&
+                                            !currentTitle.startsWith("YT Music 알림 접근"))
+                                        ytmPendingSelectionTitle=null;
+                                }
                                 updateRadioScheduleFromMetadata();
                                 updateRadioPlaybackButton(lastPlaybackState);
                                 updateMiniPlayerMetadata();
@@ -1231,10 +1243,14 @@ public class MainActivity extends AppCompatActivity {
                     control.setOnClickListener(v->showYtmBrowse(id,title));
                 else
                     control.setOnClickListener(v->{
-                        if(id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST) ||
-                           id.startsWith(PolarisYtmCatalog.PLAY))
+                        if(id.startsWith(PolarisYtmCatalog.PLAY)){
+                            // The user chose an actual track: show its full
+                            // player immediately, not only the bottom mini bar.
                             openOriginalYtmFromPhone(id);
-                        else playId(id,title);
+                            showYtmPlayerForSelection(title);
+                        }else if(id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST)){
+                            openOriginalYtmFromPhone(id);
+                        }else playId(id,title);
                     });
             }
         });
@@ -1246,7 +1262,40 @@ public class MainActivity extends AppCompatActivity {
      * Never launch YT Music or replace the verified Test 16 playback source here.
      */
     private void showYtmPlayer(){
-        if(!"ytm".equals(currentPage)||!isYtmMetadata(lastMetadata)){
+        showYtmPlayer(false);
+    }
+
+    private void showYtmPlayerForSelection(String title){
+        if(!"ytm".equals(currentPage))return;
+        // Keep the previous live metadata as a comparison baseline.
+        ytmPreviousSongTitle=lastMetadata==null?null:
+            lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
+        ytmPendingSelectionTitle=title==null?"재생 준비 중":title;
+        showYtmPlayer(true);
+        if(!"ytm_now".equals(currentPage)){
+            ytmPendingSelectionTitle=null;
+            return;
+        }
+        // Avoid briefly showing the artwork/title of the previous song while
+        // the official YT Music player processes the new URI request.
+        if(ytmPlayerTitle!=null)ytmPlayerTitle.setText(ytmPendingSelectionTitle);
+        if(ytmPlayerArtist!=null)ytmPlayerArtist.setText("YT Music · 재생 정보 대기");
+        if(ytmPlayerArt!=null)ytmPlayerArt.setImageDrawable(null);
+        final String pendingTitle=ytmPendingSelectionTitle;
+        progressHandler.postDelayed(()->{
+            // A same-title selection may not trigger a metadata change.
+            // Fall back to the latest actual MediaSession state after a delay.
+            if(!"ytm_now".equals(currentPage) ||
+                !pendingTitle.equals(ytmPendingSelectionTitle))return;
+            ytmPendingSelectionTitle=null;
+            updateYtmPlayerMetadata();
+            updateYtmPlayerState();
+        },1800L);
+    }
+
+    private void showYtmPlayer(boolean fromSelectedSong){
+        if(!"ytm".equals(currentPage)||
+           (!fromSelectedSong&&!isYtmMetadata(lastMetadata))){
             Toast.makeText(this,"YT Music 재생 세션이 연결되지 않았습니다.",
                 Toast.LENGTH_SHORT).show();
             return;
@@ -1433,6 +1482,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ytmReturnView=null;
+        ytmPendingSelectionTitle=null;
+        ytmPreviousSongTitle=null;
         ytmPlayerProgress=null;
         ytmUserSeeking=false;
         updateMiniPlayerMetadata();
@@ -1501,7 +1552,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateYtmPlayerMetadata(){
-        if(!"ytm_now".equals(currentPage))return;
+        if(!"ytm_now".equals(currentPage) || ytmPendingSelectionTitle!=null)return;
         MediaMetadataCompat m=lastMetadata;
         if(!isYtmMetadata(m))return;
         if(ytmPlayerTitle!=null){
@@ -1518,6 +1569,10 @@ public class MainActivity extends AppCompatActivity {
         if(ytmPlayerArt!=null){
             Bitmap art=m.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
             ytmPlayerArt.setImageBitmap(art);
+            // Ensure the rounded clipping layer repaints without a swipe.
+            ytmPlayerArt.postInvalidateOnAnimation();
+            if(ytmPlayerArt.getParent() instanceof View)
+                ((View)ytmPlayerArt.getParent()).postInvalidateOnAnimation();
         }
         updateYtmPlayerState();
     }
