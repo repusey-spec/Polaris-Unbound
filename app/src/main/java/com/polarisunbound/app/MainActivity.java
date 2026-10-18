@@ -451,9 +451,7 @@ public class MainActivity extends AppCompatActivity {
             addSectionTab("앨범","albums".equals(ytmNav),()->
                 showYtmBrowse(PolarisYtmCatalog.ACCOUNT_ALBUMS,"보관함 앨범"));
             addSectionTab("추천","recommend".equals(ytmNav),()->
-                showYtmBrowse(PolarisYtmCatalog.HOME,"YT Music 공개 추천"));
-            addSectionTab("화면 보관함","captured".equals(ytmNav),()->
-                showYtmBrowse(PolarisYtmCatalog.LIBRARY,"YT Music 화면에서 수집한 항목"));
+                showYtmBrowse(PolarisYtmCatalog.HOME,"YT Music 계정 추천"));
         }
     }
 
@@ -983,9 +981,6 @@ public class MainActivity extends AppCompatActivity {
         else if(PolarisYtmCatalog.HOME.equals(parent) ||
                 parent.startsWith(PolarisYtmCatalog.SHELF))
             ytmNav="recommend";
-        else if(PolarisYtmCatalog.LIBRARY.equals(parent) ||
-                parent.startsWith(PolarisYtmCatalog.CAPTURED))
-            ytmNav="captured";
         currentPage="ytm";
         base(heading);
         final LinearLayout pageBody=body;
