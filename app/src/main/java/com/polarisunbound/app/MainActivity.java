@@ -442,8 +442,14 @@ public class MainActivity extends AppCompatActivity {
             addSectionTab("앨범","albums".equals(nasNav),this::showMp3Albums);
         }else if(ytm){
             addSectionTab("홈","home".equals(ytmNav),this::showYtm);
-            addSectionTab("내 플레이리스트","playlists".equals(ytmNav),()->
+            addSectionTab("플레이리스트","playlists".equals(ytmNav),()->
                 showYtmBrowse(PolarisYtmCatalog.ACCOUNT_LIBRARY,"내 플레이리스트"));
+            addSectionTab("저장한 노래","songs".equals(ytmNav),()->
+                showYtmBrowse(PolarisYtmCatalog.ACCOUNT_SONGS,"저장한 노래"));
+            addSectionTab("좋아요 음악","liked".equals(ytmNav),()->
+                showYtmBrowse(PolarisYtmCatalog.ACCOUNT_LIKED,"좋아요 표시한 음악"));
+            addSectionTab("앨범","albums".equals(ytmNav),()->
+                showYtmBrowse(PolarisYtmCatalog.ACCOUNT_ALBUMS,"보관함 앨범"));
             addSectionTab("추천","recommend".equals(ytmNav),()->
                 showYtmBrowse(PolarisYtmCatalog.HOME,"YT Music 공개 추천"));
             addSectionTab("화면 보관함","captured".equals(ytmNav),()->
@@ -760,12 +766,27 @@ public class MainActivity extends AppCompatActivity {
     private void showYtm(){
         ytmNav="home";
         currentPage="ytm";
-        base("YT Music · 내 플레이리스트");
+        base("YT Music · 계정 보관함");
 
-        TextView library=button("내 플레이리스트 보기");
+        TextView library=button("내 플레이리스트");
         library.setOnClickListener(v->showYtmBrowse(
             PolarisYtmCatalog.ACCOUNT_LIBRARY,"내 플레이리스트"));
         body.addView(library);
+
+        TextView songs=button("저장한 노래");
+        songs.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.ACCOUNT_SONGS,"저장한 노래"));
+        body.addView(songs);
+
+        TextView likes=button("좋아요 표시한 음악");
+        likes.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.ACCOUNT_LIKED,"좋아요 표시한 음악"));
+        body.addView(likes);
+
+        TextView albums=button("보관함 앨범");
+        albums.setOnClickListener(v->showYtmBrowse(
+            PolarisYtmCatalog.ACCOUNT_ALBUMS,"보관함 앨범"));
+        body.addView(albums);
 
         TextView login=button("계정 로그인 · 변경");
         login.setOnClickListener(v->startActivity(
@@ -952,6 +973,13 @@ public class MainActivity extends AppCompatActivity {
         if(PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent) ||
            parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST))
             ytmNav="playlists";
+        else if(PolarisYtmCatalog.ACCOUNT_SONGS.equals(parent))
+            ytmNav="songs";
+        else if(PolarisYtmCatalog.ACCOUNT_LIKED.equals(parent))
+            ytmNav="liked";
+        else if(PolarisYtmCatalog.ACCOUNT_ALBUMS.equals(parent) ||
+                parent.startsWith(PolarisYtmCatalog.ACCOUNT_ALBUM))
+            ytmNav="albums";
         else if(PolarisYtmCatalog.HOME.equals(parent) ||
                 parent.startsWith(PolarisYtmCatalog.SHELF))
             ytmNav="recommend";
@@ -961,7 +989,7 @@ public class MainActivity extends AppCompatActivity {
         currentPage="ytm";
         base(heading);
         final LinearLayout pageBody=body;
-        TextView back=button("← YT Music");
+        TextView back=button("← YT Music 보관함");
         back.setOnClickListener(v->showYtm());
         body.addView(back);
         TextView reload=button("↻ 이 목록 다시 조회");
