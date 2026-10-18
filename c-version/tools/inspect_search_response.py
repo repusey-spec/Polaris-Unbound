@@ -51,6 +51,56 @@ def walk(node, found):
                 return
 
 
+def simulate_android_walk(obj, reverse=False):
+    """Mirror Java C03 bounded recursive search (without Android JSONObject)."""
+    visited = [0]
+    candidates = []
+    stats = {"maxdepth": 0, "prunedDepth": 0, "prunedVisit": 0,
+             "allRows": 0, "videoRows": 0, "correctSeen": 0,
+             "firstCorrectVisit": None, "firstCorrectDepth": None}
+
+    def dive(node, depth):
+        visited[0] += 1
+        stats["maxdepth"] = max(stats["maxdepth"], depth)
+        if depth > 32:
+            stats["prunedDepth"] += 1
+            return
+        if visited[0] > 30000:
+            stats["prunedVisit"] += 1
+            return
+        if len(candidates) >= 100:
+            return
+        if isinstance(node, dict):
+            row = node.get("musicResponsiveListItemRenderer")
+            if isinstance(row, dict):
+                stats["allRows"] += 1
+                cols=row.get("flexColumns", [])
+                name="".join(runs(cols[0])) if cols else ""
+                credit=runs(cols[1]) if len(cols)>1 else []
+                source, videoid=identify(row)
+                if len(videoid)==11:
+                    stats["videoRows"] += 1
+                    if "너에게" in name and "성시경" in "".join(credit):
+                        stats["correctSeen"]+=1
+                        if stats["firstCorrectVisit"] is None:
+                            stats["firstCorrectVisit"] = visited[0]
+                            stats["firstCorrectDepth"] = depth
+                    candidates.append((name,credit,videoid))
+            children=list(node.values())
+            if reverse: children.reverse()
+            for v in children:
+                dive(v,depth+1)
+                if visited[0]>30000 or len(candidates)>=100:return
+        elif isinstance(node,list):
+            seq=list(node)
+            if reverse: seq.reverse()
+            for v in seq:
+                dive(v,depth+1)
+                if visited[0]>30000 or len(candidates)>=100:return
+    dive(obj,0)
+    return visited[0],candidates,stats
+
+
 for query in ("성시경 너에게", "성시경 너에게는", "서태지 너에게"):
     for filtered in (True, False):
         try:
@@ -84,6 +134,16 @@ for query in ("성시경 너에게", "성시경 너에게는", "서태지 너에
                 response = json.load(f)
             found = []
             walk(response, found)
+            if query == "성시경 너에게":
+                for backwards in (False, True):
+                    visited, selected, stats = simulate_android_walk(
+                        response, reverse=backwards)
+                    print("C03 Java-walk simulator", "reverse="+str(backwards),
+                          "visits="+str(visited),"collected="+str(len(selected)),
+                          "stats="+str(stats))
+                    for name,artist,vid in selected[:3]:
+                        print("  gathered:",repr(name),repr(artist),vid)
+
             print(f"C03 API {query!r} filtered={filtered} rows={len(found)}")
             for i, item in enumerate(found):
                 cols=item["columns"]
