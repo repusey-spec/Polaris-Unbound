@@ -67,8 +67,6 @@ final class PolarisYtmAccountCatalog {
     private static final String MODE_PLAYLIST="playlist";
     private static final String MODE_SONGS="songs";
     private static final String MODE_LIKES="likes";
-    private static final String MODE_ALBUMS="albums";
-    private static final String MODE_ALBUM="album";
 
     private static final class Route {
         final String browseId,mode,playlistId,label;
@@ -87,8 +85,6 @@ final class PolarisYtmAccountCatalog {
             return new Route("FEmusic_liked_videos",MODE_SONGS,null,"저장한 노래");
         if(PolarisYtmCatalog.ACCOUNT_LIKED.equals(parent))
             return new Route("VLLM",MODE_LIKES,"LM","좋아요 음악");
-        if(PolarisYtmCatalog.ACCOUNT_ALBUMS.equals(parent))
-            return new Route("FEmusic_liked_albums",MODE_ALBUMS,null,"앨범");
         if(parent!=null && parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST)){
             String id=Uri.decode(parent.substring(
                 PolarisYtmCatalog.ACCOUNT_PLAYLIST.length()));
@@ -96,18 +92,7 @@ final class PolarisYtmAccountCatalog {
                 throw new IllegalArgumentException("잘못된 재생목록 ID");
             return new Route("VL"+id,MODE_PLAYLIST,id,"재생목록 곡");
         }
-        if(parent!=null && parent.startsWith(PolarisYtmCatalog.ACCOUNT_ALBUM)){
-            String id=Uri.decode(parent.substring(
-                PolarisYtmCatalog.ACCOUNT_ALBUM.length()));
-            if(!validAlbumId(id))throw new IllegalArgumentException("잘못된 앨범 ID");
-            return new Route(id,MODE_ALBUM,null,"앨범 곡");
-        }
         throw new IllegalArgumentException("지원되지 않는 계정 보관함 위치");
-    }
-
-    private static boolean validAlbumId(String id){
-        return id!=null && id.startsWith("MPREb") &&
-            id.matches("[A-Za-z0-9_=-]{6,180}");
     }
 
     void load(String parent,Callback callback){
@@ -365,9 +350,6 @@ final class PolarisYtmAccountCatalog {
         if(MODE_PLAYLISTS.equals(mode)){
             addPlaylist(node.optJSONObject("musicTwoRowItemRenderer"),result);
             addPlaylist(node.optJSONObject("musicResponsiveListItemRenderer"),result);
-        }else if(MODE_ALBUMS.equals(mode)){
-            addAlbum(node.optJSONObject("musicTwoRowItemRenderer"),result);
-            addAlbum(node.optJSONObject("musicResponsiveListItemRenderer"),result);
         }else{
             addSong(node.optJSONObject("musicResponsiveListItemRenderer"),
                 playlist,result);
@@ -409,29 +391,6 @@ final class PolarisYtmAccountCatalog {
                 "musicResponsiveListItemFlexColumnRenderer","text"));
         }
         String key=PolarisYtmCatalog.ACCOUNT_PLAYLIST+Uri.encode(id);
-        result.put(key,folder(key,title,subtitle));
-    }
-
-    /** Album cards have MPREb browse IDs, not VL playlist IDs. */
-    private static void addAlbum(JSONObject row,
-        Map<String,MediaBrowserCompat.MediaItem> result){
-        if(row==null)return;
-        JSONObject nav=row.optJSONObject("navigationEndpoint");
-        String browse=nav==null?"":str(path(nav,"browseEndpoint"),"browseId");
-        if(!validAlbumId(browse))
-            browse=findAlbumBrowseId(row,0,new int[]{0});
-        if(!validAlbumId(browse))return;
-        String title=text(row.optJSONObject("title"));
-        JSONArray flex=row.optJSONArray("flexColumns");
-        if(title.isEmpty())
-            title=text(path(flex==null?null:flex.optJSONObject(0),
-                "musicResponsiveListItemFlexColumnRenderer","text"));
-        if(title.isEmpty())return;
-        String subtitle=text(row.optJSONObject("subtitle"));
-        if(subtitle.isEmpty())
-            subtitle=text(path(flex==null?null:flex.optJSONObject(1),
-                "musicResponsiveListItemFlexColumnRenderer","text"));
-        String key=PolarisYtmCatalog.ACCOUNT_ALBUM+Uri.encode(browse);
         result.put(key,folder(key,title,subtitle));
     }
 
@@ -490,28 +449,6 @@ final class PolarisYtmAccountCatalog {
             return out.toString().trim();
         }
         return obj.optString("simpleText","").trim();
-    }
-
-    private static String findAlbumBrowseId(Object value,int depth,int[] seen){
-        if(value==null||depth>15||seen[0]++>9000)return "";
-        if(value instanceof JSONArray){
-            JSONArray a=(JSONArray)value;
-            for(int i=0;i<a.length()&&i<100;i++){
-                String id=findAlbumBrowseId(a.opt(i),depth+1,seen);
-                if(validAlbumId(id))return id;
-            }
-            return "";
-        }
-        if(!(value instanceof JSONObject))return "";
-        JSONObject obj=(JSONObject)value;
-        String direct=str(obj.optJSONObject("browseEndpoint"),"browseId");
-        if(validAlbumId(direct))return direct;
-        JSONArray keys=obj.names();
-        if(keys!=null)for(int i=0;i<keys.length()&&i<60;i++){
-            String id=findAlbumBrowseId(obj.opt(keys.optString(i)),depth+1,seen);
-            if(validAlbumId(id))return id;
-        }
-        return "";
     }
 
     private static String findBrowseId(Object value,int depth,int[] seen){
