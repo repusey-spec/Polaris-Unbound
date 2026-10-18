@@ -291,7 +291,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 if(playback!=null)session.setPlaybackState(playback);
             }
             @Override public void onTrace(String event){trace(event);}
-            @Override public void onBrowserChildrenChanged(){notifyChildrenChanged("ytm");}
+            @Override public void onBrowserChildrenChanged(){
+                notifyChildrenChanged("ytm");
+                // YT Music content now appears directly in the AA Media root.
+                notifyChildrenChanged("nav:media");
+            }
         });
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         mp3RepeatMode=getSharedPreferences(MP3_PREFS,MODE_PRIVATE)
@@ -2900,14 +2904,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(folder("radio","라디오"));
             x.add(folder("nav:media","미디어"));
             x.add(folder("can","CAN"));
-        } else if(parent.equals("nav:media")){
-            // Host-owned second-level browser, NOT a custom horizontal tab bar.
-            // YT Music is first, NAS Music second, matching the phone media UI.
-            x.add(folder("ytm","YT Music"));
-            x.add(folder("mp3","NAS Music"));
-        } else if(parent.equals("ytm")){
-            // Hush/Metrolist-inspired browse layout, populated ONLY with
-            // real public YTM server results or user-approved visible UI labels.
+        } else if(parent.equals("nav:media") || parent.equals("ytm")){
+            // Selecting Media opens YT Music categories immediately, without
+            // another "YT Music" folder. NAS is a secondary folder below.
+            // Keep the direct "ytm" route for existing browser references.
+            // Entries come from the existing authenticated YTM account catalog.
             x.add(folder(PolarisYtmCatalog.ACCOUNT_LIBRARY,
                 "내 플레이리스트"));
             x.add(folder(PolarisYtmCatalog.ACCOUNT_SONGS,
@@ -2936,6 +2937,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             x.add(new android.support.v4.media.MediaBrowserCompat.MediaItem(
                 current.build(),
                 android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE));
+            if(parent.equals("nav:media")){
+                // Low-use NAS content remains available but does not block
+                // one-tap access to the user's YT Music library.
+                x.add(folder("mp3","NAS Music"));
+            }
         } else if(parent.equals("can")){
             PolarisFtp.Config cfg=PolarisFtp.load(this);
             String sub=cfg.isConfigured() ? cfg.canRoot+" · "+canFtpStatus : "폰에서 FTP 설정 필요";
