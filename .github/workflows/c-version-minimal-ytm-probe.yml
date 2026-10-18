@@ -1,4 +1,4 @@
-name: Polaris C05 Typed YT Music Search APK
+name: Polaris C06 Verified YTM Search APK
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - 'c-version/**'
       - '.github/workflows/c-version-minimal-ytm-probe.yml'
   push:
-    branches: [ 'experiment/c-version-05-correct-music-results' ]
+    branches: [ 'experiment/c-version-06-ytmusicapi-parity' ]
   workflow_dispatch:
 
 jobs:
@@ -41,9 +41,12 @@ jobs:
             c-version/app/src/main/java/com/polaris/cprobe/SongSelector.java \
             c-version/tests/SongSelectorCliTest.java \
             c-version/app/src/main/java/com/polaris/cprobe/MusicRowType.java \
-            c-version/tests/MusicRowTypeCliTest.java
+            c-version/tests/MusicRowTypeCliTest.java \
+            c-version/app/src/main/java/com/polaris/cprobe/YtmSearchProtocol.java \
+            c-version/tests/YtmSearchProtocolCliTest.java
           java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.SongSelectorCliTest
           java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.MusicRowTypeCliTest
+          java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.YtmSearchProtocolCliTest
       - name: Restore persistent debug signing key
         run: |
           set -euo pipefail
@@ -58,13 +61,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='6'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='7'"
           "$APKSIGNER" verify --print-certs "$APK"
           test -s "$APK"
           ls -lh "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-C05-YTM-Music-Search
+          name: Polaris-C06-YTM-Search-Protocol
           path: c-version/app/build/outputs/apk/debug/*.apk
           retention-days: 30
           if-no-files-found: error
