@@ -42,25 +42,25 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Isolated C05 experiment: one text field -> public YT Music search ->
+ * Isolated C06 experiment: one text field -> public YT Music search ->
  * official YT Music deep-link launch. No player, cookies or Polaris service.
  */
 public final class MainActivity extends Activity {
-    private static final String TAG = "PolarisC05";
+    private static final String TAG = "PolarisC06";
     private static final String YTM_PACKAGE = "com.google.android.apps.youtube.music";
-    private static final String YTM_SEARCH =
-        "https://music.youtube.com/youtubei/v1/search?prettyPrint=false";
+    private static final String YTM_SEARCH = YtmSearchProtocol.SEARCH_URL;
     // Public WEB_REMIX key embedded in the YT Music web client, not a user secret.
     private static final String YTM_PUBLIC_KEY =
         "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30";
     private static final String CLIENT_VERSION = "1.20260114.03.00";
     private static final String SONGS_FILTER =
-        "EgWKAQIIAWoKEAMQBBAJEAoQEA==";
+        YtmSearchProtocol.SONGS_FILTER;
     private static final int MAX_JSON_BYTES = 3 * 1024 * 1024;
     private static final int MAX_BOOTSTRAP_BYTES = 2 * 1024 * 1024;
+    // Mirror public ytmusicapi 1.12.3 unauthenticated WEB_REMIX requests.
     private static final String WEB_USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) " +
+        "Gecko/20100101 Firefox/88.0";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private EditText text;
@@ -135,7 +135,7 @@ public final class MainActivity extends Activity {
             } catch (Exception e) {
                 error = "검색 오류: " + e.getClass().getSimpleName() +
                     (e.getMessage() != null ? " (" + e.getMessage() + ")" : "");
-                Log.w(TAG, "C05 search request failed", e);
+                Log.w(TAG, "C06 search request failed", e);
             }
             final SongSelector.Candidate selected =
                 outcome == null ? null : outcome.song;
@@ -156,7 +156,7 @@ public final class MainActivity extends Activity {
     // On failure only, let the user inspect and copy what the *phone itself*
     // received; no PC ADB required, no login cookies or private tokens logged.
     private void showFailureReport(String query,String details){
-        String report="C05 · YT Music 검색 진단\n\n" +
+        String report="C06 · YT Music 검색 진단\n\n" +
             "실제 입력: " + query + "\n\n" + details +
             "\n\n잘못된 곡은 자동 재생하지 않았습니다.";
         TextView info=new TextView(this);
@@ -167,13 +167,13 @@ public final class MainActivity extends Activity {
         ScrollView scrolling=new ScrollView(this);
         scrolling.addView(info);
         new AlertDialog.Builder(this)
-            .setTitle("검색 실패 · C05 진단")
+            .setTitle("검색 실패 · C06 진단")
             .setView(scrolling)
             .setPositiveButton("진단 복사",(dialog,which)->{
                 ClipboardManager cm=(ClipboardManager)getSystemService(
                     Context.CLIPBOARD_SERVICE);
                 if(cm!=null)cm.setPrimaryClip(
-                    ClipData.newPlainText("Polaris C05 Search",report));
+                    ClipData.newPlainText("Polaris C06 Search",report));
                 tell("검색 결과 진단을 복사했습니다.");
             })
             .setNegativeButton("닫기",null)
@@ -198,7 +198,7 @@ public final class MainActivity extends Activity {
         request.addCategory(Intent.CATEGORY_BROWSABLE);
         try {
             startActivity(request);
-            Log.i(TAG, "C05 matched " + song.title + " / " + song.artist +
+            Log.i(TAG, "C06 matched " + song.title + " / " + song.artist +
                 " -> " + song.id);
             tell("재생 요청: " + song.artist + " - " + song.title);
         } catch (ActivityNotFoundException | SecurityException e) {
@@ -230,6 +230,9 @@ public final class MainActivity extends Activity {
         int musicShelves;
         int twoRowItems;
         int otherShelves;
+        int itemSections;
+        int messageRenderers;
+        int tabbedSections;
     }
 
     private static String resultCategory(JSONArray columns){
@@ -240,8 +243,7 @@ public final class MainActivity extends Activity {
         JSONObject text=x==null?null:x.optJSONObject("text");
         JSONArray runs=text==null?null:text.optJSONArray("runs");
         JSONObject first=runs==null?null:runs.optJSONObject(0);
-        return MusicRowType.classify(
-            first==null?"":first.optString("text",""));
+        return first==null?"":first.optString("text","");
     }
 
     private static final class SearchClient {
@@ -273,6 +275,7 @@ public final class MainActivity extends Activity {
         http.setReadTimeout(8000);
         http.setRequestProperty("User-Agent",WEB_USER_AGENT);
         http.setRequestProperty("Accept","text/html");
+        http.setRequestProperty("Cookie",YtmSearchProtocol.CONSENT_COOKIE);
         try {
             int code=http.getResponseCode();
             if(code!=200)throw new IOException("YTM bootstrap HTTP "+code);
@@ -311,18 +314,23 @@ public final class MainActivity extends Activity {
             (filtered?"노래":"전체")+"] \""+q+"\"";
         try {
             JSONObject response=postYtmSearch(q,filtered,client,country,language);
-            List<SongSelector.Candidate> items=collectSongs(response,stats);
+            List<SongSelector.Candidate> items=
+                collectSongs(response,stats,filtered);
             for(SongSelector.Candidate song:items)
                 merged.putIfAbsent(song.id,song);
             StringBuilder status=new StringBuilder(label).append(" : ")
                 .append("목록 ").append(stats.allRows)
                 .append(" / 음악폴더 ").append(stats.musicShelves)
+                .append(" / 아이템섹션 ").append(stats.itemSections)
+                .append(" / 탭 ").append(stats.tabbedSections)
+                .append(" / 안내메시지 ").append(stats.messageRenderers)
                 .append(" / 카드 ").append(stats.twoRowItems)
                 .append(" / 노래 ").append(stats.songRows)
                 .append(" / 영상 ").append(stats.videoRows)
                 .append(" / 에피소드 ").append(stats.episodeRows)
                 .append(" / 기타 ").append(stats.unknownRows)
                 .append(" / ID ").append(stats.validVideoIds)
+                .append(" / ID누락 ").append(stats.missingVideoIds)
                 .append(" / 음악수집 ").append(stats.accepted)
                 .append(" / 누적 ").append(merged.size());
             if(stats.allRows==0)
@@ -331,14 +339,14 @@ public final class MainActivity extends Activity {
             SongSelector.Selection chosen=SongSelector.select(original,
                 new ArrayList<>(merged.values()));
             if(chosen!=null){
-                Log.i(TAG,"C05 matched "+chosen.song.title+
+                Log.i(TAG,"C06 matched "+chosen.song.title+
                     " / "+chosen.song.artist+" score="+chosen.score);
                 return chosen.song;
             }
         } catch(Exception ex){
             diagnostics.add(label+" : 응답/파싱 오류 "+
                 ex.getClass().getSimpleName()+" "+safeError(ex.getMessage()));
-            Log.w(TAG,"C05 search "+label+" failed",ex);
+            Log.w(TAG,"C06 search "+label+" failed",ex);
         }
         return null;
     }
@@ -455,7 +463,8 @@ public final class MainActivity extends Activity {
             .put("gl",country);
         if(!cfg.visitorId.isEmpty())
             client.put("visitorData",cfg.visitorId);
-        JSONObject context = new JSONObject().put("client", client);
+        JSONObject context = new JSONObject()
+            .put("client",client).put("user",new JSONObject());
         JSONObject payload = new JSONObject()
             .put("context", context)
             .put("query", query);
@@ -479,6 +488,7 @@ public final class MainActivity extends Activity {
             http.setRequestProperty("X-Goog-Visitor-Id",cfg.visitorId);
         http.setRequestProperty("Origin", "https://music.youtube.com");
         http.setRequestProperty("Referer", "https://music.youtube.com/");
+        http.setRequestProperty("Cookie",YtmSearchProtocol.CONSENT_COOKIE);
         http.setRequestProperty("User-Agent",WEB_USER_AGENT);
         http.setDoOutput(true);
         try {
@@ -505,14 +515,15 @@ public final class MainActivity extends Activity {
     }
 
     private static List<SongSelector.Candidate> collectSongs(
-            JSONObject response,ScanStats stats){
+            JSONObject response,ScanStats stats,boolean filtered){
         Map<String,SongSelector.Candidate> byId=new LinkedHashMap<>();
-        walk(response,new int[]{0},0,byId,stats);
+        walk(response,new int[]{0},0,byId,stats,filtered);
         return new ArrayList<>(byId.values());
     }
 
     private static void walk(Object node,int[] visited,int depth,
-            Map<String,SongSelector.Candidate> result,ScanStats stats){
+            Map<String,SongSelector.Candidate> result,ScanStats stats,
+            boolean filtered){
         if(node==null || depth>32 || ++visited[0]>30000 ||
                 result.size()>=100)return;
         if(node instanceof JSONObject){
@@ -520,11 +531,16 @@ public final class MainActivity extends Activity {
             if(object.has("musicShelfRenderer"))stats.musicShelves++;
             if(object.has("musicTwoRowItemRenderer"))stats.twoRowItems++;
             if(object.has("shelfRenderer"))stats.otherShelves++;
+            if(object.has("itemSectionRenderer"))stats.itemSections++;
+            if(object.has("messageRenderer"))stats.messageRenderers++;
+            if(object.has("tabbedSearchResultsRenderer"))stats.tabbedSections++;
             JSONObject renderer=object.optJSONObject("musicResponsiveListItemRenderer");
             if(renderer!=null){
                 stats.allRows++;
                 JSONArray columns=renderer.optJSONArray("flexColumns");
-                String category=resultCategory(columns);
+                String label=resultCategory(columns);
+                String videoType=findMusicVideoType(renderer);
+                String category=MusicRowType.resolve(label,videoType,filtered);
                 if("song".equals(category))stats.songRows++;
                 else if("video".equals(category))stats.videoRows++;
                 else if("episode".equals(category))stats.episodeRows++;
@@ -535,8 +551,7 @@ public final class MainActivity extends Activity {
                     stats.validVideoIds++;
                     // Neither podcasts nor arbitrary videos should EVER
                     // become song candidates, even with a playable videoId.
-                    if(!"episode".equals(category) &&
-                       !"video".equals(category)){
+                    if("song".equals(category)){
                         String title=columns==null?"":
                             firstText(columns.optJSONObject(0));
                         String artist=columns==null?"":
@@ -555,13 +570,13 @@ public final class MainActivity extends Activity {
             }
             Iterator<String> keys=object.keys();
             while(keys.hasNext()){
-                walk(object.opt(keys.next()),visited,depth+1,result,stats);
+                walk(object.opt(keys.next()),visited,depth+1,result,stats,filtered);
                 if(result.size()>=100)return;
             }
         }else if(node instanceof JSONArray){
             JSONArray arr=(JSONArray)node;
             for(int i=0;i<arr.length();i++){
-                walk(arr.opt(i),visited,depth+1,result,stats);
+                walk(arr.opt(i),visited,depth+1,result,stats,filtered);
                 if(result.size()>=100)return;
             }
         }
@@ -646,6 +661,26 @@ public final class MainActivity extends Activity {
         if(text.contains("조회수")||text.contains("회 재생")||
            text.contains("views"))return false;
         return true;
+    }
+
+    // ytmusicapi 1.12.3 also relies on this nested watchEndpoint type
+    // to distinguish music audio (ATV) from podcasts and ordinary videos.
+    private static String findMusicVideoType(JSONObject row) {
+        JSONObject overlay=row.optJSONObject("overlay");
+        JSONObject thumb=overlay==null?null:
+            overlay.optJSONObject("musicItemThumbnailOverlayRenderer");
+        JSONObject content=thumb==null?null:thumb.optJSONObject("content");
+        JSONObject play=content==null?null:
+            content.optJSONObject("musicPlayButtonRenderer");
+        JSONObject endpoint=play==null?null:
+            play.optJSONObject("playNavigationEndpoint");
+        if(endpoint==null) endpoint=row.optJSONObject("navigationEndpoint");
+        JSONObject watch=endpoint==null?null:endpoint.optJSONObject("watchEndpoint");
+        JSONObject supported=watch==null?null:
+            watch.optJSONObject("watchEndpointMusicSupportedConfigs");
+        JSONObject config=supported==null?null:
+            supported.optJSONObject("watchEndpointMusicConfig");
+        return config==null?"":config.optString("musicVideoType","");
     }
 
     private static String findVideoId(JSONObject row) {
