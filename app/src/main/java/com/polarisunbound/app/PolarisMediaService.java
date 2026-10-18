@@ -2748,14 +2748,17 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         // restart, or replace the current source.
         Bundle style=new Bundle();
         style.putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT",1);
-        style.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
+        // Default playable items to text rows. Stations carry an explicit
+        // per-item grid override, preserving the existing radio artwork.
+        style.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
         style.putBoolean(MediaConstants.BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED,true);
         return new BrowserRoot("root",style);
     }
 
     private android.support.v4.media.MediaBrowserCompat.MediaItem folder(String id,String title){
         Bundle e=new Bundle();
-        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
+        // Child songs in these folders have no thumbnail, so request a list.
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
         return new android.support.v4.media.MediaBrowserCompat.MediaItem(
             new MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setExtras(e).build(),
             android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
@@ -2927,12 +2930,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 .setTitle(name==null||name.trim().isEmpty()?"YT Music 현재 재생 연결":name)
                 .setSubtitle(artist==null||artist.trim().isEmpty()?
                     "YT Music에서 음악을 먼저 재생하세요":artist);
-            if(metadata!=null){
-                Bitmap art=metadata.getBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART);
-                if(art!=null)current.setIconBitmap(art);
-            }
+            // The AA browser shows a simple currently-playing text row.
+            // Real album artwork is still mirrored in the separate full player.
             Bundle hints=new Bundle();
-            hints.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",2);
+            hints.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
+            hints.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+            hints.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,1);
             current.setExtras(hints);
             x.add(new android.support.v4.media.MediaBrowserCompat.MediaItem(
                 current.build(),
