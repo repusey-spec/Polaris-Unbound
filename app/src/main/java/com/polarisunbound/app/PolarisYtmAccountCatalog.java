@@ -43,8 +43,8 @@ final class PolarisYtmAccountCatalog {
     private static final String YTM_BROWSER="https://music.youtube.com/youtubei/v1/browse?prettyPrint=false";
     private static final String USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) "+
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-    private static final int PAGE_LIMIT=10;
-    private static final int MAX_RESULTS=450;
+    private static final int PAGE_LIMIT=30;
+    private static final int MAX_RESULTS=900;
     private static final int MAX_RESPONSE=4*1024*1024;
     private static volatile PolarisYtmAccountCatalog singleton;
 
@@ -62,29 +62,68 @@ final class PolarisYtmAccountCatalog {
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
     private final Handler main=new Handler(Looper.getMainLooper());
 
+    /** Distinct account browse routes. The LM list is *likes*, not saved songs. */
+    private static final String MODE_PLAYLISTS="playlists";
+    private static final String MODE_PLAYLIST="playlist";
+    private static final String MODE_SONGS="songs";
+    private static final String MODE_LIKES="likes";
+    private static final String MODE_ALBUMS="albums";
+    private static final String MODE_ALBUM="album";
+
+    private static final class Route {
+        final String browseId,mode,playlistId,label;
+        Route(String browseId,String mode,String playlistId,String label){
+            this.browseId=browseId;
+            this.mode=mode;
+            this.playlistId=playlistId;
+            this.label=label;
+        }
+    }
+
+    private static Route route(String parent){
+        if(PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent))
+            return new Route("FEmusic_liked_playlists",MODE_PLAYLISTS,null,"플레이리스트");
+        if(PolarisYtmCatalog.ACCOUNT_SONGS.equals(parent))
+            return new Route("FEmusic_liked_videos",MODE_SONGS,null,"저장한 노래");
+        if(PolarisYtmCatalog.ACCOUNT_LIKED.equals(parent))
+            return new Route("VLLM",MODE_LIKES,"LM","좋아요 음악");
+        if(PolarisYtmCatalog.ACCOUNT_ALBUMS.equals(parent))
+            return new Route("FEmusic_liked_albums",MODE_ALBUMS,null,"앨범");
+        if(parent!=null && parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST)){
+            String id=Uri.decode(parent.substring(
+                PolarisYtmCatalog.ACCOUNT_PLAYLIST.length()));
+            if(!PolarisYtmSharedPlaylist.validId(id))
+                throw new IllegalArgumentException("잘못된 재생목록 ID");
+            return new Route("VL"+id,MODE_PLAYLIST,id,"재생목록 곡");
+        }
+        if(parent!=null && parent.startsWith(PolarisYtmCatalog.ACCOUNT_ALBUM)){
+            String id=Uri.decode(parent.substring(
+                PolarisYtmCatalog.ACCOUNT_ALBUM.length()));
+            if(!validAlbumId(id))throw new IllegalArgumentException("잘못된 앨범 ID");
+            return new Route(id,MODE_ALBUM,null,"앨범 곡");
+        }
+        throw new IllegalArgumentException("지원되지 않는 계정 보관함 위치");
+    }
+
+    private static boolean validAlbumId(String id){
+        return id!=null && id.startsWith("MPREb") &&
+            id.matches("[A-Za-z0-9_=-]{6,180}");
+    }
+
     void load(String parent,Callback callback){
         executor.execute(()->{
             List<MediaBrowserCompat.MediaItem> result=new ArrayList<>();
             String error=null;
             try{
-                String playlist=null;
-                if(parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST)){
-                    playlist=Uri.decode(parent.substring(
-                        PolarisYtmCatalog.ACCOUNT_PLAYLIST.length()));
-                    if(!PolarisYtmSharedPlaylist.validId(playlist))
-                        throw new IllegalArgumentException("잘못된 재생목록 ID");
-                }else if(!PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent)){
-                    throw new IllegalArgumentException("지원되지 않는 계정 보관함 위치");
-                }
+                Route route=route(parent);
                 Auth auth=authenticated();
                 JSONObject cfg=webConfig(auth.cookie);
-                String browseId=playlist==null?"FEmusic_liked_playlists":"VL"+playlist;
                 String continuation=null;
                 String previousContinuation=null;
                 Map<String,MediaBrowserCompat.MediaItem> collected=new LinkedHashMap<>();
                 for(int page=0;page<PAGE_LIMIT && collected.size()<MAX_RESULTS;page++){
-                    JSONObject response=api(auth,cfg,browseId,continuation);
-                    collectEntries(response,playlist,collected);
+                    JSONObject response=api(auth,cfg,route.browseId,continuation);
+                    collectEntries(response,route.mode,route.playlistId,collected);
                     String next=findContinuation(response,0,new int[]{0});
                     if(next==null||next.isEmpty()||next.equals(continuation)||
                         next.equals(previousContinuation))break;
@@ -93,9 +132,9 @@ final class PolarisYtmAccountCatalog {
                 }
                 result.addAll(collected.values());
                 if(result.isEmpty())
-                    error="로그인은 확인됐지만 실제 "+(playlist==null?
-                        "플레이리스트":"곡")+" 항목을 읽지 못했습니다. "+
-                        "계정 선택 또는 응답 형식이 일치하지 않을 수 있습니다.";
+                    error="로그인은 확인됐지만 실제 "+route.label+
+                        " 항목을 읽지 못했습니다. 계정 선택 또는 응답 형식이 "+
+                        "일치하지 않을 수 있습니다.";
             }catch(Exception ex){
                 // Do not surface exception messages; those might include
                 // request URLs/headers if a platform implementation changes.
@@ -107,7 +146,7 @@ final class PolarisYtmAccountCatalog {
                     "조회 실패 ("+ex.getClass().getSimpleName()+")";
                 error=kind+
                     (ex instanceof AuthMissing?
-                     " · 먼저 Polaris 안에서 YT Music 계정에 로그인하세요.":"");
+                      " · 먼저 Polaris 안에서 YT Music 계정에 로그인하세요.":"");
             }
             final List<MediaBrowserCompat.MediaItem> data=result;
             final String message=error;
@@ -288,33 +327,36 @@ final class PolarisYtmAccountCatalog {
         }
     }
 
-    private static void collectEntries(JSONObject response,String playlist,
+    private static void collectEntries(JSONObject response,String mode,String playlist,
         Map<String,MediaBrowserCompat.MediaItem> result){
-        walk(response,playlist,result,0,new int[]{0});
+        walk(response,mode,playlist,result,0,new int[]{0});
     }
 
-    private static void walk(Object value,String playlist,
+    private static void walk(Object value,String mode,String playlist,
             Map<String,MediaBrowserCompat.MediaItem> result,int depth,int[] seen){
         if(value==null||depth>22||seen[0]++>45000||
             result.size()>=MAX_RESULTS)return;
         if(value instanceof JSONArray){
             JSONArray array=(JSONArray)value;
             for(int i=0;i<array.length()&&i<1800;i++)
-                walk(array.opt(i),playlist,result,depth+1,seen);
+                walk(array.opt(i),mode,playlist,result,depth+1,seen);
             return;
         }
         if(!(value instanceof JSONObject))return;
         JSONObject node=(JSONObject)value;
-        if(playlist==null){
+        if(MODE_PLAYLISTS.equals(mode)){
             addPlaylist(node.optJSONObject("musicTwoRowItemRenderer"),result);
             addPlaylist(node.optJSONObject("musicResponsiveListItemRenderer"),result);
+        }else if(MODE_ALBUMS.equals(mode)){
+            addAlbum(node.optJSONObject("musicTwoRowItemRenderer"),result);
+            addAlbum(node.optJSONObject("musicResponsiveListItemRenderer"),result);
         }else{
             addSong(node.optJSONObject("musicResponsiveListItemRenderer"),
                 playlist,result);
         }
         JSONArray keys=node.names();
         if(keys!=null)for(int i=0;i<keys.length()&&i<130;i++)
-            walk(node.opt(keys.optString(i)),playlist,result,depth+1,seen);
+            walk(node.opt(keys.optString(i)),mode,playlist,result,depth+1,seen);
     }
 
     private static void addPlaylist(JSONObject row,
@@ -352,6 +394,29 @@ final class PolarisYtmAccountCatalog {
         result.put(key,folder(key,title,subtitle));
     }
 
+    /** Album cards have MPREb browse IDs, not VL playlist IDs. */
+    private static void addAlbum(JSONObject row,
+        Map<String,MediaBrowserCompat.MediaItem> result){
+        if(row==null)return;
+        JSONObject nav=row.optJSONObject("navigationEndpoint");
+        String browse=nav==null?"":str(path(nav,"browseEndpoint"),"browseId");
+        if(!validAlbumId(browse))
+            browse=findAlbumBrowseId(row,0,new int[]{0});
+        if(!validAlbumId(browse))return;
+        String title=text(row.optJSONObject("title"));
+        JSONArray flex=row.optJSONArray("flexColumns");
+        if(title.isEmpty())
+            title=text(path(flex==null?null:flex.optJSONObject(0),
+                "musicResponsiveListItemFlexColumnRenderer","text"));
+        if(title.isEmpty())return;
+        String subtitle=text(row.optJSONObject("subtitle"));
+        if(subtitle.isEmpty())
+            subtitle=text(path(flex==null?null:flex.optJSONObject(1),
+                "musicResponsiveListItemFlexColumnRenderer","text"));
+        String key=PolarisYtmCatalog.ACCOUNT_ALBUM+Uri.encode(browse);
+        result.put(key,folder(key,title,subtitle));
+    }
+
     private static void addSong(JSONObject row,String playlist,
         Map<String,MediaBrowserCompat.MediaItem> result){
         if(row==null)return;
@@ -373,8 +438,8 @@ final class PolarisYtmAccountCatalog {
                 "watchEndpoint"),"videoId");
         }
         if(PolarisYtmAccountIds.video(video)==null)return;
-        String key=PolarisYtmCatalog.PLAY+Uri.encode(video)+"?list="+
-            Uri.encode(playlist);
+        String key=PolarisYtmCatalog.PLAY+Uri.encode(video)+
+            (playlist==null?"":"?list="+Uri.encode(playlist));
         // Preserve repeated occurrences in playlist if source specifies
         // playlistSetVideoId; otherwise identical videos are collapsed.
         String setId=row.optString("playlistSetVideoId","");
@@ -407,6 +472,28 @@ final class PolarisYtmAccountCatalog {
             return out.toString().trim();
         }
         return obj.optString("simpleText","").trim();
+    }
+
+    private static String findAlbumBrowseId(Object value,int depth,int[] seen){
+        if(value==null||depth>15||seen[0]++>9000)return "";
+        if(value instanceof JSONArray){
+            JSONArray a=(JSONArray)value;
+            for(int i=0;i<a.length()&&i<100;i++){
+                String id=findAlbumBrowseId(a.opt(i),depth+1,seen);
+                if(validAlbumId(id))return id;
+            }
+            return "";
+        }
+        if(!(value instanceof JSONObject))return "";
+        JSONObject obj=(JSONObject)value;
+        String direct=str(obj.optJSONObject("browseEndpoint"),"browseId");
+        if(validAlbumId(direct))return direct;
+        JSONArray keys=obj.names();
+        if(keys!=null)for(int i=0;i<keys.length()&&i<60;i++){
+            String id=findAlbumBrowseId(obj.opt(keys.optString(i)),depth+1,seen);
+            if(validAlbumId(id))return id;
+        }
+        return "";
     }
 
     private static String findBrowseId(Object value,int depth,int[] seen){
