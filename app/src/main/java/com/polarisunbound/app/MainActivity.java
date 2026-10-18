@@ -58,6 +58,8 @@ public class MainActivity extends AppCompatActivity {
     private HorizontalScrollView subNavScroll;
     private String nasNav="home";
     private String ytmNav="home";
+    // Remember which library was last selected when leaving the Media section.
+    private String lastMediaSource="ytm";
     private FrameLayout pageHost;
     private TextView scheduleView;
     private LinearLayout miniPlayer;
@@ -368,8 +370,16 @@ public class MainActivity extends AppCompatActivity {
         });
         tabsBar=new LinearLayout(this); tabsBar.setOrientation(LinearLayout.HORIZONTAL); tabsBar.setPadding(12,12,12,0);
         root.addView(tabsBar,new LinearLayout.LayoutParams(-1,-2));
-        pageHost=new FrameLayout(this); root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
-        // Per-source navigation lives below content, never inside the top source index.
+
+        // Second-level Media selector, immediately below Radio | Media | CAN.
+        // This row is hidden entirely on Radio and CAN screens.
+        bottomSourceBar=new LinearLayout(this);
+        bottomSourceBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomSourceBar.setPadding(dp(12),dp(5),dp(12),dp(5));
+        bottomSourceBar.setBackgroundColor(0xE620242C);
+        root.addView(bottomSourceBar,new LinearLayout.LayoutParams(-1,-2));
+
+        // Third-level source categories are below YT Music | NAS Music.
         subNavScroll=new HorizontalScrollView(this);
         subNavScroll.setHorizontalScrollBarEnabled(false);
         subNavScroll.setFillViewport(false);
@@ -380,18 +390,16 @@ public class MainActivity extends AppCompatActivity {
         subNavScroll.addView(sourceSubBar,new HorizontalScrollView.LayoutParams(-2,-2));
         root.addView(subNavScroll,new LinearLayout.LayoutParams(-1,-2));
 
+        // Flexible content now follows all index rows instead of preceding them.
+        pageHost=new FrameLayout(this);
+        root.addView(pageHost,new LinearLayout.LayoutParams(-1,0,1));
+
         miniPlayer=buildMiniPlayer();
         miniPlayer.setVisibility(View.GONE);
         LinearLayout.LayoutParams miniLp=new LinearLayout.LayoutParams(-1,-2);
         miniLp.setMargins(dp(12),dp(4),dp(12),dp(8));
         root.addView(miniPlayer,miniLp);
 
-        // Persistent lower source index; independent of the upper Radio/CAN tabs.
-        bottomSourceBar=new LinearLayout(this);
-        bottomSourceBar.setOrientation(LinearLayout.HORIZONTAL);
-        bottomSourceBar.setPadding(dp(12),dp(5),dp(12),dp(8));
-        bottomSourceBar.setBackgroundColor(0xE620242C);
-        root.addView(bottomSourceBar,new LinearLayout.LayoutParams(-1,-2));
         shell.addView(root,new FrameLayout.LayoutParams(-1,-1));
         setContentView(shell);
     }
@@ -421,16 +429,22 @@ public class MainActivity extends AppCompatActivity {
         sourceSubBar.removeAllViews();
         final boolean nas="mp3".equals(currentPage)||"mp3_now".equals(currentPage);
         final boolean ytm="ytm".equals(currentPage);
+        final boolean media=nas||ytm;
+        if(nas)lastMediaSource="nas";
+        else if(ytm)lastMediaSource="ytm";
 
-        // Upper index: only Radio and CAN.
+        // Top index: Radio | Media | CAN. Media is a source group, not a player.
         addSourceTab(tabsBar,"라디오","radio".equals(currentPage),this::showDomestic);
+        addSourceTab(tabsBar,"미디어",media,this::showMedia);
         addSourceTab(tabsBar,"CAN","can".equals(currentPage),this::showCan);
 
-        // Lower index: the two independent music libraries.
-        addSourceTab(bottomSourceBar,"YT NAS MUSIC",nas,this::showMp3);
-        addSourceTab(bottomSourceBar,"YT Music",ytm,this::showYtm);
-
-        subNavScroll.setVisibility(nas||ytm?View.VISIBLE:View.GONE);
+        // Nested Media sources, visible directly beneath the top index.
+        bottomSourceBar.setVisibility(media?View.VISIBLE:View.GONE);
+        if(media){
+            addSourceTab(bottomSourceBar,"YT Music",ytm,this::showYtm);
+            addSourceTab(bottomSourceBar,"NAS Music",nas,this::showMp3);
+        }
+        subNavScroll.setVisibility(media?View.VISIBLE:View.GONE);
         if(nas){
             addSectionTab("홈","home".equals(nasNav),this::showMp3);
             addSectionTab("좋아요","favorites".equals(nasNav),this::showMp3Favorites);
@@ -456,7 +470,6 @@ public class MainActivity extends AppCompatActivity {
     private void base(String title){
         ensureShell();
         tabsBar.setVisibility(View.VISIBLE);
-        bottomSourceBar.setVisibility(View.VISIBLE);
         refreshTabs();
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
@@ -771,6 +784,13 @@ public class MainActivity extends AppCompatActivity {
     private void showHome(){
         // No duplicate 'home' index: the persistent source tabs ARE the home navigation.
         showDomestic();
+    }
+
+    private void showMedia(){
+        // Preserve the last selected Media source when returning from Radio/CAN.
+        if("ytm".equals(currentPage)||"mp3".equals(currentPage))return;
+        if("nas".equals(lastMediaSource))showMp3();
+        else showYtm();
     }
 
     private void showYtm(){
