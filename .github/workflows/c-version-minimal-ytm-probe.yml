@@ -1,0 +1,73 @@
+name: Polaris C06 Verified YTM Search APK
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'c-version/**'
+      - '.github/workflows/c-version-minimal-ytm-probe.yml'
+  push:
+    branches: [ 'experiment/c-version-06-ytmusicapi-parity' ]
+  workflow_dispatch:
+
+jobs:
+  build-c-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Enforce standalone two-control experiment
+        run: |
+          set -euo pipefail
+          test "$(grep -c 'new EditText(this)' c-version/app/src/main/java/com/polaris/cprobe/MainActivity.java)" -eq 1
+          test "$(grep -c 'new Button(this)' c-version/app/src/main/java/com/polaris/cprobe/MainActivity.java)" -eq 1
+          ! grep -Eq 'PolarisMediaService|PolarisYtmBridge|MediaBrowserServiceCompat|ExoPlayer' c-version/app/src/main/java/com/polaris/cprobe/MainActivity.java
+          grep -q 'com.polaris.cprobe' c-version/app/build.gradle.kts
+          grep -q 'com.google.android.apps.youtube.music' c-version/app/src/main/java/com/polaris/cprobe/MainActivity.java
+      - name: Check actual public YT Music response shape (optional)
+        continue-on-error: true
+        run: python c-version/tools/inspect_search_response.py
+      - name: Test artist/title matching before APK build
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/c02-tests"
+          javac -encoding UTF-8 -d "$RUNNER_TEMP/c02-tests" \
+            c-version/app/src/main/java/com/polaris/cprobe/SongSelector.java \
+            c-version/tests/SongSelectorCliTest.java \
+            c-version/app/src/main/java/com/polaris/cprobe/MusicRowType.java \
+            c-version/tests/MusicRowTypeCliTest.java \
+            c-version/app/src/main/java/com/polaris/cprobe/YtmSearchProtocol.java \
+            c-version/tests/YtmSearchProtocolCliTest.java
+          java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.SongSelectorCliTest
+          java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.MusicRowTypeCliTest
+          java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.YtmSearchProtocolCliTest
+      - name: Restore persistent debug signing key
+        run: |
+          set -euo pipefail
+          base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
+          keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
+      - name: Compile standalone C app
+        run: gradle --no-daemon -p c-version :app:assembleDebug
+      - name: Check package, version and APK signature
+        run: |
+          set -euo pipefail
+          APK="$(find c-version/app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='7'"
+          "$APKSIGNER" verify --print-certs "$APK"
+          test -s "$APK"
+          ls -lh "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-C06-YTM-Search-Protocol
+          path: c-version/app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+          if-no-files-found: error
