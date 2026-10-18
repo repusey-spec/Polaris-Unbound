@@ -565,7 +565,10 @@ public class MainActivity extends AppCompatActivity {
         returnToSavedFromPlayer=false;
         if(controller==null){ Toast.makeText(this,"재생 서비스 연결 중입니다",Toast.LENGTH_SHORT).show(); return; }
         if(status!=null) status.setText(label+" 연결 중…");
-        if(PolarisYtmBridge.MEDIA_ID.equals(id)){
+        if(PolarisYtmBridge.MEDIA_ID.equals(id) ||
+           (id!=null && (id.startsWith(PolarisYtmCatalog.PLAY) ||
+                          id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST) ||
+                          "ytm:openapp".equals(id)))){
             selectedRadioId=null;
             scheduleHandler.removeCallbacksAndMessages(null);
             try{controller.getTransportControls().playFromMediaId(id,null);}
