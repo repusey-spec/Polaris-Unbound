@@ -33,11 +33,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Isolated C02 experiment: one text field -> public YT Music search ->
+ * Isolated C03 experiment: one text field -> public YT Music search ->
  * official YT Music deep-link launch. No player, cookies or Polaris service.
  */
 public final class MainActivity extends Activity {
-    private static final String TAG = "PolarisC02";
+    private static final String TAG = "PolarisC03";
     private static final String YTM_PACKAGE = "com.google.android.apps.youtube.music";
     private static final String YTM_SEARCH =
         "https://music.youtube.com/youtubei/v1/search?prettyPrint=false";
@@ -113,18 +113,19 @@ public final class MainActivity extends Activity {
         tell("YT Music에서 곡 검색 중…");
 
         worker.execute(() -> {
-            SongSelector.Candidate result = null;
+            SearchOutcome outcome = null;
             String error = null;
             try {
-                result = searchMatchingSong(query);
-                if(result == null)
-                    error = "가수·곡명이 일치하는 결과가 없습니다. 정확한 곡명을 입력하세요.";
+                outcome = searchMatchingSong(query);
+                if(outcome.song == null)
+                    error = "일치하는 곡 없음 · " + outcome.diagnostic;
             } catch (Exception e) {
                 error = "검색 오류: " + e.getClass().getSimpleName() +
                     (e.getMessage() != null ? " (" + e.getMessage() + ")" : "");
-                Log.w(TAG, "C02 search request failed", e);
+                Log.w(TAG, "C03 search request failed", e);
             }
-            final SongSelector.Candidate selected = result;
+            final SongSelector.Candidate selected =
+                outcome == null ? null : outcome.song;
             final String failure = error;
             runOnUiThread(() -> {
                 if(isFinishing() || isDestroyed()) return;
@@ -156,7 +157,7 @@ public final class MainActivity extends Activity {
         request.addCategory(Intent.CATEGORY_BROWSABLE);
         try {
             startActivity(request);
-            Log.i(TAG, "C02 matched " + song.title + " / " + song.artist +
+            Log.i(TAG, "C03 matched " + song.title + " / " + song.artist +
                 " -> " + song.id);
             tell("재생 요청: " + song.artist + " - " + song.title);
         } catch (ActivityNotFoundException | SecurityException e) {
@@ -165,49 +166,69 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static SongSelector.Candidate searchMatchingSong(String query)
+    private static final class SearchOutcome {
+        final SongSelector.Candidate song;
+        final String diagnostic;
+        SearchOutcome(SongSelector.Candidate song, String diagnostic) {
+            this.song=song;
+            this.diagnostic=diagnostic;
+        }
+    }
+
+    private static SearchOutcome findMatch(String query,
+                                            List<SongSelector.Candidate> candidates) {
+        SongSelector.Selection match=SongSelector.select(query,candidates);
+        if(match!=null) return new SearchOutcome(match.song,"");
+        StringBuilder details=new StringBuilder("후보 ").append(candidates.size()).append("개");
+        // Show actual parsed fields if C03 cannot match. This differentiates
+        // a genuinely absent song from an incorrectly parsed YTM response.
+        for(int i=0;i<Math.min(2,candidates.size());i++) {
+            SongSelector.Candidate c=candidates.get(i);
+            details.append(" / ").append(c.title).append(" - ").append(c.artist);
+        }
+        return new SearchOutcome(null,details.toString());
+    }
+
+    private static SearchOutcome searchMatchingSong(String query)
         throws Exception {
-        List<SongSelector.Candidate> candidates = new ArrayList<>();
-        Exception firstError = null;
-        // Keep the successful C01 public search + official-app ACTION_VIEW
-        // handoff. Only the result selection changes.
-        try {
-            candidates.addAll(collectSongs(postYtmSearch(query, true)));
-        } catch (Exception e) {
-            firstError = e;
-        }
-        SongSelector.Selection pick = SongSelector.select(query, candidates);
-        if(pick != null) return pick.song;
+        java.util.LinkedHashMap<String,SongSelector.Candidate> candidates =
+            new java.util.LinkedHashMap<>();
+        Exception firstError=null;
 
-        // If filtered results are absent/incomplete, also inspect public
-        // unfiltered results rather than playing whichever item came first.
-        try {
-            candidates.addAll(collectSongs(postYtmSearch(query, false)));
-        } catch (Exception e) {
-            if(firstError == null) firstError = e;
+        String[] originalParts=query.trim().split("\\s+");
+        List<String> queries=new ArrayList<>();
+        queries.add(query);
+        // First attempt an unchanged C01-compatible song search. On failure
+        // broaden to search's other categories. Do NOT autoplay the first hit.
+        if(originalParts.length>=2) {
+            String last=originalParts[originalParts.length-1];
+            if(last.length()>2 &&
+               (last.endsWith("는")||last.endsWith("은")||
+                last.endsWith("을")||last.endsWith("를"))) {
+                queries.add(query.substring(0,query.length()-1));
+            }
         }
-        pick = SongSelector.select(query, candidates);
-        if(pick != null) return pick.song;
-
-        // Spoken Korean may attach a topic/object particle to the song name:
-        // e.g. "성시경 너에게는" when the released title is "너에게".
-        String[] parts = query.trim().split("\\s+");
-        if(parts.length >= 2) {
-            String tail = parts[parts.length-1];
-            if(tail.length() > 2 && (tail.endsWith("는") ||
-                    tail.endsWith("은") || tail.endsWith("을") || tail.endsWith("를"))) {
-                String altered = query.substring(0,query.length()-1);
+        for(String requestQuery:queries) {
+            for(boolean filtered:new boolean[]{true,false}) {
                 try {
-                    candidates.addAll(collectSongs(postYtmSearch(altered, true)));
-                    pick = SongSelector.select(query, candidates);
-                    if(pick != null) return pick.song;
-                } catch (Exception e) {
-                    if(firstError == null) firstError = e;
+                    List<SongSelector.Candidate> results =
+                        collectSongs(postYtmSearch(requestQuery,filtered));
+                    for(SongSelector.Candidate item:results)
+                        candidates.putIfAbsent(item.id,item);
+                    SearchOutcome match=findMatch(query,
+                        new ArrayList<>(candidates.values()));
+                    if(match.song!=null) return match;
+                } catch(Exception e) {
+                    if(firstError==null) firstError=e;
+                    Log.w(TAG,"Search pass failed filtered="+filtered+
+                        " query=" + requestQuery,e);
                 }
             }
         }
-        if(candidates.isEmpty() && firstError != null) throw firstError;
-        return null; // A wrong song must NEVER be the fallback.
+        if(candidates.isEmpty()&&firstError!=null)throw firstError;
+        SearchOutcome noMatch=findMatch(query,new ArrayList<>(candidates.values()));
+        Log.i(TAG,"C03 no strict match: "+noMatch.diagnostic);
+        return noMatch;
     }
 
     private static JSONObject postYtmSearch(String query, boolean songsOnly)
@@ -305,30 +326,48 @@ public final class MainActivity extends Activity {
     }
 
     private static String firstArtist(JSONArray columns) {
-        if(columns.length() <= 1) return "";
-        for(int i=1; i<columns.length(); i++) {
-            JSONObject col = columns.optJSONObject(i);
-            JSONObject flex = col==null?null:
+        if(columns.length()<=1)return "";
+        List<String> credited=new ArrayList<>();
+        for(int i=1;i<Math.min(4,columns.length());i++) {
+            JSONObject col=columns.optJSONObject(i);
+            JSONObject flex=col==null?null:
                 col.optJSONObject("musicResponsiveListItemFlexColumnRenderer");
-            JSONObject text = flex==null?null:flex.optJSONObject("text");
-            if(text == null) continue;
-            JSONArray runs = text.optJSONArray("runs");
-            if(runs == null) {
-                String simple = text.optString("simpleText","").trim();
-                if(!simple.isEmpty()) return simple;
+            JSONObject text=flex==null?null:flex.optJSONObject("text");
+            if(text==null)continue;
+            JSONArray runs=text.optJSONArray("runs");
+            if(runs==null) {
+                String simple=text.optString("simpleText","").trim();
+                if(isLikelyArtist(simple))credited.add(simple);
                 continue;
             }
             for(int j=0;j<runs.length();j++) {
                 JSONObject run=runs.optJSONObject(j);
-                String value=run==null?"":run.optString("text","").trim();
-                if(value.isEmpty()||value.equals("•")||value.equals("·")||
-                   value.equalsIgnoreCase("Song")||value.equals("노래")||
-                   value.equalsIgnoreCase("Video")||value.equals("동영상"))
-                    continue;
-                return value;
+                if(run==null)continue;
+                String value=run.optString("text","").trim();
+                if(!isLikelyArtist(value))continue;
+                JSONObject nav=run.optJSONObject("navigationEndpoint");
+                JSONObject browse=nav==null?null:nav.optJSONObject("browseEndpoint");
+                String browseId=browse==null?"":browse.optString("browseId","");
+                if(browseId.startsWith("MPRE") || browseId.startsWith("MPRD"))
+                    continue; // Album, not an artist.
+                if(!credited.contains(value))credited.add(value);
             }
         }
-        return "";
+        return android.text.TextUtils.join(" · ",credited);
+    }
+
+    private static boolean isLikelyArtist(String text) {
+        if(text==null||text.isEmpty()||text.equals("•")||text.equals("·")||
+           text.equals("|")||text.matches("\\d{4}")||
+           text.matches("\\d+:\\d+(?::\\d+)?")) return false;
+        for(String category:new String[]{
+            "Song","Songs","노래","동영상","Video","Videos",
+            "Album","앨범","Single","싱글","EP","Music video"}) {
+            if(text.equalsIgnoreCase(category))return false;
+        }
+        if(text.contains("조회수")||text.contains("회 재생")||
+           text.contains("views"))return false;
+        return true;
     }
 
     private static String findVideoId(JSONObject row) {
@@ -369,9 +408,13 @@ public final class MainActivity extends Activity {
         JSONObject text = flex == null ? null : flex.optJSONObject("text");
         if(text == null) return "";
         JSONArray runs = text.optJSONArray("runs");
-        JSONObject first = runs == null ? null : runs.optJSONObject(0);
-        return first == null ? text.optString("simpleText", "") :
-            first.optString("text", "");
+        if(runs == null) return text.optString("simpleText","");
+        StringBuilder title = new StringBuilder();
+        for(int i=0;i<runs.length();i++) {
+            JSONObject part=runs.optJSONObject(i);
+            if(part!=null)title.append(part.optString("text",""));
+        }
+        return title.toString().trim();
     }
 
     @Override protected void onDestroy() {
