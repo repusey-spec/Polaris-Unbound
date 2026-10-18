@@ -2859,9 +2859,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 PolarisYtmCatalog.ACCOUNT_LIBRARY.equals(parent) ||
                 PolarisYtmCatalog.ACCOUNT_SONGS.equals(parent) ||
                 PolarisYtmCatalog.ACCOUNT_LIKED.equals(parent) ||
-                PolarisYtmCatalog.ACCOUNT_ALBUMS.equals(parent) ||
-                parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST) ||
-                parent.startsWith(PolarisYtmCatalog.ACCOUNT_ALBUM))){
+                parent.startsWith(PolarisYtmCatalog.ACCOUNT_PLAYLIST))){
             result.detach();
             PolarisYtmCatalog.get(this).load(parent,(children,error)->{
                 if(error!=null)trace("YTM catalog "+parent+" "+error);
@@ -2894,8 +2892,6 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 "저장한 노래"));
             x.add(folder(PolarisYtmCatalog.ACCOUNT_LIKED,
                 "좋아요 표시한 음악"));
-            x.add(folder(PolarisYtmCatalog.ACCOUNT_ALBUMS,
-                "보관함 앨범"));
             x.add(folder(PolarisYtmCatalog.HOME,"추천 · YT Music 계정"));
             // The original live YTM track is still mirrored as before.
             MediaMetadataCompat metadata=ytmBridge==null?null:ytmBridge.currentMetadata();
