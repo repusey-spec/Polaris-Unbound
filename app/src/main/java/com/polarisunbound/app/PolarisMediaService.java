@@ -2788,6 +2788,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         String symbol="liked".equals(kind)?"♥":
             "saved".equals(kind)?"♫":
             "nas".equals(kind)?"N":"♪";
+        // Tile images are fully controlled by Polaris. The labels are
+        // burned into local bitmaps, so they need no remote album-art URL.
+        // Other media tiles keep the Test 22 original single-symbol artwork.
+        boolean labelled="liked".equals(kind)||"nas".equals(kind);
         Bitmap bmp=Bitmap.createBitmap(128,128,Bitmap.Config.ARGB_8888);
         Canvas canvas=new Canvas(bmp);
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -2797,9 +2801,25 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         p.setTextAlign(Paint.Align.CENTER);
         p.setTypeface(android.graphics.Typeface.create("sans-serif",
             android.graphics.Typeface.BOLD));
-        p.setTextSize("liked".equals(kind)?73f:68f);
+        p.setTextSize(labelled?57f:("liked".equals(kind)?73f:68f));
         Paint.FontMetrics fm=p.getFontMetrics();
-        canvas.drawText(symbol,64f,64f-(fm.ascent+fm.descent)/2f,p);
+        float iconCenterY=labelled?46f:64f;
+        canvas.drawText(symbol,64f,iconCenterY-(fm.ascent+fm.descent)/2f,p);
+        if(labelled){
+            p.setColor(0xCC19242D);
+            canvas.drawRoundRect(new RectF(3f,84f,125f,126f),9f,9f,p);
+            p.setColor(Color.WHITE);
+            String first="liked".equals(kind)?"YouTube":"Synology";
+            String second="liked".equals(kind)?"Remote Player":"NAS Media Player";
+            p.setTextSize(15f);
+            canvas.drawText(first,64f,101f,p);
+            p.setTextSize(12f);
+            // Keep the full caption within the 128px bitmap even if a
+            // different system typeface has wider Latin glyphs.
+            if(p.measureText(second)>116f)
+                p.setTextSize(12f*116f/p.measureText(second));
+            canvas.drawText(second,64f,117f,p);
+        }
         aaMediaTileIcons.put(kind,bmp);
         return bmp;
     }
