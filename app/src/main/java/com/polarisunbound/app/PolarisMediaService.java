@@ -297,8 +297,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             @Override public void onTrace(String event){trace(event);}
             @Override public void onBrowserChildrenChanged(){
                 notifyChildrenChanged("ytm");
-                // YT Music content now appears directly in the AA Media root.
-                notifyChildrenChanged("nav:media");
+                // Media home now displays fixed folders and real playlist tiles,
+                // NOT a changing current-track row. A song change must not
+                // fetch the entire account playlist list again.
             }
         });
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS|MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
