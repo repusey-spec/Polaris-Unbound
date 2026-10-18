@@ -1,4 +1,4 @@
-name: Polaris C02 Singer-Title Search and Play APK
+name: Polaris C02.1 Installation Fix APK
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - 'c-version/**'
       - '.github/workflows/c-version-minimal-ytm-probe.yml'
   push:
-    branches: [ 'experiment/c-version-02-song-match' ]
+    branches: [ 'experiment/c-version-02-install-fixed' ]
   workflow_dispatch:
 
 jobs:
@@ -38,6 +38,11 @@ jobs:
             c-version/app/src/main/java/com/polaris/cprobe/SongSelector.java \
             c-version/tests/SongSelectorCliTest.java
           java -cp "$RUNNER_TEMP/c02-tests" com.polaris.cprobe.SongSelectorCliTest
+      - name: Restore persistent debug signing key
+        run: |
+          set -euo pipefail
+          base64 -d .github/polaris-debug.keystore.b64 > .github/polaris-debug.keystore
+          keytool -list -keystore .github/polaris-debug.keystore -storepass android -alias polarisdebug >/dev/null
       - name: Compile standalone C app
         run: gradle --no-daemon -p c-version :app:assembleDebug
       - name: Check package, version and APK signature
@@ -47,13 +52,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe'.*versionCode='2'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='3'"
           "$APKSIGNER" verify --print-certs "$APK"
           test -s "$APK"
           ls -lh "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-C02-YTM-Singer-Title-Match
+          name: Polaris-C02-1-Install-Fixed
           path: c-version/app/build/outputs/apk/debug/*.apk
           retention-days: 30
           if-no-files-found: error
