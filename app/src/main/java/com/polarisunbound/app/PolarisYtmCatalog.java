@@ -2,6 +2,7 @@ package com.polarisunbound.app;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.support.v4.media.MediaBrowserCompat;
@@ -482,11 +483,15 @@ final class PolarisYtmCatalog {
     }
     private static MediaBrowserCompat.MediaItem createItem(String id,String title,
             String subtitle,String art,boolean browsing) {
+        // AA renders these YT Music browse rows as text, not thumbnail cards.
+        // Do not forward unverified remote image URLs to the AA head unit.
+        Bundle hints=new Bundle();
+        hints.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
+        hints.putInt(androidx.media.utils.MediaConstants
+            .DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,1);
         MediaDescriptionCompat.Builder b=new MediaDescriptionCompat.Builder()
-            .setMediaId(id).setTitle(title).setSubtitle(subtitle);
-        if(art!=null && art.startsWith("https://")) {
-            try{ b.setIconUri(Uri.parse(art)); }catch(Exception ignored){}
-        }
+            .setMediaId(id).setTitle(title).setSubtitle(subtitle)
+            .setExtras(hints);
         return new MediaBrowserCompat.MediaItem(b.build(),browsing?
             MediaBrowserCompat.MediaItem.FLAG_BROWSABLE:
             MediaBrowserCompat.MediaItem.FLAG_PLAYABLE);
