@@ -1,4 +1,4 @@
-name: Polaris C02.1 Installation Fix APK
+name: Polaris C03 Search Parsing and Diagnostics APK
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - 'c-version/**'
       - '.github/workflows/c-version-minimal-ytm-probe.yml'
   push:
-    branches: [ 'experiment/c-version-02-install-fixed' ]
+    branches: [ 'experiment/c-version-03-search-parser-diagnostics' ]
   workflow_dispatch:
 
 jobs:
@@ -52,13 +52,13 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APK" && test -x "$AAPT" && test -x "$APKSIGNER"
-          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='3'"
+          "$AAPT" dump badging "$APK" | grep -E "package: name='com.polaris.cprobe.c02'.*versionCode='4'"
           "$APKSIGNER" verify --print-certs "$APK"
           test -s "$APK"
           ls -lh "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-C02-1-Install-Fixed
+          name: Polaris-C03-YTM-Search-Parser
           path: c-version/app/build/outputs/apk/debug/*.apk
           retention-days: 30
           if-no-files-found: error
