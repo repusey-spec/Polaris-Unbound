@@ -2896,8 +2896,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 "좋아요 표시한 음악"));
             x.add(folder(PolarisYtmCatalog.ACCOUNT_ALBUMS,
                 "보관함 앨범"));
-            x.add(folder(PolarisYtmCatalog.HOME,"홈 · YT Music 공개 추천"));
-            x.add(folder(PolarisYtmCatalog.LIBRARY,"보관함 · 실제 화면에서 읽은 항목"));
+            x.add(folder(PolarisYtmCatalog.HOME,"추천 · YT Music 계정"));
             // The original live YTM track is still mirrored as before.
             MediaMetadataCompat metadata=ytmBridge==null?null:ytmBridge.currentMetadata();
             String name=metadata==null?null:
