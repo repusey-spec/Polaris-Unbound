@@ -1,6 +1,10 @@
 package com.polaris.cprobe;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
@@ -12,6 +16,8 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -33,11 +39,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Isolated C03 experiment: one text field -> public YT Music search ->
+ * Isolated C04 experiment: one text field -> public YT Music search ->
  * official YT Music deep-link launch. No player, cookies or Polaris service.
  */
 public final class MainActivity extends Activity {
-    private static final String TAG = "PolarisC03";
+    private static final String TAG = "PolarisC04";
     private static final String YTM_PACKAGE = "com.google.android.apps.youtube.music";
     private static final String YTM_SEARCH =
         "https://music.youtube.com/youtubei/v1/search?prettyPrint=false";
@@ -122,7 +128,7 @@ public final class MainActivity extends Activity {
             } catch (Exception e) {
                 error = "검색 오류: " + e.getClass().getSimpleName() +
                     (e.getMessage() != null ? " (" + e.getMessage() + ")" : "");
-                Log.w(TAG, "C03 search request failed", e);
+                Log.w(TAG, "C04 search request failed", e);
             }
             final SongSelector.Candidate selected =
                 outcome == null ? null : outcome.song;
@@ -131,12 +137,40 @@ public final class MainActivity extends Activity {
                 if(isFinishing() || isDestroyed()) return;
                 execute.setEnabled(true);
                 if(selected == null) {
-                    tell(failure == null ? "검색 실패" : failure);
+                    showFailureReport(query, failure == null ? "검색 실패" : failure);
                     return;
                 }
                 openOfficialYtmTrack(selected);
             });
         });
+    }
+
+    // Keep the main screen at EXACTLY one text field and one Execute button.
+    // On failure only, let the user inspect and copy what the *phone itself*
+    // received; no PC ADB required, no login cookies or private tokens logged.
+    private void showFailureReport(String query,String details){
+        String report="C04 · YT Music 검색 진단\n\n" +
+            "실제 입력: " + query + "\n\n" + details +
+            "\n\n잘못된 곡은 자동 재생하지 않았습니다.";
+        TextView info=new TextView(this);
+        info.setText(report);
+        info.setTextIsSelectable(true);
+        info.setTextSize(14f);
+        info.setPadding(dp(18),dp(14),dp(18),dp(14));
+        ScrollView scrolling=new ScrollView(this);
+        scrolling.addView(info);
+        new AlertDialog.Builder(this)
+            .setTitle("검색 실패 · C04 진단")
+            .setView(scrolling)
+            .setPositiveButton("진단 복사",(dialog,which)->{
+                ClipboardManager cm=(ClipboardManager)getSystemService(
+                    Context.CLIPBOARD_SERVICE);
+                if(cm!=null)cm.setPrimaryClip(
+                    ClipData.newPlainText("Polaris C04 Search",report));
+                tell("검색 결과 진단을 복사했습니다.");
+            })
+            .setNegativeButton("닫기",null)
+            .show();
     }
 
     private boolean isYtmInstalled() {
@@ -157,7 +191,7 @@ public final class MainActivity extends Activity {
         request.addCategory(Intent.CATEGORY_BROWSABLE);
         try {
             startActivity(request);
-            Log.i(TAG, "C03 matched " + song.title + " / " + song.artist +
+            Log.i(TAG, "C04 matched " + song.title + " / " + song.artist +
                 " -> " + song.id);
             tell("재생 요청: " + song.artist + " - " + song.title);
         } catch (ActivityNotFoundException | SecurityException e) {
