@@ -448,8 +448,6 @@ public class MainActivity extends AppCompatActivity {
                 showYtmBrowse(PolarisYtmCatalog.ACCOUNT_SONGS,"저장한 노래"));
             addSectionTab("좋아요 음악","liked".equals(ytmNav),()->
                 showYtmBrowse(PolarisYtmCatalog.ACCOUNT_LIKED,"좋아요 표시한 음악"));
-            addSectionTab("앨범","albums".equals(ytmNav),()->
-                showYtmBrowse(PolarisYtmCatalog.ACCOUNT_ALBUMS,"보관함 앨범"));
             addSectionTab("추천","recommend".equals(ytmNav),()->
                 showYtmBrowse(PolarisYtmCatalog.HOME,"YT Music 계정 추천"));
         }
@@ -784,11 +782,6 @@ public class MainActivity extends AppCompatActivity {
             PolarisYtmCatalog.ACCOUNT_LIKED,"좋아요 표시한 음악"));
         body.addView(likes);
 
-        TextView albums=button("보관함 앨범");
-        albums.setOnClickListener(v->showYtmBrowse(
-            PolarisYtmCatalog.ACCOUNT_ALBUMS,"보관함 앨범"));
-        body.addView(albums);
-
         TextView login=button("계정 로그인 · 변경");
         login.setOnClickListener(v->startActivity(
             new Intent(this,PolarisYtmLoginActivity.class)));
@@ -975,9 +968,6 @@ public class MainActivity extends AppCompatActivity {
             ytmNav="songs";
         else if(PolarisYtmCatalog.ACCOUNT_LIKED.equals(parent))
             ytmNav="liked";
-        else if(PolarisYtmCatalog.ACCOUNT_ALBUMS.equals(parent) ||
-                parent.startsWith(PolarisYtmCatalog.ACCOUNT_ALBUM))
-            ytmNav="albums";
         else if(PolarisYtmCatalog.HOME.equals(parent) ||
                 parent.startsWith(PolarisYtmCatalog.SHELF))
             ytmNav="recommend";
