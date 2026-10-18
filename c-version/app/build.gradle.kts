@@ -10,8 +10,8 @@ android {
         applicationId = "com.polaris.cprobe"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "C01-ytm-search-play"
+        versionCode = 2
+        versionName = "C02-ytm-song-match"
     }
 
     buildTypes {
