@@ -176,7 +176,9 @@ final class PolarisYtmCatalog {
     private void ensureHome() throws Exception {
         if (!homeSections.isEmpty() && System.currentTimeMillis()-homeAt<CACHE_MS)
             return;
-        JSONObject response=request("FEmusic_home");
+        // Personalized recommendations require the same selected Google account
+        // and authenticated WEB_REMIX context as the working playlist library.
+        JSONObject response=PolarisYtmAccountCatalog.fetchAuthenticatedHome();
         JSONObject section=findHomeSectionList(response);
         JSONArray contents=section==null?null:section.optJSONArray("contents");
         List<Section> fresh=new ArrayList<>();
@@ -201,7 +203,7 @@ final class PolarisYtmCatalog {
                 "; visitor="+(!visitorData.isEmpty())+
                 "; bootstrap="+bootstrapStatus);
         }
-        Log.i(TAG,"public home sections="+fresh.size());
+        Log.i(TAG,"account home sections="+fresh.size());
     }
 
     /**
