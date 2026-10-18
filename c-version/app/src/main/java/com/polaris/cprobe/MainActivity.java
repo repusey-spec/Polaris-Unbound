@@ -247,7 +247,8 @@ public final class MainActivity extends Activity {
     }
 
     private static final class SearchClient {
-        final String apiKey, version, visitorId, label;
+        final String apiKey, version, label;
+        String visitorId;
         SearchClient(String apiKey,String version,String visitorId,String label){
             this.apiKey=apiKey;
             this.version=version;
@@ -314,6 +315,15 @@ public final class MainActivity extends Activity {
             (filtered?"노래":"전체")+"] \""+q+"\"";
         try {
             JSONObject response=postYtmSearch(q,filtered,client,country,language);
+            // YouTube may mint a public visitor ID in the first response,
+            // even when the anonymous page lacks VISITOR_DATA. Persist only
+            // this session identifier, never auth cookies or account data.
+            JSONObject responseContext=response.optJSONObject("responseContext");
+            String seen=responseContext==null?"":
+                responseContext.optString("visitorData","");
+            if(client.visitorId.isEmpty() &&
+               seen.matches("[A-Za-z0-9_%-]{8,512}"))
+                client.visitorId=seen;
             List<SongSelector.Candidate> items=
                 collectSongs(response,stats,filtered);
             for(SongSelector.Candidate song:items)
@@ -332,7 +342,9 @@ public final class MainActivity extends Activity {
                 .append(" / ID ").append(stats.validVideoIds)
                 .append(" / ID누락 ").append(stats.missingVideoIds)
                 .append(" / 음악수집 ").append(stats.accepted)
-                .append(" / 누적 ").append(merged.size());
+                .append(" / 누적 ").append(merged.size())
+                .append(" / 방문자 ").append(
+                    client.visitorId.isEmpty()?"없음":"있음");
             if(stats.allRows==0)
                 status.append(" / 응답최상위 ").append(rootKeys(response));
             diagnostics.add(status.toString());
