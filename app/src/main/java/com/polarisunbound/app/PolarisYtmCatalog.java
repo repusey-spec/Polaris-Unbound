@@ -51,6 +51,10 @@ final class PolarisYtmCatalog {
     static final String HOME = "ytm:home";
     static final String LIBRARY = "ytm:library";
     static final String ACCOUNT_LIBRARY = "ytm:account:library";
+    static final String ACCOUNT_SONGS = "ytm:account:songs";
+    static final String ACCOUNT_LIKED = "ytm:account:liked";
+    static final String ACCOUNT_ALBUMS = "ytm:account:albums";
+    static final String ACCOUNT_ALBUM = "ytm:account:album:";
     static final String ACCOUNT_PLAYLIST = "ytm:account:playlist:";
     static final String SHELF = "ytm:shelf:";
     static final String PLAYLIST = "ytm:playlist:";
@@ -94,7 +98,11 @@ final class PolarisYtmCatalog {
 
     void load(String parent, Callback callback) {
         if (ACCOUNT_LIBRARY.equals(parent) ||
-                (parent!=null && parent.startsWith(ACCOUNT_PLAYLIST))) {
+                ACCOUNT_SONGS.equals(parent) ||
+                ACCOUNT_LIKED.equals(parent) ||
+                ACCOUNT_ALBUMS.equals(parent) ||
+                (parent!=null && (parent.startsWith(ACCOUNT_PLAYLIST) ||
+                    parent.startsWith(ACCOUNT_ALBUM)))) {
             PolarisYtmAccountCatalog.get(context).load(parent,callback::done);
             return;
         }
