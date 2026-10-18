@@ -76,6 +76,17 @@ public final class SongSelectorCliTest {
             "너에게로 가는 길","성시경",1);
         wants("성시경 너에게",null,unrelated,wrongCover);
 
-        System.out.println("C03 singer/title matching: 16 fixtures OK");
+        // Exact user input from C03 phone failure with real YTM song ID.
+        SongSelector.Candidate returnedFirst=new SongSelector.Candidate(
+            "YE9YnrFgib8","너에게 To You","성시경",
+            "응답하라 1994 OST Part 2",0);
+        wants("성시경 너에게","YE9YnrFgib8",
+            realWrong,wrongCover,returnedFirst);
+        if(SongSelector.inspectScore("성시경 너에게",returnedFirst)<205)
+            throw new AssertionError("Expected real OST track to pass threshold");
+        if(SongSelector.inspectScore("성시경 너에게",wrongCover)>=205)
+            throw new AssertionError("An unrelated cover must not pass threshold");
+
+        System.out.println("C04 artist/title/score: 17 match fixtures + 2 score checks OK");
     }
 }
