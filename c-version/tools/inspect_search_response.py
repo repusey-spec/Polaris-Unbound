@@ -36,7 +36,7 @@ def walk(node, found):
                 return
 
 
-for query in ("성시경 너에게는", "서태지 너에게"):
+for query in ("성시경 너에게", "성시경 너에게는", "서태지 너에게"):
     for filtered in (True, False):
         try:
             data = {
