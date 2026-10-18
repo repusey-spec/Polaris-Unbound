@@ -24,16 +24,20 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Isolated C01 experiment: one text field -> public YT Music search ->
+ * Isolated C02 experiment: one text field -> public YT Music search ->
  * official YT Music deep-link launch. No player, cookies or Polaris service.
  */
 public final class MainActivity extends Activity {
-    private static final String TAG = "PolarisC01";
+    private static final String TAG = "PolarisC02";
     private static final String YTM_PACKAGE = "com.google.android.apps.youtube.music";
     private static final String YTM_SEARCH =
         "https://music.youtube.com/youtubei/v1/search?prettyPrint=false";
@@ -109,17 +113,18 @@ public final class MainActivity extends Activity {
         tell("YT Music에서 곡 검색 중…");
 
         worker.execute(() -> {
-            Track result = null;
+            SongSelector.Candidate result = null;
             String error = null;
             try {
-                result = searchFirstSong(query);
-                if(result == null) error = "곡 ID를 찾지 못했습니다.";
+                result = searchMatchingSong(query);
+                if(result == null)
+                    error = "가수·곡명이 일치하는 결과가 없습니다. 정확한 곡명을 입력하세요.";
             } catch (Exception e) {
                 error = "검색 오류: " + e.getClass().getSimpleName() +
                     (e.getMessage() != null ? " (" + e.getMessage() + ")" : "");
-                Log.w(TAG, "C01 search request failed", e);
+                Log.w(TAG, "C02 search request failed", e);
             }
-            final Track selected = result;
+            final SongSelector.Candidate selected = result;
             final String failure = error;
             runOnUiThread(() -> {
                 if(isFinishing() || isDestroyed()) return;
@@ -142,7 +147,7 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void openOfficialYtmTrack(Track song) {
+    private void openOfficialYtmTrack(SongSelector.Candidate song) {
         // The only playback action is handed to the *installed official app*.
         // startActivity succeeding is NOT evidence that YT Music actually played.
         Uri link = Uri.parse("https://music.youtube.com/watch?v=" + song.id);
@@ -151,33 +156,58 @@ public final class MainActivity extends Activity {
         request.addCategory(Intent.CATEGORY_BROWSABLE);
         try {
             startActivity(request);
-            Log.i(TAG, "C01 target ID handed off to official YT Music: " + song.id);
-            tell("YT Music 재생 요청: " + song.title);
+            Log.i(TAG, "C02 matched " + song.title + " / " + song.artist +
+                " -> " + song.id);
+            tell("재생 요청: " + song.artist + " - " + song.title);
         } catch (ActivityNotFoundException | SecurityException e) {
             Log.w(TAG, "Official YT Music cannot open watch URI", e);
             tell("YT Music 앱이 곡 링크를 열지 못했습니다.");
         }
     }
 
-    private static Track searchFirstSong(String query) throws Exception {
+    private static SongSelector.Candidate searchMatchingSong(String query)
+        throws Exception {
+        List<SongSelector.Candidate> candidates = new ArrayList<>();
         Exception firstError = null;
+        // Keep the successful C01 public search + official-app ACTION_VIEW
+        // handoff. Only the result selection changes.
         try {
-            Track song = findFirstSong(postYtmSearch(query, true));
-            if(song != null) return song;
-        } catch (IOException e) {
+            candidates.addAll(collectSongs(postYtmSearch(query, true)));
+        } catch (Exception e) {
             firstError = e;
         }
-        // Some anonymous clients reject the song-filter token; retry default
-        // public results, still selecting only a real watchEndpoint videoId.
+        SongSelector.Selection pick = SongSelector.select(query, candidates);
+        if(pick != null) return pick.song;
+
+        // If filtered results are absent/incomplete, also inspect public
+        // unfiltered results rather than playing whichever item came first.
         try {
-            Track song = findFirstSong(postYtmSearch(query, false));
-            if(song != null) return song;
-        } catch (IOException e) {
-            if(firstError != null) e.addSuppressed(firstError);
-            throw e;
+            candidates.addAll(collectSongs(postYtmSearch(query, false)));
+        } catch (Exception e) {
+            if(firstError == null) firstError = e;
         }
-        if(firstError != null) throw firstError;
-        return null;
+        pick = SongSelector.select(query, candidates);
+        if(pick != null) return pick.song;
+
+        // Spoken Korean may attach a topic/object particle to the song name:
+        // e.g. "성시경 너에게는" when the released title is "너에게".
+        String[] parts = query.trim().split("\\s+");
+        if(parts.length >= 2) {
+            String tail = parts[parts.length-1];
+            if(tail.length() > 2 && (tail.endsWith("는") ||
+                    tail.endsWith("은") || tail.endsWith("을") || tail.endsWith("를"))) {
+                String altered = query.substring(0,query.length()-1);
+                try {
+                    candidates.addAll(collectSongs(postYtmSearch(altered, true)));
+                    pick = SongSelector.select(query, candidates);
+                    if(pick != null) return pick.song;
+                } catch (Exception e) {
+                    if(firstError == null) firstError = e;
+                }
+            }
+        }
+        if(candidates.isEmpty() && firstError != null) throw firstError;
+        return null; // A wrong song must NEVER be the fallback.
     }
 
     private static JSONObject postYtmSearch(String query, boolean songsOnly)
@@ -234,12 +264,16 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private static Track findFirstSong(JSONObject response) {
-        return walk(response, new int[]{0}, 0);
+    private static List<SongSelector.Candidate> collectSongs(JSONObject response) {
+        Map<String,SongSelector.Candidate> byId = new LinkedHashMap<>();
+        walk(response, new int[]{0}, 0, byId);
+        return new ArrayList<>(byId.values());
     }
 
-    private static Track walk(Object node, int[] visited, int depth) {
-        if(node == null || depth > 24 || ++visited[0] > 13000) return null;
+    private static void walk(Object node, int[] visited, int depth,
+                             Map<String,SongSelector.Candidate> result) {
+        if(node == null || depth > 32 || ++visited[0] > 30000 ||
+           result.size() >= 100) return;
         if(node instanceof JSONObject) {
             JSONObject object = (JSONObject) node;
             JSONObject renderer = object.optJSONObject("musicResponsiveListItemRenderer");
@@ -248,22 +282,53 @@ public final class MainActivity extends Activity {
                 if(isVideoId(id)) {
                     JSONArray columns = renderer.optJSONArray("flexColumns");
                     String title = columns == null ? "" : firstText(columns.optJSONObject(0));
-                    return new Track(id, title.isEmpty() ? "검색된 곡" : title);
+                    String artist = columns == null ? "" : firstArtist(columns);
+                    if(!title.isEmpty() && !artist.isEmpty() &&
+                            !result.containsKey(id)) {
+                        result.put(id, new SongSelector.Candidate(
+                            id, title, artist, result.size()));
+                    }
                 }
             }
             Iterator<String> keys = object.keys();
             while(keys.hasNext()) {
-                Track found = walk(object.opt(keys.next()), visited, depth + 1);
-                if(found != null) return found;
+                walk(object.opt(keys.next()), visited, depth + 1, result);
+                if(result.size() >= 100) return;
             }
         } else if(node instanceof JSONArray) {
             JSONArray arr = (JSONArray) node;
-            for(int i = 0; i < arr.length(); i++) {
-                Track found = walk(arr.opt(i), visited, depth + 1);
-                if(found != null) return found;
+            for(int i=0; i<arr.length(); i++) {
+                walk(arr.opt(i), visited, depth + 1, result);
+                if(result.size() >= 100) return;
             }
         }
-        return null;
+    }
+
+    private static String firstArtist(JSONArray columns) {
+        if(columns.length() <= 1) return "";
+        for(int i=1; i<columns.length(); i++) {
+            JSONObject col = columns.optJSONObject(i);
+            JSONObject flex = col==null?null:
+                col.optJSONObject("musicResponsiveListItemFlexColumnRenderer");
+            JSONObject text = flex==null?null:flex.optJSONObject("text");
+            if(text == null) continue;
+            JSONArray runs = text.optJSONArray("runs");
+            if(runs == null) {
+                String simple = text.optString("simpleText","").trim();
+                if(!simple.isEmpty()) return simple;
+                continue;
+            }
+            for(int j=0;j<runs.length();j++) {
+                JSONObject run=runs.optJSONObject(j);
+                String value=run==null?"":run.optString("text","").trim();
+                if(value.isEmpty()||value.equals("•")||value.equals("·")||
+                   value.equalsIgnoreCase("Song")||value.equals("노래")||
+                   value.equalsIgnoreCase("Video")||value.equals("동영상"))
+                    continue;
+                return value;
+            }
+        }
+        return "";
     }
 
     private static String findVideoId(JSONObject row) {
@@ -314,12 +379,4 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    private static final class Track {
-        final String id;
-        final String title;
-        Track(String id, String title) {
-            this.id = id;
-            this.title = title;
-        }
-    }
 }
