@@ -19,6 +19,10 @@ import android.net.Uri;
 import android.provider.MediaStore;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Color;
+import android.graphics.RectF;
 import android.media.MediaMetadataRetriever;
 import android.support.v4.media.*;
 import android.support.v4.media.session.*;
@@ -2755,6 +2759,101 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         return new BrowserRoot("root",style);
     }
 
+    // AA's Media tab is the only grid parent; radio and NAS retain their
+    // existing browser preferences. Actual track rows remain text-only.
+    private android.support.v4.media.MediaBrowserCompat.MediaItem mediaGridParent(){
+        Bundle e=new Bundle();
+        e.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+            MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM);
+        e.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+            MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM);
+        e.putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT",2);
+        e.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            new MediaDescriptionCompat.Builder().setMediaId("nav:media")
+                .setTitle("미디어").setExtras(e).build(),
+            android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
+    }
+
+    // Compose local icons so AA receives an actual bitmap and never substitutes
+    // the warning triangle previously shown for missing remote album artwork.
+    private final Map<String,Bitmap> aaMediaTileIcons=new HashMap<>();
+    private Bitmap aaMediaTileIcon(String kind){
+        Bitmap cached=aaMediaTileIcons.get(kind);
+        if(cached!=null&&!cached.isRecycled())return cached;
+        int background="liked".equals(kind)?0xFF873E72:
+            "saved".equals(kind)?0xFF39748E:
+            "nas".equals(kind)?0xFF535A68:0xFF41666B;
+        String symbol="liked".equals(kind)?"♥":
+            "saved".equals(kind)?"♫":
+            "nas".equals(kind)?"N":"♪";
+        Bitmap bmp=Bitmap.createBitmap(128,128,Bitmap.Config.ARGB_8888);
+        Canvas canvas=new Canvas(bmp);
+        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(background);
+        canvas.drawRoundRect(new RectF(0,0,128,128),18f,18f,p);
+        p.setColor(Color.WHITE);
+        p.setTextAlign(Paint.Align.CENTER);
+        p.setTypeface(android.graphics.Typeface.create("sans-serif",
+            android.graphics.Typeface.BOLD));
+        p.setTextSize("liked".equals(kind)?73f:68f);
+        Paint.FontMetrics fm=p.getFontMetrics();
+        canvas.drawText(symbol,64f,64f-(fm.ascent+fm.descent)/2f,p);
+        aaMediaTileIcons.put(kind,bmp);
+        return bmp;
+    }
+
+    private android.support.v4.media.MediaBrowserCompat.MediaItem aaMediaTile(
+            String id,String title,String subtitle,String kind){
+        Bundle e=new Bundle();
+        e.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+            MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM);
+        // Selecting a category opens TEXT song rows, even though its parent
+        // is a grid. This is an item-scoped preference, not a global override.
+        e.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+            MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM);
+        e.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+            MediaConstants.DESCRIPTION_EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM);
+        MediaDescriptionCompat.Builder d=new MediaDescriptionCompat.Builder()
+            .setMediaId(id).setTitle(title).setIconBitmap(aaMediaTileIcon(kind))
+            .setExtras(e);
+        if(subtitle!=null&&!subtitle.trim().isEmpty())
+            d.setSubtitle(subtitle);
+        return new android.support.v4.media.MediaBrowserCompat.MediaItem(
+            d.build(),android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_BROWSABLE);
+    }
+
+    private void loadAaMediaGrid(
+            Result<List<android.support.v4.media.MediaBrowserCompat.MediaItem>> result){
+        result.detach();
+        PolarisYtmCatalog.get(this).load(PolarisYtmCatalog.ACCOUNT_LIBRARY,
+            (actualPlaylists,error)->{
+                List<android.support.v4.media.MediaBrowserCompat.MediaItem> out=new ArrayList<>();
+                out.add(aaMediaTile(PolarisYtmCatalog.ACCOUNT_LIKED,
+                    "좋아요 음악",null,"liked"));
+                out.add(aaMediaTile(PolarisYtmCatalog.ACCOUNT_SONGS,
+                    "저장한 노래",null,"saved"));
+                if(error!=null)trace("AA media grid account playlists: "+error);
+                if(actualPlaylists!=null){
+                    Set<String> seen=new HashSet<>();
+                    for(android.support.v4.media.MediaBrowserCompat.MediaItem item:actualPlaylists){
+                        if(item==null||!item.isBrowsable()||
+                           item.getDescription()==null)continue;
+                        String id=item.getMediaId();
+                        if(id==null||!id.startsWith(
+                           PolarisYtmCatalog.ACCOUNT_PLAYLIST)||!seen.add(id))continue;
+                        CharSequence name=item.getDescription().getTitle();
+                        if(name==null||name.toString().trim().isEmpty())continue;
+                        CharSequence sub=item.getDescription().getSubtitle();
+                        out.add(aaMediaTile(id,name.toString(),
+                            sub==null?null:sub.toString(),"playlist"));
+                    }
+                }
+                out.add(aaMediaTile("mp3","NAS Music",null,"nas"));
+                result.sendResult(out);
+            });
+    }
+
     private android.support.v4.media.MediaBrowserCompat.MediaItem folder(String id,String title){
         Bundle e=new Bundle();
         // Child songs in these folders have no thumbnail, so request a list.
@@ -2899,52 +2998,18 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             loadFtpMp3ChildrenAsync(parent,result);
             return;
         }
+        if("nav:media".equals(parent) || "ytm".equals(parent)){
+            loadAaMediaGrid(result);
+            return;
+        }
         List<android.support.v4.media.MediaBrowserCompat.MediaItem> x=new ArrayList<>();
         if(parent.equals("root")){
             // The Android Auto host renders root browse folders as navigation
             // tabs. The desired order is Radio | Media | CAN (three children,
             // below the host's typical limit of four root tabs).
             x.add(folder("radio","라디오"));
-            x.add(folder("nav:media","미디어"));
+            x.add(mediaGridParent());
             x.add(folder("can","CAN"));
-        } else if(parent.equals("nav:media") || parent.equals("ytm")){
-            // Selecting Media opens YT Music categories immediately, without
-            // another "YT Music" folder. NAS is a secondary folder below.
-            // Keep the direct "ytm" route for existing browser references.
-            // Entries come from the existing authenticated YTM account catalog.
-            x.add(folder(PolarisYtmCatalog.ACCOUNT_LIBRARY,
-                "내 플레이리스트"));
-            x.add(folder(PolarisYtmCatalog.ACCOUNT_SONGS,
-                "저장한 노래"));
-            x.add(folder(PolarisYtmCatalog.ACCOUNT_LIKED,
-                "좋아요 표시한 음악"));
-            x.add(folder(PolarisYtmCatalog.HOME,"추천 · YT Music 계정"));
-            // The original live YTM track is still mirrored as before.
-            MediaMetadataCompat metadata=ytmBridge==null?null:ytmBridge.currentMetadata();
-            String name=metadata==null?null:
-                metadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
-            String artist=metadata==null?null:
-                metadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
-            MediaDescriptionCompat.Builder current=new MediaDescriptionCompat.Builder()
-                .setMediaId(YTM_ID)
-                .setTitle(name==null||name.trim().isEmpty()?"YT Music 현재 재생 연결":name)
-                .setSubtitle(artist==null||artist.trim().isEmpty()?
-                    "YT Music에서 음악을 먼저 재생하세요":artist);
-            // The AA browser shows a simple currently-playing text row.
-            // Real album artwork is still mirrored in the separate full player.
-            Bundle hints=new Bundle();
-            hints.putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT",1);
-            hints.putInt("android.media.browse.CONTENT_STYLE_SINGLE_ITEM_HINT",1);
-            hints.putInt(MediaConstants.DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,1);
-            current.setExtras(hints);
-            x.add(new android.support.v4.media.MediaBrowserCompat.MediaItem(
-                current.build(),
-                android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE));
-            if(parent.equals("nav:media")){
-                // Low-use NAS content remains available but does not block
-                // one-tap access to the user's YT Music library.
-                x.add(folder("mp3","NAS Music"));
-            }
         } else if(parent.equals("can")){
             PolarisFtp.Config cfg=PolarisFtp.load(this);
             String sub=cfg.isConfigured() ? cfg.canRoot+" · "+canFtpStatus : "폰에서 FTP 설정 필요";
