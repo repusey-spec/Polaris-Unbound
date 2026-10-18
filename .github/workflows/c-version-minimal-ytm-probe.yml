@@ -30,6 +30,9 @@ jobs:
           ! grep -Eq 'PolarisMediaService|PolarisYtmBridge|MediaBrowserServiceCompat|ExoPlayer' c-version/app/src/main/java/com/polaris/cprobe/MainActivity.java
           grep -q 'com.polaris.cprobe' c-version/app/build.gradle.kts
           grep -q 'com.google.android.apps.youtube.music' c-version/app/src/main/java/com/polaris/cprobe/MainActivity.java
+      - name: Check actual public YT Music response shape (optional)
+        continue-on-error: true
+        run: python c-version/tools/inspect_search_response.py
       - name: Test artist/title matching before APK build
         run: |
           set -euo pipefail
