@@ -162,7 +162,13 @@ public class MainActivity extends AppCompatActivity {
                 float ax=Math.abs(dx);
                 float ay=Math.abs(dy);
 
-                if(ax>dp(14) && ax>ay*1.25f){
+                if("ytm_now".equals(currentPage)){
+                    // Do not translate the YT Music ScrollView while swiping.
+                    // Previously the early skip return left the *entire screen*
+                    // shifted, and a small drag also forced an artwork repaint.
+                    if(getTranslationX()!=0f)setTranslationX(0f);
+                    if(getTranslationY()!=0f)setTranslationY(0f);
+                }else if(ax>dp(14) && ax>ay*1.25f){
                     setTranslationX(Math.max(-dp(110),Math.min(dp(110),dx*0.30f)));
                     setTranslationY(0f);
                 }else if(dy>dp(14) && ay>ax*1.25f && getScrollY()<=dp(2)){
@@ -181,9 +187,17 @@ public class MainActivity extends AppCompatActivity {
                 if(action==android.view.MotionEvent.ACTION_UP && !gestureBlocked){
                     if(ax>=dp(88) && ax>ay*1.25f){
                         if("ytm_now".equals(currentPage)){
+                            animate().cancel();
+                            setTranslationX(0f);
+                            setTranslationY(0f);
+                            setAlpha(1f);
                             if(controller!=null){
-                                if(dx<0)controller.getTransportControls().skipToNext();
-                                else controller.getTransportControls().skipToPrevious();
+                                if(dx<0 && ytmHasAction(
+                                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT))
+                                    controller.getTransportControls().skipToNext();
+                                else if(dx>0 && ytmHasAction(
+                                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS))
+                                    controller.getTransportControls().skipToPrevious();
                             }
                         }else if(dx<0)finishHorizontalPlayerSwipe(this,1);
                         else finishHorizontalPlayerSwipe(this,-1);
