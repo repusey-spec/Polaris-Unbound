@@ -77,6 +77,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private PolarisYtmBridge ytmBridge;
     private boolean ytmMode=false;
     private static final String YTM_ID=PolarisYtmBridge.MEDIA_ID;
+    // Explicitly set only by PHONE YTM selections. AA browse playback retains
+    // its existing route and never attempts this experimental session action.
+    static final String EXTRA_YTM_PHONE_BACKGROUND=
+        "com.polarisunbound.app.extra.YTM_PHONE_BACKGROUND";
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
     private final ExecutorService programExecutor=Executors.newFixedThreadPool(3);
@@ -308,8 +312,25 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                     if(id!=null && (id.startsWith(PolarisYtmCatalog.PLAY) ||
                             id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST) ||
                             "ytm:openapp".equals(id))){
-                        // Do not interrupt live radio/MP3 until Android accepts
-                        // the original YT Music activity launch request.
+                        // On PHONE only, try an already-active official
+                        // YT Music session without launching an Activity.
+                        // This is capability-gated, and dispatch alone does
+                        // not guarantee that the source selected the requested
+                        // song or playlist.
+                        boolean phoneBackground=extras!=null &&
+                            extras.getBoolean(EXTRA_YTM_PHONE_BACKGROUND,false);
+                        if(phoneBackground){
+                            String uri=PolarisYtmDeepLink.urlFor(id);
+                            if(uri!=null && ytmBridge.tryPlayFromUriInBackground(
+                                    Uri.parse(uri))){
+                                enterYtmMode();
+                                trace("YTM phone background request dispatched; verify source playback");
+                                return;
+                            }
+                            trace("YTM phone background unavailable; using original link");
+                        }
+                        // Preserve the previously working URI launch fallback,
+                        // including the existing Android Auto path.
                         if(openOriginalYtm(id)) enterYtmMode();
                         else trace("YTM launch rejected; existing source preserved");
                         return;
