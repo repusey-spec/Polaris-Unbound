@@ -17,26 +17,41 @@ def runs(column):
     return [str(x.get("text", "")) for x in payload.get("runs", [])]
 
 
+def identify(row):
+    # Mirror the Java C03 findVideoId decision branches.
+    p = row.get("playlistItemData", {}).get("videoId", "")
+    nav = row.get("navigationEndpoint", {}).get("watchEndpoint", {}).get("videoId", "")
+    overlay = (row.get("overlay", {})
+               .get("musicItemThumbnailOverlayRenderer", {})
+               .get("content", {}).get("musicPlayButtonRenderer", {})
+               .get("playNavigationEndpoint", {}).get("watchEndpoint", {})
+               .get("videoId", ""))
+    source = ("playlistItemData" if len(p) == 11 else
+              "navigation" if len(nav) == 11 else
+              "overlay" if len(overlay) == 11 else "NONE")
+    return source, p or nav or overlay
+
+
 def walk(node, found):
-    if len(found) >= 8:
+    if len(found) >= 24:
         return
     if isinstance(node, dict):
         row = node.get("musicResponsiveListItemRenderer")
         if row:
             columns = row.get("flexColumns", [])
-            found.append([runs(x) for x in columns[:3]])
+            found.append({"columns": [runs(x) for x in columns[:3]], "id": identify(row)})
         for child in node.values():
             walk(child, found)
-            if len(found) >= 8:
+            if len(found) >= 24:
                 return
     elif isinstance(node, list):
         for child in node:
             walk(child, found)
-            if len(found) >= 8:
+            if len(found) >= 24:
                 return
 
 
-for query in ("성시경 너에게는", "서태지 너에게"):
+for query in ("성시경 너에게", "성시경 너에게는", "서태지 너에게"):
     for filtered in (True, False):
         try:
             data = {
@@ -70,7 +85,9 @@ for query in ("성시경 너에게는", "서태지 너에게"):
             found = []
             walk(response, found)
             print(f"C03 API {query!r} filtered={filtered} rows={len(found)}")
-            for i, cols in enumerate(found[:5]):
-                print(f"  {i}: {cols!r}")
+            for i, item in enumerate(found):
+                cols=item["columns"]
+                print(f"  {i} id={item['id']} title={cols[0] if cols else []!r} "
+                      f"credit={cols[1] if len(cols)>1 else []!r}")
         except Exception as exc:
             print(f"C03 API {query!r} filtered={filtered} unavailable: {type(exc).__name__} {str(exc)[:100]}")
