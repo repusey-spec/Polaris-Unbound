@@ -39,11 +39,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Isolated C04 experiment: one text field -> public YT Music search ->
+ * Isolated C05 experiment: one text field -> public YT Music search ->
  * official YT Music deep-link launch. No player, cookies or Polaris service.
  */
 public final class MainActivity extends Activity {
-    private static final String TAG = "PolarisC04";
+    private static final String TAG = "PolarisC05";
     private static final String YTM_PACKAGE = "com.google.android.apps.youtube.music";
     private static final String YTM_SEARCH =
         "https://music.youtube.com/youtubei/v1/search?prettyPrint=false";
@@ -128,7 +128,7 @@ public final class MainActivity extends Activity {
             } catch (Exception e) {
                 error = "검색 오류: " + e.getClass().getSimpleName() +
                     (e.getMessage() != null ? " (" + e.getMessage() + ")" : "");
-                Log.w(TAG, "C04 search request failed", e);
+                Log.w(TAG, "C05 search request failed", e);
             }
             final SongSelector.Candidate selected =
                 outcome == null ? null : outcome.song;
@@ -149,7 +149,7 @@ public final class MainActivity extends Activity {
     // On failure only, let the user inspect and copy what the *phone itself*
     // received; no PC ADB required, no login cookies or private tokens logged.
     private void showFailureReport(String query,String details){
-        String report="C04 · YT Music 검색 진단\n\n" +
+        String report="C05 · YT Music 검색 진단\n\n" +
             "실제 입력: " + query + "\n\n" + details +
             "\n\n잘못된 곡은 자동 재생하지 않았습니다.";
         TextView info=new TextView(this);
@@ -160,13 +160,13 @@ public final class MainActivity extends Activity {
         ScrollView scrolling=new ScrollView(this);
         scrolling.addView(info);
         new AlertDialog.Builder(this)
-            .setTitle("검색 실패 · C04 진단")
+            .setTitle("검색 실패 · C05 진단")
             .setView(scrolling)
             .setPositiveButton("진단 복사",(dialog,which)->{
                 ClipboardManager cm=(ClipboardManager)getSystemService(
                     Context.CLIPBOARD_SERVICE);
                 if(cm!=null)cm.setPrimaryClip(
-                    ClipData.newPlainText("Polaris C04 Search",report));
+                    ClipData.newPlainText("Polaris C05 Search",report));
                 tell("검색 결과 진단을 복사했습니다.");
             })
             .setNegativeButton("닫기",null)
@@ -191,7 +191,7 @@ public final class MainActivity extends Activity {
         request.addCategory(Intent.CATEGORY_BROWSABLE);
         try {
             startActivity(request);
-            Log.i(TAG, "C04 matched " + song.title + " / " + song.artist +
+            Log.i(TAG, "C05 matched " + song.title + " / " + song.artist +
                 " -> " + song.id);
             tell("재생 요청: " + song.artist + " - " + song.title);
         } catch (ActivityNotFoundException | SecurityException e) {
@@ -216,6 +216,36 @@ public final class MainActivity extends Activity {
         int emptyTitles;
         int emptyArtists;
         int accepted;
+        int songRows;
+        int videoRows;
+        int episodeRows;
+        int unknownRows;
+        int musicShelves;
+        int twoRowItems;
+        int otherShelves;
+    }
+
+    private static String resultCategory(JSONArray columns){
+        if(columns==null||columns.length()<2)return "unknown";
+        JSONObject flex=columns.optJSONObject(1);
+        JSONObject x=flex==null?null:
+            flex.optJSONObject("musicResponsiveListItemFlexColumnRenderer");
+        JSONObject text=x==null?null:x.optJSONObject("text");
+        JSONArray runs=text==null?null:text.optJSONArray("runs");
+        JSONObject first=runs==null?null:runs.optJSONObject(0);
+        String label=first==null?"":first.optString("text","").trim();
+        if(label.equalsIgnoreCase("Song")||label.equalsIgnoreCase("Songs")||
+           label.equals("노래")||label.equals("곡"))return "song";
+        if(label.equalsIgnoreCase("Video")||
+           label.equalsIgnoreCase("Videos")||label.equals("동영상")||
+           label.equals("뮤직비디오")||label.equalsIgnoreCase("Music video"))
+            return "video";
+        if(label.equalsIgnoreCase("Episode")||
+           label.equalsIgnoreCase("Episodes")||label.equals("에피소드")||
+           label.equals("팟캐스트")||label.equalsIgnoreCase("Podcast")||
+           label.equalsIgnoreCase("Podcast episode"))
+            return "episode";
+        return "unknown";
     }
 
     private static SearchOutcome searchMatchingSong(String query) throws Exception {
@@ -377,25 +407,39 @@ public final class MainActivity extends Activity {
                 result.size()>=100)return;
         if(node instanceof JSONObject){
             JSONObject object=(JSONObject)node;
+            if(object.has("musicShelfRenderer"))stats.musicShelves++;
+            if(object.has("musicTwoRowItemRenderer"))stats.twoRowItems++;
+            if(object.has("shelfRenderer"))stats.otherShelves++;
             JSONObject renderer=object.optJSONObject("musicResponsiveListItemRenderer");
             if(renderer!=null){
                 stats.allRows++;
+                JSONArray columns=renderer.optJSONArray("flexColumns");
+                String category=resultCategory(columns);
+                if("song".equals(category))stats.songRows++;
+                else if("video".equals(category))stats.videoRows++;
+                else if("episode".equals(category))stats.episodeRows++;
+                else stats.unknownRows++;
+
                 String id=findVideoId(renderer);
                 if(isVideoId(id)){
                     stats.validVideoIds++;
-                    JSONArray columns=renderer.optJSONArray("flexColumns");
-                    String title=columns==null?"":
-                        firstText(columns.optJSONObject(0));
-                    String artist=columns==null?"":
-                        firstArtist(columns);
-                    String album=columns==null?"":
-                        firstAlbum(columns);
-                    if(title.isEmpty())stats.emptyTitles++;
-                    if(artist.isEmpty())stats.emptyArtists++;
-                    if(!title.isEmpty()&&!artist.isEmpty()&&!result.containsKey(id)){
-                        result.put(id,new SongSelector.Candidate(
-                            id,title,artist,album,result.size()));
-                        stats.accepted++;
+                    // Neither podcasts nor arbitrary videos should EVER
+                    // become song candidates, even with a playable videoId.
+                    if(!"episode".equals(category) &&
+                       !"video".equals(category)){
+                        String title=columns==null?"":
+                            firstText(columns.optJSONObject(0));
+                        String artist=columns==null?"":
+                            firstArtist(columns);
+                        String album=columns==null?"":
+                            firstAlbum(columns);
+                        if(title.isEmpty())stats.emptyTitles++;
+                        if(artist.isEmpty())stats.emptyArtists++;
+                        if(!title.isEmpty()&&!artist.isEmpty()&&!result.containsKey(id)){
+                            result.put(id,new SongSelector.Candidate(
+                                id,title,artist,album,result.size()));
+                            stats.accepted++;
+                        }
                     }
                 }else stats.missingVideoIds++;
             }
@@ -485,7 +529,8 @@ public final class MainActivity extends Activity {
            text.matches("\\d+:\\d+(?::\\d+)?")) return false;
         for(String category:new String[]{
             "Song","Songs","노래","동영상","Video","Videos",
-            "Album","앨범","Single","싱글","EP","Music video"}) {
+            "Album","앨범","Single","싱글","EP","Music video",
+            "Episode","Episodes","에피소드","팟캐스트","Podcast","Podcast episode"}) {
             if(text.equalsIgnoreCase(category))return false;
         }
         if(text.contains("조회수")||text.contains("회 재생")||
