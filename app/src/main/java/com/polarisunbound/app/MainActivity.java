@@ -75,6 +75,20 @@ public class MainActivity extends AppCompatActivity {
     private TextView nowPlayerShuffle;
     private TextView nowPlayerRepeat;
     private TextView nowPlayerPlayPause;
+    // YT Music controls are independent of the existing NAS full player.
+    private View ytmReturnView;
+    private ImageView ytmPlayerArt;
+    private TextView ytmPlayerTitle;
+    private TextView ytmPlayerArtist;
+    private TextView ytmPlayerPlayPause;
+    private TextView ytmPlayerLike;
+    private TextView ytmPlayerDislike;
+    private TextView ytmPlayerShuffle;
+    private TextView ytmPlayerRepeat;
+    private TextView ytmPlayerElapsed;
+    private TextView ytmPlayerDuration;
+    private SeekBar ytmPlayerProgress;
+    private boolean ytmUserSeeking=false;
     private MediaMetadataCompat lastMetadata;
     private PlaybackStateCompat lastPlaybackState;
     private SeekBar mp3Progress;
@@ -87,6 +101,7 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable progressTick=new Runnable(){
         @Override public void run(){
             updateMp3Progress();
+            updateYtmPlayerProgress();
             progressHandler.postDelayed(this,1000L);
         }
     };
@@ -127,12 +142,14 @@ public class MainActivity extends AppCompatActivity {
             if(action==android.view.MotionEvent.ACTION_DOWN){
                 downX=event.getRawX();
                 downY=event.getRawY();
-                gestureBlocked=isRawPointInsideView(downX,downY,mp3Progress);
+                gestureBlocked=isRawPointInsideView(downX,downY,
+                    "ytm_now".equals(currentPage)?ytmPlayerProgress:mp3Progress);
             }
 
             boolean handled=super.dispatchTouchEvent(event);
 
-            if(!"mp3_now".equals(currentPage)) return handled;
+            if(!"mp3_now".equals(currentPage) &&
+               !"ytm_now".equals(currentPage))return handled;
 
             if(action==android.view.MotionEvent.ACTION_MOVE && !gestureBlocked){
                 float dx=event.getRawX()-downX;
@@ -158,12 +175,19 @@ public class MainActivity extends AppCompatActivity {
 
                 if(action==android.view.MotionEvent.ACTION_UP && !gestureBlocked){
                     if(ax>=dp(88) && ax>ay*1.25f){
-                        if(dx<0) finishHorizontalPlayerSwipe(this,1);
+                        if("ytm_now".equals(currentPage)){
+                            if(controller!=null){
+                                if(dx<0)controller.getTransportControls().skipToNext();
+                                else controller.getTransportControls().skipToPrevious();
+                            }
+                        }else if(dx<0)finishHorizontalPlayerSwipe(this,1);
                         else finishHorizontalPlayerSwipe(this,-1);
                         return handled;
                     }
                     if(dy>=dp(110) && ay>ax*1.25f && getScrollY()<=dp(2)){
-                        finishDownPlayerSwipe(this);
+                        if("ytm_now".equals(currentPage))
+                            finishDownYtmPlayerSwipe(this);
+                        else finishDownPlayerSwipe(this);
                         return handled;
                     }
                 }
@@ -215,6 +239,15 @@ public class MainActivity extends AppCompatActivity {
             .start();
     }
 
+    private void finishDownYtmPlayerSwipe(View playerView){
+        playerView.animate()
+            .translationY(Math.max(dp(150),playerView.getHeight()*0.22f))
+            .alpha(0.55f)
+            .setDuration(130L)
+            .withEndAction(this::returnFromYtmPlayer)
+            .start();
+    }
+
     private void returnFromNowPlaying(){
         if(returnToSavedFromPlayer){
             showNasSavedSongs();
@@ -251,6 +284,8 @@ public class MainActivity extends AppCompatActivity {
                                 updateNowPlayingModes();
                                 updateMp3Progress();
                                 updateYtmNow();
+                                updateYtmPlayerState();
+                                updateYtmPlayerProgress();
                             }
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
@@ -261,6 +296,9 @@ public class MainActivity extends AppCompatActivity {
                                 updateNowPlayingModes();
                                 updateMp3Progress();
                                 updateYtmNow();
+                                updateYtmPlayerMetadata();
+                                updateYtmPlayerState();
+                                updateYtmPlayerProgress();
                             }
                         });
                         lastMetadata=controller.getMetadata();
@@ -1531,7 +1569,11 @@ public class MainActivity extends AppCompatActivity {
         bar.setClickable(true);
         bar.setFocusable(true);
         bar.setContentDescription("현재 재생 화면 열기");
-        bar.setOnClickListener(v->showNowPlaying());
+        bar.setOnClickListener(v->{
+            if("ytm".equals(currentPage)&&isYtmMetadata(lastMetadata))
+                showYtmPlayer();
+            else showNowPlaying();
+        });
         return bar;
     }
 
@@ -1541,16 +1583,23 @@ public class MainActivity extends AppCompatActivity {
         return mediaId!=null && (mediaId.startsWith("mp3:")||mediaId.startsWith("ftpmp3:"));
     }
 
+    private boolean isYtmMetadata(MediaMetadataCompat m){
+        return m!=null && PolarisYtmBridge.MEDIA_ID.equals(
+            m.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID));
+    }
+
     private void updateMiniPlayerVisibility(){
-        if(miniPlayer==null) return;
-        miniPlayer.setVisibility("mp3".equals(currentPage) && isMp3Metadata(lastMetadata) ? View.VISIBLE : View.GONE);
+        if(miniPlayer==null)return;
+        boolean nas="mp3".equals(currentPage)&&isMp3Metadata(lastMetadata);
+        boolean ytm="ytm".equals(currentPage)&&isYtmMetadata(lastMetadata);
+        miniPlayer.setVisibility(nas||ytm?View.VISIBLE:View.GONE);
     }
 
     private void updateMiniPlayerMetadata(){
         if(lastMetadata==null && controller!=null) lastMetadata=controller.getMetadata();
         if(miniPlayer==null) return;
         updateMiniPlayerVisibility();
-        if(!isMp3Metadata(lastMetadata)) return;
+        if(!isMp3Metadata(lastMetadata)&&!isYtmMetadata(lastMetadata))return;
 
         String title=lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_TITLE);
         String artist=lastMetadata.getString(MediaMetadataCompat.METADATA_KEY_ARTIST);
@@ -2996,6 +3045,10 @@ public class MainActivity extends AppCompatActivity {
     @Override public void onBackPressed(){
         if("mp3_now".equals(currentPage)){
             returnFromNowPlaying();
+            return;
+        }
+        if("ytm_now".equals(currentPage)){
+            returnFromYtmPlayer();
             return;
         }
         super.onBackPressed();
