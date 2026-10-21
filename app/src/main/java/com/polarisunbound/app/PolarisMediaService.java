@@ -78,7 +78,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
     };
     private MediaSessionCompat session;
-    private PolarisYtmBridge ytmBridge;
+    private PolarisHushBridge hushBridge;
     private boolean ytmMode=false;
     private static final String YTM_ID=PolarisYtmBridge.MEDIA_ID;
     // Explicitly set only by PHONE YTM selections. AA browse playback retains
@@ -288,7 +288,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 .build();
         }
         session=new MediaSessionCompat(this,"PolarisUnboundIntegratedTest");
-        ytmBridge=new PolarisYtmBridge(this,new PolarisYtmBridge.Listener(){
+        hushBridge=new PolarisHushBridge(this,new PolarisYtmBridge.Listener(){
             @Override public void onMirror(MediaMetadataCompat md,PlaybackStateCompat playback){
                 if(!ytmMode||session==null)return;
                 if(md!=null)session.setMetadata(md);
@@ -315,33 +315,34 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 try{
                     if(YTM_ID.equals(id)){
                         enterYtmMode();
-                        ytmBridge.play();
+                        hushBridge.play();
                         return;
                     }
-                    if(id!=null && (id.startsWith(PolarisYtmCatalog.PLAY) ||
-                            id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST) ||
-                            "ytm:openapp".equals(id))){
-                        // On PHONE only, try an already-active official
-                        // YT Music session without launching an Activity.
-                        // This is capability-gated, and dispatch alone does
-                        // not guarantee that the source selected the requested
-                        // song or playlist.
-                        boolean phoneBackground=extras!=null &&
-                            extras.getBoolean(EXTRA_YTM_PHONE_BACKGROUND,false);
-                        if(phoneBackground){
-                            String uri=PolarisYtmDeepLink.urlFor(id);
-                            if(uri!=null && ytmBridge.tryPlayFromUriInBackground(
-                                    Uri.parse(uri))){
-                                enterYtmMode();
-                                trace("YTM phone background request dispatched; verify source playback");
-                                return;
-                            }
-                            trace("YTM phone background unavailable; using original link");
+                    if(id!=null && id.startsWith(PolarisYtmCatalog.PLAY)){
+                        // H01: reuse the title and artist from the displayed
+                        // Polaris result; never launch official YouTube Music.
+                        // Hush's search result remains authoritative for playback.
+                        String query=PolarisYtmCatalog.searchQueryFor(id);
+                        if(query==null || query.isEmpty()){
+                            trace("HUSH song selection missing metadata; playback unchanged: "+id);
+                            return;
                         }
-                        // Preserve the previously working URI launch fallback,
-                        // including the existing Android Auto path.
-                        if(openOriginalYtm(id)) enterYtmMode();
-                        else trace("YTM launch rejected; existing source preserved");
+                        enterYtmMode();
+                        hushBridge.searchAndPlay(query);
+                        return;
+                    }
+                    if(id!=null && id.startsWith(PolarisYtmCatalog.OPEN_PLAYLIST)){
+                        String playlistId=Uri.decode(id.substring(
+                            PolarisYtmCatalog.OPEN_PLAYLIST.length()));
+                        if(playlistId.matches("[A-Za-z0-9_-]{6,120}")){
+                            enterYtmMode();
+                            hushBridge.playPlaylist(playlistId);
+                        }else trace("HUSH invalid playlist selection");
+                        return;
+                    }
+                    if("ytm:openapp".equals(id)){
+                        enterYtmMode();
+                        trace("HUSH internal browser connected without launching activity");
                         return;
                     }
                     if(ytmMode && id!=null && !id.startsWith("can:"))
@@ -381,15 +382,28 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }catch(Throwable e){ publishError("playFromMediaId: "+e); }
             }
             @Override public void onPlayFromSearch(String query,Bundle extras){
-                if(ytmMode){
-                    trace("YTM voice search deferred - no unreliable PlayFromSearch");
+                String raw=query==null?"":query.trim();
+                if(raw.isEmpty()){
+                    trace("VOICE empty query; preserve source");
                     return;
                 }
-                trace("SERVICE onPlayFromSearch: query="+query+" extras="+String.valueOf(extras));
-                handleVoicePlaySearch(query,extras);
+                // Explicit radio/MP3 commands retain the original Polaris path.
+                // All other song queries are handled by the Hush session.
+                String normalized=normalizeVoiceQuery(raw);
+                boolean local=normalized.contains("라디오")||
+                    normalized.contains("radio")||normalized.contains("mp3")||
+                    normalized.contains("nas")||radioIdFromVoice(raw)!=null;
+                if(local){
+                    if(ytmMode)exitYtmMode(true);
+                    handleVoicePlaySearch(raw,extras);
+                    return;
+                }
+                enterYtmMode();
+                hushBridge.searchAndPlay(raw);
+                trace("HUSH AA search dispatched: "+raw);
             }
             @Override public void onPlay(){
-                if(ytmMode){ytmBridge.play();return;}
+                if(ytmMode){hushBridge.play();return;}
                 userStopped=false;
                 if(currentFtpMp3Path!=null){
                     rememberFtpForResume(currentFtpMp3Path,currentPlayerPosition());
@@ -435,19 +449,19 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 publishState();
             }
             @Override public void onSkipToNext(){
-                if(ytmMode)ytmBridge.next();else skipCurrent(1);
+                if(ytmMode)hushBridge.next();else skipCurrent(1);
             }
             @Override public void onSkipToPrevious(){
-                if(ytmMode)ytmBridge.previous();else skipCurrent(-1);
+                if(ytmMode)hushBridge.previous();else skipCurrent(-1);
             }
             @Override public void onFastForward(){
-                if(ytmMode)ytmBridge.next();else skipCurrent(1);
+                if(ytmMode)hushBridge.next();else skipCurrent(1);
             }
             @Override public void onRewind(){
-                if(ytmMode)ytmBridge.previous();else skipCurrent(-1);
+                if(ytmMode)hushBridge.previous();else skipCurrent(-1);
             }
             @Override public void onPause(){
-                if(ytmMode){ytmBridge.pause();return;}
+                if(ytmMode){hushBridge.pause();return;}
                 saveLastPlaybackPosition();
                 userStopped=true;
                 resumeAfterTransientFocusLoss=false;
@@ -461,7 +475,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 trace("USER pause -> automatic session restore disabled");
             }
             @Override public void onSeekTo(long pos){
-                if(ytmMode){ytmBridge.seek(pos);return;}
+                if(ytmMode){hushBridge.seek(pos);return;}
                 if(player!=null){
                     player.seekTo(Math.max(0L,pos));
                     saveLastPlaybackPosition();
@@ -469,7 +483,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 }
             }
             @Override public void onSetRepeatMode(int repeatMode){
-                if(ytmMode){ytmBridge.custom("loop_mode_action");return;}
+                if(ytmMode){hushBridge.custom("loop_mode_action");return;}
                 if(repeatMode!=PlaybackStateCompat.REPEAT_MODE_ONE &&
                    repeatMode!=PlaybackStateCompat.REPEAT_MODE_ALL)
                     repeatMode=PlaybackStateCompat.REPEAT_MODE_NONE;
@@ -481,7 +495,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 publishState();
             }
             @Override public void onSetShuffleMode(int shuffleMode){
-                if(ytmMode){ytmBridge.custom("shuffle_action");return;}
+                if(ytmMode){hushBridge.custom("shuffle_action");return;}
                 mp3Shuffle=shuffleMode!=PlaybackStateCompat.SHUFFLE_MODE_NONE;
                 getSharedPreferences(MP3_PREFS,MODE_PRIVATE).edit()
                     .putBoolean(PREF_MP3_SHUFFLE,mp3Shuffle).apply();
@@ -490,7 +504,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                 publishState();
             }
             @Override public void onCustomAction(String action,Bundle extras){
-                if(ytmMode){ytmBridge.custom(action);return;}
+                if(ytmMode){hushBridge.custom(action);return;}
                 if(ACTION_MP3_LIKE.equals(action)){
                     toggleFavoriteCurrent();
                 }else if(ACTION_MP3_SHUFFLE.equals(action)){
@@ -509,12 +523,12 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
                         int code=event.getKeyCode();
                         if(code==android.view.KeyEvent.KEYCODE_MEDIA_NEXT){
                             trace("MEDIA BUTTON next");
-                            if(ytmMode)ytmBridge.next();else skipCurrent(1);
+                            if(ytmMode)hushBridge.next();else skipCurrent(1);
                             return true;
                         }
                         if(code==android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS){
                             trace("MEDIA BUTTON previous");
-                            if(ytmMode)ytmBridge.previous();else skipCurrent(-1);
+                            if(ytmMode)hushBridge.previous();else skipCurrent(-1);
                             return true;
                         }
                     }
@@ -523,7 +537,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             }
             @Override public void onStop(){
                 if(ytmMode){
-                    ytmBridge.pause();
+                    hushBridge.pause();
                     trace("YTM stop requested -> pause original YTM playback");
                     return;
                 }
@@ -610,7 +624,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
 
 
     private void enterYtmMode(){
-        if(ytmMode){ytmBridge.start();return;}
+        if(ytmMode){hushBridge.start();return;}
         trace("SOURCE switch -> YT Music");
         saveLastPlaybackPosition();
         setResumeAllowed(false);
@@ -634,7 +648,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         abandonPlaybackFocus();
         leavePlaybackForeground();
         ytmMode=true;
-        ytmBridge.start();
+        hushBridge.start();
         notifyChildrenChanged("ytm");
     }
 
@@ -683,9 +697,9 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void exitYtmMode(boolean pauseSource){
         if(!ytmMode)return;
         trace("SOURCE switch <- YT Music");
-        if(pauseSource)ytmBridge.pause();
+        if(pauseSource)hushBridge.pause();
         ytmMode=false;
-        ytmBridge.stop();
+        hushBridge.stop();
         session.setMetadata(new MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE,"Polaris 재생 준비").build());
         publishState();
@@ -3101,7 +3115,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             try{unregisterReceiver(ytmLibraryReceiver);}catch(Exception ignored){}
             ytmLibraryReceiverRegistered=false;
         }
-        if(ytmBridge!=null)ytmBridge.stop();
+        if(hushBridge!=null)hushBridge.stop();
         getSharedPreferences("radio_presets",MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(radioPresetListener);
         saveLastPlaybackPosition();
