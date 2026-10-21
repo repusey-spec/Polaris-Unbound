@@ -61,6 +61,13 @@ final class PolarisYtmCatalog {
     static final String PLAY = "ytm:play:";
     static final String OPEN_PLAYLIST = "ytm:openplaylist:";
     static final String CAPTURED = "ytm:captured:";
+    // Title/artist of a *displayed* playable row. This is not an audio ID
+    // mapper; Hush receives it as a fresh search query.
+    private static final java.util.concurrent.ConcurrentHashMap<String,String> HUSH_QUERIES =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    static String searchQueryFor(String mediaId) {
+        return mediaId == null ? null : HUSH_QUERIES.get(mediaId);
+    }
     private static final String TAG = "PolarisYtmCatalog";
     private static final long CACHE_MS = 5 * 60 * 1000L;
     private static final int MAX_BYTES = 3 * 1024 * 1024;
@@ -479,6 +486,11 @@ final class PolarisYtmCatalog {
     }
     private static MediaBrowserCompat.MediaItem playable(String id,String title,
             String subtitle,String art) {
+        if(id!=null && id.startsWith(PLAY) && title!=null && !title.trim().isEmpty()){
+            String artist=subtitle==null?"":subtitle.trim();
+            HUSH_QUERIES.put(id,(artist+" "+title.trim()).trim());
+            if(HUSH_QUERIES.size()>1000)HUSH_QUERIES.clear();
+        }
         return createItem(id,title,subtitle,art,false);
     }
     private static MediaBrowserCompat.MediaItem createItem(String id,String title,
