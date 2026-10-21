@@ -33,6 +33,7 @@ final class PolarisHushBridge {
     private MediaControllerCompat controller;
     private String pendingSearch;
     private String pendingMediaId;
+    private boolean pendingResume;
     private boolean running;
     private int generation;
     private MediaMetadataCompat lastMetadata;
@@ -64,6 +65,7 @@ final class PolarisHushBridge {
                                 listener.onTrace("HUSH controller connect failed: " +
                                     e.getClass().getSimpleName());
                                 publishUnavailable("Hush 세션 연결 오류");
+                                dropBrowser();
                             }
                         }
                         @Override public void onConnectionSuspended() {
@@ -71,12 +73,14 @@ final class PolarisHushBridge {
                             releaseController();
                             listener.onTrace("HUSH library session suspended");
                             publishUnavailable("Hush 연결 중단");
+                            dropBrowser();
                         }
                         @Override public void onConnectionFailed() {
                             if (token != generation) return;
                             releaseController();
                             listener.onTrace("HUSH browser connection failed; verify app installed");
                             publishUnavailable("Hush 설치 및 실행 상태를 확인하세요");
+                            dropBrowser();
                         }
                     }, null);
                 browser.connect();
@@ -93,12 +97,17 @@ final class PolarisHushBridge {
             running = false;
             pendingSearch = null;
             pendingMediaId = null;
+            pendingResume = false;
             releaseController();
-            if (browser != null) {
-                try { browser.disconnect(); } catch (Exception ignored) {}
-                browser = null;
-            }
+            dropBrowser();
         });
+    }
+
+    private void dropBrowser() {
+        if (browser != null) {
+            try { browser.disconnect(); } catch (Exception ignored) {}
+            browser = null;
+        }
     }
 
     private final MediaControllerCompat.Callback callback = new MediaControllerCompat.Callback() {
@@ -108,6 +117,7 @@ final class PolarisHushBridge {
             listener.onTrace("HUSH session destroyed");
             releaseController();
             publishUnavailable("Hush 재생 세션 종료");
+            dropBrowser();
         }
     };
 
@@ -174,6 +184,7 @@ final class PolarisHushBridge {
         if (query == null || query.trim().isEmpty()) return;
         main.post(() -> {
             pendingMediaId = null;
+            pendingResume = false;
             pendingSearch = query.trim();
             start();
             dispatchPending();
@@ -187,6 +198,7 @@ final class PolarisHushBridge {
         }
         main.post(() -> {
             pendingSearch = null;
+            pendingResume = false;
             pendingMediaId = "online_playlist/" + playlistId;
             start();
             dispatchPending();
@@ -206,6 +218,10 @@ final class PolarisHushBridge {
                 pendingMediaId = null;
                 controller.getTransportControls().playFromMediaId(id, Bundle.EMPTY);
                 listener.onTrace("HUSH playFromMediaId dispatched; playback unverified");
+            } else if (pendingResume) {
+                pendingResume = false;
+                controller.getTransportControls().play();
+                listener.onTrace("HUSH pending PLAY dispatched");
             }
         } catch (Exception e) {
             listener.onTrace("HUSH media command error: " + e.getClass().getSimpleName());
@@ -228,7 +244,16 @@ final class PolarisHushBridge {
             }
         });
     }
-    void play() { forward("PLAY", t -> t.play()); }
+    void play() {
+        main.post(() -> {
+            if (controller == null) {
+                pendingResume = true;
+                start();
+            } else {
+                forward("PLAY", t -> t.play());
+            }
+        });
+    }
     void pause() { forward("PAUSE", t -> t.pause()); }
     void next() { forward("NEXT", t -> t.skipToNext()); }
     void previous() { forward("PREVIOUS", t -> t.skipToPrevious()); }
