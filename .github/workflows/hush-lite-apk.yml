@@ -1,0 +1,83 @@
+name: Hush Lite HLT01 debug APK — explicit requested test build
+
+on:
+  pull_request:
+    branches: [experiment/hush-native-01]
+    paths:
+      - 'hush-lite/**'
+      - '.github/workflows/hush-lite-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assemble-hush-lite:
+    name: Build independent Hush Lite Android test APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Ensure Android SDK 36
+        run: |
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-36" >/dev/null || true
+          test -d "$ANDROID_HOME/platforms/android-36"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Prepare pinned Hush source
+        run: |
+          git clone --quiet --depth 1 --branch v13.14.7 \
+            https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush-original"
+          test "$(git -C "$RUNNER_TEMP/hush-original" rev-parse HEAD)" = "8f3e55d1114f1b844f0a21af8c365d090a43799f"
+
+      - name: Verify source generator guards
+        run: python3 -m unittest discover -s hush-lite/tests -v
+
+      - name: Construct isolated Android app
+        run: |
+          python3 hush-lite/scripts/stage_android.py \
+            --upstream "$RUNNER_TEMP/hush-original" \
+            --out "$RUNNER_TEMP/hush-lite-android"
+
+      - name: Assemble debug APK
+        run: |
+          gradle -p "$RUNNER_TEMP/hush-lite-android" --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Check package identity and ZIP integrity
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/hush-lite-android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          unzip -t "$apk" | tail -n 1
+          aapt_bin="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -n "$aapt_bin"
+          "$aapt_bin" dump badging "$apk" | grep "^package: name='app.hush.music.lite.test'"
+          "$aapt_bin" dump badging "$apk" | grep 'launchable-activity: name=.app.hush.music.lite.MainActivity.'
+          mkdir -p dist
+          cp "$apk" dist/HushLite-HLT01-debug.apk
+          sha256sum dist/HushLite-HLT01-debug.apk | tee dist/SHA256SUMS.txt
+          du -h dist/HushLite-HLT01-debug.apk
+
+      - name: Upload test APK and SHA256 (private GitHub Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HushLite-HLT01-debug-apk
+          path: |
+            dist/HushLite-HLT01-debug.apk
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
