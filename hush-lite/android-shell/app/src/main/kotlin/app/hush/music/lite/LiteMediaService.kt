@@ -70,7 +70,7 @@ class LiteMediaService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
-        LiteSession.initialize()
+        LiteSession.initialize(this)
         val resolving = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
             if (spec.uri.scheme != "hushlite") return@Factory spec
             val videoId = spec.uri.lastPathSegment.orEmpty()
