@@ -44,6 +44,10 @@ def stage_android(source: Path, destination: Path) -> dict:
             "plugins {", """plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.kotlin.android) apply false""", 1), encoding="utf-8")
+        (work / "gradle.properties").write_text(
+            "android.useAndroidX=true\nandroid.nonTransitiveRClass=true\n",
+            encoding="utf-8",
+        )
         settings = work / "settings.gradle.kts"
         settings.write_text(settings.read_text(encoding="utf-8") + '\ninclude(":app")\n', encoding="utf-8")
         report["scope"] = "Hush JVM InnerTube core plus minimal Android login/search/AA/player diagnostic"
