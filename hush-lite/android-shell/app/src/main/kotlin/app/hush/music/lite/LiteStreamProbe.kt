@@ -22,14 +22,17 @@ internal object LiteStreamProbe {
         val failures = mutableListOf<String>()
         return withTimeout(15000L) {
             for (client in clients) {
-                val response = YouTube.player(
+                val attempt = YouTube.player(
                     videoId = videoId,
                     client = client,
                     setLogin = client.loginSupported,
-                ).getOrElse {
-                    failures += client.clientName + ": " + it.javaClass.simpleName
+                )
+                if (attempt.isFailure) {
+                    failures += client.clientName + ": " +
+                        attempt.exceptionOrNull()?.javaClass?.simpleName
                     continue
                 }
+                val response = attempt.getOrThrow()
                 val url = response.streamingData
                     ?.adaptiveFormats
                     ?.asSequence()
