@@ -139,6 +139,10 @@ def stage(source: Path, dest: Path, *, expected_sha: str = UPSTREAM_SHA) -> dict
         adapter_path = work / "core/src/main/kotlin/app/hush/music/lite/HushLiteSongSearch.kt"
         adapter_path.parent.mkdir(parents=True, exist_ok=True)
         adapter_path.write_text(SEARCH_ADAPTER, encoding="utf-8")
+        stream_adapter_src = Path(__file__).resolve().parents[1] / "adapters/HushLiteStreamResolver.kt"
+        if not stream_adapter_src.is_file():
+            raise FileNotFoundError("Missing checked-in Hush Lite stream resolver template")
+        shutil.copy2(stream_adapter_src, adapter_path.parent / stream_adapter_src.name)
         (work / MARKER).write_text(sha + "\n", encoding="utf-8")
         upstream_files = [p for p in source.rglob("*") if p.is_file() and ".git" not in p.parts]
         staged_files = [p for p in work.rglob("*") if p.is_file()]
@@ -149,6 +153,7 @@ def stage(source: Path, dest: Path, *, expected_sha: str = UPSTREAM_SHA) -> dict
             "scope": "Hush InnerTube JVM core plus thin ID-preserving song search adapter (no Android/AA/player)",
             "modules": ["core"],
             "search_adapter": "app.hush.music.lite.HushLiteSongSearch",
+            "stream_adapter": "app.hush.music.lite.HushLiteStreamResolver",
             "retained_core_files": len([p for p in (work / "core").rglob("*") if p.is_file()]),
             "staged_total_files": len(staged_files),
             "upstream_total_files_excluding_git": len(upstream_files),
