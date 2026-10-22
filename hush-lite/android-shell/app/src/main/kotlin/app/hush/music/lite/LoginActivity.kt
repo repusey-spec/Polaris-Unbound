@@ -123,14 +123,23 @@ class LoginActivity : Activity() {
             status.text = "YouTube 로그인 세션 쿠키를 확인하지 못했습니다."
             return
         }
-        if (dataSyncId.isNullOrBlank()) {
-            status.text = "계정 DataSyncId가 아직 확인되지 않았습니다. 로그인 후 재확인해 주세요."
-            return
-        }
         verifying = true
+        // Match upstream YouTubeLoginRepository: ask the selected account
+        // endpoint for DataSyncId before falling back to page-extracted data.
         LiteSession.setAccount(cookies, dataSyncId, visitorData)
-        status.text = "계정 확인 중…"
+        status.text = "계정 식별 정보 확인 중…"
         scope.launch {
+            val networkDataSyncId = app.hush.music.innertube.YouTube
+                .accountDataSyncId().getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+            val resolvedDataSyncId = networkDataSyncId
+                ?: dataSyncId?.trim()?.takeIf { it.isNotBlank() }
+            if (resolvedDataSyncId == null) {
+                status.text = "계정 DataSyncId를 확인하지 못했습니다. 다시 로그인해 주세요."
+                verifying = false
+                return@launch
+            }
+            dataSyncId = resolvedDataSyncId
+            LiteSession.setAccount(cookies, resolvedDataSyncId, visitorData)
             app.hush.music.innertube.YouTube.accountInfo().fold(
                 onSuccess = { info ->
                     LiteSession.setAccount(cookies, dataSyncId, visitorData)
