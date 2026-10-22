@@ -1,4 +1,48 @@
-# Hush Lite: YouTube Music core isolation — stage 1
+# Hush Lite: YouTube Music core and minimal Android shell
+
+## Stage 2: Android shell compiles, playback still unverified (2026-10-22)
+
+The isolated `hush-lite/android-shell/app/` now provides:
+- Minimal **phone** login/search/select screens with a launcher icon via the platform launcher.
+- Hush InnerTube `SongItem.id` forwarded **unchanged** to a single Media3
+  `LiteMediaService` (no official YouTube Music / Hush external app dependency).
+- Media3 `MediaLibrarySession.Callback` AA search/result and
+  `onSetMediaItems(requestMetadata.searchQuery)` path.
+- ExoPlayer + `LiteStreamProbe` trying direct audio URLs from Hush's
+  `YouTube.player()`. This is **NOT** the original full Hush stream resolver.
+- Login WebView session is **process-memory only** at the app/auth layer. Standard
+  Android WebView's cookie store may outlive the activity. The required upstream
+  DataSyncId/session recovery is not fully ported.
+- One exported AA media library service; no other Hush playback service packaged.
+
+**CI verified:** Android app compilation and manifest processing passed in
+GitHub Actions run [39703942997](https://github.com/repusey-spec/Polaris-Unbound/actions/runs/39703942997):
+`:app:compileDebugKotlin :app:processDebugMainManifest`. The job explicitly
+checks **no APK was created**. The original Hush `:core:compileKotlin` also
+compiled as an app dependency.
+
+Run source-stage + compile in CI:
+```sh
+python3 hush-lite/scripts/stage_android.py --upstream hush-original --out /tmp/hush-lite-android
+gradle -p /tmp/hush-lite-android :app:compileDebugKotlin :app:processDebugMainManifest
+```
+The staged app intentionally pins **AGP 8.7.3 / Gradle 8.9 / Android 36 /
+JDK 21**, allowing Hush's JVM Kotlin 2.4.0 core to compile alongside the
+separate Polaris-compatible Android build.
+
+### NOT proven or complete
+
+1. Audio bytes are playable on device. Hush's original stream resolver includes
+   cipher/signature/PoToken/BotGuard, fallback clients, format/caching and retry
+   behavior. The direct URL probe can legitimately fail even for valid songs.
+2. Account WebView authentication, persistent secure sessions and personal
+   YTM library/playlist browsing.
+3. AA voice invocation on the vehicle, exact song scoring, buffered playback
+   latency, seek/queue stability, playback focus across Polaris sources.
+4. End-to-end APK/install/phone/AA validation. **No APK is generated in CI.**
+
+Do not claim this is a completed Hush Lite, or merge it into stable Polaris.
+
 
 **Status (2026-10-22):** Source slicer committed; upstream compile and playback NOT YET verified. **No APK**.
 
