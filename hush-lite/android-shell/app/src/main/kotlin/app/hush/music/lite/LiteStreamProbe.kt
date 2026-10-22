@@ -1,50 +1,51 @@
 package app.hush.music.lite
 
 import android.net.Uri
-import android.util.Log
+import android.os.SystemClock
 import app.hush.music.innertube.YouTube
-import app.hush.music.innertube.models.YouTubeClient
-import kotlinx.coroutines.withTimeout
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * First isolated streaming *probe*, NOT the complete Hush MusicService resolver.
- * The upstream engine has cipher/PoToken/client fallback paths not yet ported;
- * never silently substitute another song when direct URL resolution fails.
+ * Android-only wrapper around the preserved Hush InnerTube/NewPipe resolver.
+ *
+ * The short, account-scoped memory cache prevents a second player loader
+ * request for the same stream after a seek/range reopen. No URL/cookie is
+ * persisted to storage or recorded in logs.
  */
 internal object LiteStreamProbe {
+    private data class Cached(val url: String, val validUntilMs: Long)
+    private val urls = ConcurrentHashMap<String, Cached>()
+    private const val MAX_ENTRIES = 64
+    private const val MAX_TTL_MS = 120_000L
+    private const val SAFETY_MS = 60_000L
+
     suspend fun directAudioUrl(videoId: String): String {
-        require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))) { "Invalid YouTube video ID" }
-        val clients = listOf(
-            YouTubeClient.ANDROID_VR_1_65_10,
-            YouTubeClient.IOS,
-            YouTubeClient.ANDROID_MUSIC,
-        )
-        val failures = mutableListOf<String>()
-        return withTimeout(15000L) {
-            for (client in clients) {
-                val attempt = YouTube.player(
-                    videoId = videoId,
-                    client = client,
-                    setLogin = client.loginSupported,
-                )
-                if (attempt.isFailure) {
-                    failures += client.clientName + ": " +
-                        attempt.exceptionOrNull()?.javaClass?.simpleName
-                    continue
-                }
-                val response = attempt.getOrThrow()
-                val url = response.streamingData
-                    ?.adaptiveFormats
-                    ?.asSequence()
-                    ?.filter { it.isAudio && it.url?.startsWith("https://") == true }
-                    ?.sortedByDescending { it.bitrate }
-                    ?.firstOrNull()
-                    ?.url
-                if (url != null) return@withTimeout url
-                failures += client.clientName + ": no directly playable audio URL"
-            }
-            Log.w("HushLiteStream", "No direct audio URL for video ID; upstream stream resolver still required")
-            throw IllegalStateException("Stream unavailable: " + failures.joinToString("; "))
+        require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))) { "Invalid video ID" }
+        val key = videoId + ":" + YouTube.currentPlaybackAuthState().fingerprint
+        val now = SystemClock.elapsedRealtime()
+        urls[key]?.let { if (now < it.validUntilMs) return it.url }
+
+        // Calls Hush's unchanged NewPipeUtils.getStreamUrl for each candidate
+        // instead of discarding ciphered or throttled formats.
+        val url = HushLiteStreamResolver.audioUrl(videoId)
+        val expireSeconds = runCatching {
+            Uri.parse(url).getQueryParameter("expire")?.toLongOrNull()
+        }.getOrNull()
+        val serverRemainingMs = expireSeconds?.let {
+            it * 1000L - System.currentTimeMillis() - SAFETY_MS
+        } ?: MAX_TTL_MS
+
+        val ttlMs = minOf(MAX_TTL_MS, serverRemainingMs)
+        if (ttlMs > 0L) {
+            if (urls.size >= MAX_ENTRIES) urls.clear()
+            urls[key] = Cached(url, SystemClock.elapsedRealtime() + ttlMs)
         }
+        return url
+    }
+
+    /** Clear a rejected/expired stream on player error; retry is explicit. */
+    fun invalidate(videoId: String) {
+        val prefix = videoId + ":"
+        urls.keys.removeAll { it.startsWith(prefix) }
     }
 }
