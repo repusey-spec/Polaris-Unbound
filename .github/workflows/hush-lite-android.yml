@@ -41,6 +41,11 @@ jobs:
       - name: Compile app and manifest only — NO APK
         run: |
           gradle -p "$RUNNER_TEMP/hush-lite-android" --no-daemon :app:compileDebugKotlin :app:processDebugMainManifest
+      - name: Require Android Main coroutine dispatcher at runtime
+        run: |
+          set -eo pipefail
+          gradle -p "$RUNNER_TEMP/hush-lite-android" --no-daemon :app:dependencies --configuration debugRuntimeClasspath > "$RUNNER_TEMP/runtime-deps.txt"
+          grep -F 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0' "$RUNNER_TEMP/runtime-deps.txt"
       - name: Verify APK was not assembled
         run: |
           test ! -d "$RUNNER_TEMP/hush-lite-android/app/build/outputs/apk"
