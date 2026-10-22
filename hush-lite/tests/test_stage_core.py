@@ -41,6 +41,12 @@ class StageCoreTests(unittest.TestCase):
         self.assertFalse((dest / "app").exists())
         self.assertIn('include(":core")', (dest / "settings.gradle.kts").read_text())
         self.assertNotIn('include(":app")', (dest / "settings.gradle.kts").read_text())
+        adapter = dest / "core/src/main/kotlin/app/hush/music/lite/HushLiteSongSearch.kt"
+        self.assertTrue(adapter.exists())
+        adapter_content = adapter.read_text(encoding="utf-8")
+        self.assertIn("YouTube.search(query, YouTube.SearchFilter.FILTER_SONG)", adapter_content)
+        self.assertIn("videoId = song.id", adapter_content)
+        self.assertIn("song.endpoint ?: WatchEndpoint(videoId = song.id)", adapter_content)
         self.assertFalse(report["apk_generated"])
         self.assertFalse(report["compile_verified"])
 
