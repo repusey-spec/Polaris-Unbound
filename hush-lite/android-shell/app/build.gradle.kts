@@ -32,4 +32,7 @@ dependencies {
     implementation(libs.media3.okhttp)
     implementation(libs.guava)
     implementation(libs.coroutines.guava)
+    // Required by Dispatchers.Main used in MainActivity/MediaLibraryService.
+    // Without this, an APK can compile but crash at initial scope.launch.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }
