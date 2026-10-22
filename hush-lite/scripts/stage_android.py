@@ -38,6 +38,12 @@ def stage_android(source: Path, destination: Path) -> dict:
         if original.count(marker) != 1:
             raise ValueError("Unexpected upstream AGP; review toolchain manually")
         catalog.write_text(original.replace(marker, 'agp = "8.7.3"'), encoding="utf-8")
+        # Resolve both Android and Kotlin plugins in the same root plugin classpath.
+        root_build = work / "build.gradle.kts"
+        root_build.write_text(root_build.read_text(encoding="utf-8").replace(
+            "plugins {", """plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.android) apply false""", 1), encoding="utf-8")
         settings = work / "settings.gradle.kts"
         settings.write_text(settings.read_text(encoding="utf-8") + '\ninclude(":app")\n', encoding="utf-8")
         report["scope"] = "Hush JVM InnerTube core plus minimal Android login/search/AA/player diagnostic"
