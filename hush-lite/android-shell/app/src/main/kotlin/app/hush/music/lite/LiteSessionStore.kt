@@ -71,7 +71,7 @@ internal object LiteSessionStore {
     fun restore(context: Context): PlaybackAuthState? =
         runCatching {
             val encoded = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-                .getString(KEY_PAYLOAD, null) ?: return null
+                .getString(KEY_PAYLOAD, null) ?: return@runCatching null
             val data = Base64.decode(encoded, Base64.NO_WRAP)
             require(data.size > IV_SIZE + 16)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
