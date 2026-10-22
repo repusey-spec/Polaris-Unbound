@@ -3,6 +3,8 @@ package app.hush.music.lite
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
+import android.widget.ScrollView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -25,6 +27,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        window.decorView.systemUiVisibility = 0
         // Show a readable startup error even if an optional YouTube core
         // class cannot initialize on the user's Android version.
         val startupError = runCatching { LiteSession.initialize(this) }.exceptionOrNull()
@@ -47,10 +51,10 @@ class MainActivity : Activity() {
         val login = Button(this).apply { text = "YouTube Music 로그인 (임시 세션)" }
         val search = Button(this).apply { text = "Hush 검색" }
         list = ListView(this)
-        root.addView(label)
         root.addView(login)
         root.addView(query)
         root.addView(search)
+        root.addView(label)
         root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         if (startupError != null) {
@@ -82,7 +86,7 @@ class MainActivity : Activity() {
     }
 
     private fun searchSongs(q: String) {
-        label.text = "Hush 검색 중…"
+        label.text = "Hush 검색 중… · 로그인 없이 공개 검색"
         scope.launch {
             HushLiteSongSearch.songs(q).fold(
                 onSuccess = { songs ->
@@ -93,7 +97,7 @@ class MainActivity : Activity() {
                         android.R.layout.simple_list_item_1,
                         candidates.map { it.title + " — " + it.artistNames.joinToString(", ") }
                     )
-                    label.text = "검색 결과 " + songs.size + "건 · 선택 후 동일 ID로 재생"
+                    label.text = if (songs.isEmpty()) "검색 0건 · 서버 결과 없음 또는 SongItem 파싱 실패 (진단 필요)" else "검색 결과 " + songs.size + "건 · 선택 후 동일 ID로 재생"
                 },
                 onFailure = { e ->
                     label.text = "검색 실패: " + e.javaClass.simpleName + ": " + e.message
