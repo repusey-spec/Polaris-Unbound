@@ -1,5 +1,37 @@
 # Hush Lite: YouTube Music core and minimal Android shell
 
+## Stage 3: Hush stream resolution and saved account state (2026-10-22)
+
+- `adapters/HushLiteStreamResolver.kt` now uses Hush's **unchanged core**
+  `NewPipeUtils.getStreamUrl(format, videoId, client, authState)`,
+  rather than accepting only directly exposed stream URLs.
+  It can consume `signatureCipher` / `cipher` formats and the original
+  throttling-parameter decoder, without substituting another video ID.
+- Playback resolver clients are bounded and errors are reported without
+  logging signed URLs. `LiteStreamProbe` caches the URL **only in RAM**,
+  scoped to the account fingerprint and with a short expiry. Player errors
+  clear the cache; playback still needs a real phone test.
+- `LiteSessionStore.kt` stores verified account cookie, DataSyncId, and
+  visitorData using Android Keystore AES-GCM; app backup disabled.
+  On each process start, the **single Android service** restores the session.
+- `LoginActivity` now merges Hush's three YouTube cookie domains and
+  attempts `YouTube.accountDataSyncId()` as the original
+  `YouTubeLoginRepository` does, before the page-extracted fallback.
+  Credentials are saved **only after** a successful `accountInfo()`.
+- `LiteDiagnostics` shows buffering, player state and a sanitized error
+  code on the phone screen, so audio failures can be observed without
+  USB ADB while using wired Android Auto.
+
+**Validation scope:** The original Hush InnerTube JVM core and Android
+Kotlin/manifest compilation are automated. **No online song playback,
+Google login, persistent session restore or Android Auto vehicle voice test
+has yet been executed.** This is not an APK release.
+
+**Still missing:** full Hush `YTPlayerUtils` retry/client cache, web
+PoTokens and BotGuard session recovery, proven stream byte handling,
+download/cache integration, authenticated personal music library, and
+Polaris radio/NAS/CAN integration with a single audio focus owner.
+
 ## Stage 2: Android shell compiles, playback still unverified (2026-10-22)
 
 The isolated `hush-lite/android-shell/app/` now provides:
