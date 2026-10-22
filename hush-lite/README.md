@@ -25,6 +25,24 @@ catalog into a new, independently buildable *library-only* project.
 - No merge into stable Polaris `main`, B, C or external H01.
 - No use of original YouTube Music as the future playback dependency.
 
+### Actual compiled Hush Lite search adapter
+
+The stage generator adds `core/src/main/kotlin/app/hush/music/lite/HushLiteSongSearch.kt`.
+This is a **thin Polaris-specific addition** to the preserved upstream core:
+`HushLiteSongSearch.songs(query)` calls the **actual Hush InnerTube**
+`YouTube.search(query, FILTER_SONG)`, maps `SongItem` results to a candidate list,
+and retains each song's **real video ID and WatchEndpoint**. This avoids the old
+Polaris C failure mode of accepting the first arbitrary item or running a
+second text search after selecting an ID.
+
+It is currently a **compiled library API**, not a phone search screen, AA
+command receiver or playback engine. Successful Kotlin compilation is
+**not evidence** of a successful online search or audible sound on a device.
+
+**Verified:** GitHub Actions ran source-staging tests, downloaded the pinned
+original Hush revision, compiled the core **including the new adapter** and
+confirmed that no Android app/APK output was present.
+
 ### Run locally / in CI
 
 ```bash
