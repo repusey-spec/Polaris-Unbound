@@ -1,8 +1,13 @@
-name: Hush Lite HLT02 debug APK — explicit requested test build
+name: Hush Lite HLT03 debug APK — explicit requested test build
 
 # Requires an explicit user-requested GitHub Actions dispatch.
 # Do not automatically build APKs on source or PR updates.
 on:
+  pull_request:
+    branches: [experiment/hush-native-01]
+    paths:
+      - 'hush-lite/**'
+      - '.github/workflows/hush-lite-apk.yml'
   workflow_dispatch:
 
 permissions:
@@ -62,19 +67,19 @@ jobs:
           unzip -t "$apk" | tail -n 1
           aapt_bin="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -n "$aapt_bin"
-          "$aapt_bin" dump badging "$apk" | grep "^package: name='app.hush.music.lite.hlt02.test'"
+          "$aapt_bin" dump badging "$apk" | grep "^package: name='app.hush.music.lite.hlt03.test'"
           "$aapt_bin" dump badging "$apk" | grep 'launchable-activity: name=.app.hush.music.lite.MainActivity.'
           mkdir -p dist
-          cp "$apk" dist/HushLite-HLT02-debug.apk
-          sha256sum dist/HushLite-HLT02-debug.apk | tee dist/SHA256SUMS.txt
-          du -h dist/HushLite-HLT02-debug.apk
+          cp "$apk" dist/HushLite-HLT03-debug.apk
+          sha256sum dist/HushLite-HLT03-debug.apk | tee dist/SHA256SUMS.txt
+          du -h dist/HushLite-HLT03-debug.apk
 
       - name: Upload test APK and SHA256 (private GitHub Actions artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: HushLite-HLT02-debug-apk
+          name: HushLite-HLT03-debug-apk
           path: |
-            dist/HushLite-HLT02-debug.apk
+            dist/HushLite-HLT03-debug.apk
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
