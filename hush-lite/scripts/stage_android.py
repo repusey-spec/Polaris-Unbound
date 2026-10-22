@@ -30,6 +30,14 @@ def stage_android(source: Path, destination: Path) -> dict:
         work = Path(tmp) / "staged"
         report = _core.stage(source, work)
         shutil.copytree(_SHELL, work / "app")
+        # Android Gradle Plugin 9 removes BaseVariant used by the loaded Kotlin plugin.
+        # Keep original upstream catalog untouched and pin only this staged Android shell.
+        catalog = work / "gradle/libs.versions.toml"
+        original = catalog.read_text(encoding="utf-8")
+        marker = 'agp = "9.2.1"'
+        if original.count(marker) != 1:
+            raise ValueError("Unexpected upstream AGP; review toolchain manually")
+        catalog.write_text(original.replace(marker, 'agp = "8.7.3"'), encoding="utf-8")
         settings = work / "settings.gradle.kts"
         settings.write_text(settings.read_text(encoding="utf-8") + '\ninclude(":app")\n', encoding="utf-8")
         report["scope"] = "Hush JVM InnerTube core plus minimal Android login/search/AA/player diagnostic"
