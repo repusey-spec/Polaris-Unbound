@@ -25,13 +25,20 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        LiteSession.initialize(this)
+        // Show a readable startup error even if an optional YouTube core
+        // class cannot initialize on the user's Android version.
+        val startupError = runCatching { LiteSession.initialize(this) }.exceptionOrNull()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(22, 24, 22, 12)
         }
         label = TextView(this).apply {
-            text = "Hush Lite search + early playback. Audio not device verified."
+            text = if (startupError != null) {
+                "앱 초기화 실패: " + startupError.javaClass.simpleName +
+                    " · 이 화면을 촬영해 전달해 주세요."
+            } else {
+                "Hush Lite search + early playback. Audio not device verified."
+            }
         }
         query = EditText(this).apply {
             hint = "가수와 곡 제목"
@@ -46,6 +53,11 @@ class MainActivity : Activity() {
         root.addView(search)
         root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+        if (startupError != null) {
+            login.isEnabled = false
+            search.isEnabled = false
+            return
+        }
         scope.launch {
             LiteDiagnostics.status.collect { message ->
                 if (message.isNotBlank()) label.text = message
