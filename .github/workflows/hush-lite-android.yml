@@ -18,6 +18,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
       - name: Install Android 37 platform for Hush upstream AGP
         run: |
           echo "sdkmanager: $(command -v sdkmanager)"
