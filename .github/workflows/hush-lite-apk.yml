@@ -3,11 +3,6 @@ name: Hush Lite HLT03 debug APK — explicit requested test build
 # Requires an explicit user-requested GitHub Actions dispatch.
 # Do not automatically build APKs on source or PR updates.
 on:
-  pull_request:
-    branches: [experiment/hush-native-01]
-    paths:
-      - 'hush-lite/**'
-      - '.github/workflows/hush-lite-apk.yml'
   workflow_dispatch:
 
 permissions:
