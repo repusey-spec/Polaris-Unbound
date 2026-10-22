@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
-    <application android:allowBackup="false" android:label="Hush Lite Internal Test" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <application android:allowBackup="false" android:label="Hush Lite HLT02" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
         <activity android:name=".LoginActivity" android:exported="false"/>
         <activity android:name=".MainActivity" android:exported="true">
