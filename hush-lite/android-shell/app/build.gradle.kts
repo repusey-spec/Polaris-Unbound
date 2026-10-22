@@ -5,6 +5,14 @@ plugins {
 android {
     namespace = "app.hush.music.lite"
     compileSdk = 36
+    // OkHttp DNS and JSpecify ship the same multi-release OSGi metadata.
+    // These are JVM manifest resources, not Android runtime classes.
+    packaging {
+        resources {
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
