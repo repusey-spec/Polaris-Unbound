@@ -5,6 +5,10 @@ plugins {
 android {
     namespace = "app.hush.music.lite"
     compileSdk = 36
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
     defaultConfig {
         applicationId = "app.hush.music.lite.test"
         minSdk = 26
