@@ -47,6 +47,48 @@ plugins {
 }
 '''
 
+SEARCH_ADAPTER = r'''/*
+ * Polaris Hush Lite integration adapter
+ * Preserves Hush/ArchiveTune (GPL-3.0) search results and WatchEndpoint identity.
+ */
+package app.hush.music.lite
+
+import app.hush.music.innertube.YouTube
+import app.hush.music.innertube.models.SongItem
+import app.hush.music.innertube.models.WatchEndpoint
+
+object HushLiteSongSearch {
+    data class Candidate(
+        val videoId: String,
+        val title: String,
+        val artistNames: List<String>,
+        val artworkUrl: String,
+        val endpoint: WatchEndpoint,
+    )
+
+    /** Hush-native online search; results keep their actual playable video IDs. */
+    suspend fun songs(rawQuery: String, limit: Int = 30): Result<List<Candidate>> {
+        val query = rawQuery.trim()
+        if (query.isEmpty() || limit <= 0) return Result.success(emptyList())
+        return YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).map { page ->
+            page.items
+                .filterIsInstance<SongItem>()
+                .distinctBy { it.id }
+                .take(limit.coerceAtMost(100))
+                .map { song ->
+                    Candidate(
+                        videoId = song.id,
+                        title = song.title,
+                        artistNames = song.artists.map { it.name },
+                        artworkUrl = song.thumbnail,
+                        endpoint = song.endpoint ?: WatchEndpoint(videoId = song.id),
+                    )
+                }
+        }
+    }
+}
+'''
+
 REQUIRED_FILES = (
     "core/build.gradle.kts",
     "core/src/main/kotlin/app/hush/music/innertube/YouTube.kt",
@@ -94,6 +136,9 @@ def stage(source: Path, dest: Path, *, expected_sha: str = UPSTREAM_SHA) -> dict
         shutil.copy2(source / "LICENSE", work / "LICENSE")
         (work / "settings.gradle.kts").write_text(SETTINGS, encoding="utf-8")
         (work / "build.gradle.kts").write_text(BUILD, encoding="utf-8")
+        adapter_path = work / "core/src/main/kotlin/app/hush/music/lite/HushLiteSongSearch.kt"
+        adapter_path.parent.mkdir(parents=True, exist_ok=True)
+        adapter_path.write_text(SEARCH_ADAPTER, encoding="utf-8")
         (work / MARKER).write_text(sha + "\n", encoding="utf-8")
         upstream_files = [p for p in source.rglob("*") if p.is_file() and ".git" not in p.parts]
         staged_files = [p for p in work.rglob("*") if p.is_file()]
@@ -101,8 +146,9 @@ def stage(source: Path, dest: Path, *, expected_sha: str = UPSTREAM_SHA) -> dict
             "upstream": UPSTREAM_URL,
             "tag": UPSTREAM_TAG,
             "commit": sha,
-            "scope": "Hush InnerTube JVM core only (Android/login UI/player/AA intentionally excluded)",
+            "scope": "Hush InnerTube JVM core plus thin ID-preserving song search adapter (no Android/AA/player)",
             "modules": ["core"],
+            "search_adapter": "app.hush.music.lite.HushLiteSongSearch",
             "retained_core_files": len([p for p in (work / "core").rglob("*") if p.is_file()]),
             "staged_total_files": len(staged_files),
             "upstream_total_files_excluding_git": len(upstream_files),
