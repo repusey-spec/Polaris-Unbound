@@ -46,6 +46,11 @@ class MainActivity : Activity() {
         root.addView(search)
         root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+        scope.launch {
+            LiteDiagnostics.status.collect { message ->
+                if (message.isNotBlank()) label.text = message
+            }
+        }
         login.setOnClickListener { startActivity(Intent(this, LoginActivity::class.java)) }
         search.setOnClickListener {
             val q = query.text.toString().trim()
@@ -59,7 +64,7 @@ class MainActivity : Activity() {
                     putExtra(LiteMediaService.EXTRA_TITLE, selected.title)
                     putExtra(LiteMediaService.EXTRA_ARTIST, selected.artistNames.joinToString(", "))
                 })
-                label.text = "재생 요청: " + selected.title + " (" + selected.videoId + ") · 결과 미확인"
+                LiteDiagnostics.report("재생 요청: " + selected.title + " · 실제 출력 확인 중")
             }
         }
     }
