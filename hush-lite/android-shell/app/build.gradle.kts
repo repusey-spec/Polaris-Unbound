@@ -18,11 +18,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
     defaultConfig {
-        applicationId = "app.hush.music.lite.hlt02.test"
+        applicationId = "app.hush.music.lite.hlt03.test"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "hush-lite-HLT02.02"
+        versionCode = 3
+        versionName = "hush-lite-HLT03.03"
     }
 }
 dependencies {
