@@ -3,7 +3,7 @@ plugins {
 }
 android {
     namespace = "app.hush.music.lite"
-    compileSdk = 37
+    compileSdk = 36
     defaultConfig {
         applicationId = "app.hush.music.lite.test"
         minSdk = 26
