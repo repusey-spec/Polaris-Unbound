@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.ScrollView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -22,6 +21,7 @@ class MainActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val candidates = mutableListOf<HushLiteSongSearch.Candidate>()
     private lateinit var label: TextView
+    private lateinit var playbackLabel: TextView
     private lateinit var query: EditText
     private lateinit var list: ListView
 
@@ -44,6 +44,7 @@ class MainActivity : Activity() {
                 "Hush Lite search + early playback. Audio not device verified."
             }
         }
+        playbackLabel = TextView(this).apply { text = "재생 상태: 대기" }
         query = EditText(this).apply {
             hint = "가수와 곡 제목"
             setSingleLine()
@@ -55,6 +56,7 @@ class MainActivity : Activity() {
         root.addView(query)
         root.addView(search)
         root.addView(label)
+        root.addView(playbackLabel)
         root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         if (startupError != null) {
@@ -64,7 +66,7 @@ class MainActivity : Activity() {
         }
         scope.launch {
             LiteDiagnostics.status.collect { message ->
-                if (message.isNotBlank()) label.text = message
+                if (message.isNotBlank()) playbackLabel.text = message
             }
         }
         login.setOnClickListener { startActivity(Intent(this, LoginActivity::class.java)) }
@@ -86,7 +88,9 @@ class MainActivity : Activity() {
     }
 
     private fun searchSongs(q: String) {
-        label.text = "Hush 검색 중… · 로그인 없이 공개 검색"
+        label.text = "Hush 검색 중…"
+        candidates.clear()
+        list.adapter = null
         scope.launch {
             HushLiteSongSearch.songs(q).fold(
                 onSuccess = { songs ->
