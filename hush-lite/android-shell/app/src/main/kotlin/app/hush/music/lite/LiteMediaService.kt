@@ -89,7 +89,24 @@ class LiteMediaService : MediaLibraryService() {
             ).build()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                Log.e(TAG, "Audio resolver failed; do not assume successful Hush playback", error)
+                val id = player.currentMediaItem?.mediaId.orEmpty()
+                if (id.isNotEmpty()) LiteStreamProbe.invalidate(id)
+                LiteDiagnostics.report("음원 재생 오류 (" + error.errorCode + ") · Hush 스트림 확인 필요")
+                // Never print the player exception stack: URLs may include
+                // signed query parameters or other sensitive credentials.
+                Log.w(TAG, "Audio playback error code=" + error.errorCode)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                when (playbackState) {
+                    Player.STATE_BUFFERING -> LiteDiagnostics.report("음원 연결 및 버퍼링 중…")
+                    Player.STATE_READY -> LiteDiagnostics.report("음원 준비 완료 · 출력 상태 확인 중")
+                    Player.STATE_ENDED -> LiteDiagnostics.report("곡 재생 종료")
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) LiteDiagnostics.report("Hush Lite 내부 플레이어 재생 중")
             }
         })
         val openApp = PendingIntent.getActivity(
@@ -108,6 +125,7 @@ class LiteMediaService : MediaLibraryService() {
         if (intent?.action == ACTION_PLAY_ID) {
             val id = intent.getStringExtra(EXTRA_VIDEO_ID).orEmpty()
             if (id.matches(Regex("[A-Za-z0-9_-]{11}"))) {
+                LiteDiagnostics.report("선택한 곡 ID로 직접 재생 준비 중…")
                 player.setMediaItem(item(
                     id,
                     intent.getStringExtra(EXTRA_TITLE).orEmpty(),
