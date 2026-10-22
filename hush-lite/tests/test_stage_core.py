@@ -47,6 +47,10 @@ class StageCoreTests(unittest.TestCase):
         self.assertIn("YouTube.search(query, YouTube.SearchFilter.FILTER_SONG)", adapter_content)
         self.assertIn("videoId = song.id", adapter_content)
         self.assertIn("song.endpoint ?: WatchEndpoint(videoId = song.id)", adapter_content)
+        stream = dest / "core/src/main/kotlin/app/hush/music/lite/HushLiteStreamResolver.kt"
+        self.assertTrue(stream.exists())
+        self.assertIn("NewPipeUtils.getStreamUrl(", stream.read_text(encoding="utf-8"))
+        self.assertIn("audioUrl(videoId: String)", stream.read_text(encoding="utf-8"))
         self.assertFalse(report["apk_generated"])
         self.assertFalse(report["compile_verified"])
 
