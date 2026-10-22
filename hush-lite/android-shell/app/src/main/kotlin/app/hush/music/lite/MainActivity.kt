@@ -25,7 +25,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        LiteSession.initialize()
+        LiteSession.initialize(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(22, 24, 22, 12)
