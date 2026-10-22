@@ -86,7 +86,7 @@ class LoginActivity : Activity() {
 
     private fun parseJsString(encoded: String?): String? =
         runCatching {
-            if (encoded == null || encoded == "null") return null
+            if (encoded == null || encoded == "null") return@runCatching null
             JSONObject("""{"value":""" + encoded + "}").optString("value")
                 .trim().takeIf { it.isNotBlank() && it != "null" }
         }.getOrNull()
