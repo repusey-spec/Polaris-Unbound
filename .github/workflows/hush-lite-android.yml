@@ -22,11 +22,11 @@ jobs:
         with:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: 'false'
-      - name: Install Android 37 platform for Hush upstream AGP
+      - name: Install Android 36 platform for isolated shell
         run: |
           echo "sdkmanager: $(command -v sdkmanager)"
-          yes | sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-37" >/dev/null || true
-          test -d "$ANDROID_HOME/platforms/android-37"
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-36" >/dev/null || true
+          test -d "$ANDROID_HOME/platforms/android-36"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.1'
