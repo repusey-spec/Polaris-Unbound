@@ -1,13 +1,8 @@
 name: Hush Lite HLT02 debug APK — explicit requested test build
 
-# HLT02 one-time user-requested APK: this PR update triggers the build.
-# Disable PR trigger again after artifact confirmation.
+# Requires an explicit user-requested GitHub Actions dispatch.
+# Do not automatically build APKs on source or PR updates.
 on:
-  pull_request:
-    branches: [experiment/hush-native-01]
-    paths:
-      - 'hush-lite/**'
-      - '.github/workflows/hush-lite-apk.yml'
   workflow_dispatch:
 
 permissions:
