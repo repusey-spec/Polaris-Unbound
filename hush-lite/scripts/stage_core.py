@@ -70,7 +70,11 @@ object HushLiteSongSearch {
     suspend fun songs(rawQuery: String, limit: Int = 30): Result<List<Candidate>> {
         val query = rawQuery.trim()
         if (query.isEmpty() || limit <= 0) return Result.success(emptyList())
-        return YouTube.search(query, YouTube.SearchFilter.FILTER_SONG).map { page ->
+        return YouTube.search(
+            query,
+            YouTube.SearchFilter.FILTER_SONG,
+            useAccountContext = YouTube.currentPlaybackAuthState().hasPlaybackLoginContext,
+        ).map { page ->
             page.items
                 .filterIsInstance<SongItem>()
                 .distinctBy { it.id }
