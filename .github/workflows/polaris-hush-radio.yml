@@ -45,9 +45,10 @@ jobs:
           python3 polaris-hush/patch_hush_browse.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_radio_all.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_phone_ui.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_branding.py "$RUNNER_TEMP/hush"
           mkdir -p "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris"
           cp polaris-hush/*.kt "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/"
-          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py
+          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py polaris-hush/patch_hush_branding.py
       - name: Compile original Hush with Polaris radio
         working-directory: ${{ runner.temp }}/hush
         run: |
