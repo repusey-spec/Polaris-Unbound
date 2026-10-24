@@ -1,0 +1,46 @@
+name: Polaris Hush radio integration compile
+on:
+  push:
+    branches: [experiment/polaris-hush-radio-01]
+    paths:
+      - 'polaris-hush/**'
+      - '.github/workflows/polaris-hush-radio.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Checkout pinned full Hush
+        run: |
+          git clone --depth 1 --branch v13.14.7 --recurse-submodules https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush"
+          test "$(git -C "$RUNNER_TEMP/hush" rev-parse HEAD)" = "8f3e55d1114f1b844f0a21af8c365d090a43799f"
+      - name: Patch existing MediaLibrarySession and stage radio Kotlin sources
+        run: |
+          python3 polaris-hush/patch_hush_browse.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_all.py "$RUNNER_TEMP/hush"
+          mkdir -p "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris"
+          cp polaris-hush/*.kt "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/"
+          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py
+      - name: Compile original Hush with Polaris radio
+        working-directory: ${{ runner.temp }}/hush
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleGmsMobileArm64Debug
+      - name: Upload APK only if compile succeeds
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-Hush-radio-integration-debug
+          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
