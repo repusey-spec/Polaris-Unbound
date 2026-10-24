@@ -25,7 +25,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Checkout exact original Hush (no simplified search adapter)
         run: |
-          git clone --depth 1 --branch v13.14.7 https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush"
+          git clone --depth 1 --branch v13.14.7 --recurse-submodules --shallow-submodules https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush"
           test "$(git -C "$RUNNER_TEMP/hush" rev-parse HEAD)" = "8f3e55d1114f1b844f0a21af8c365d090a43799f"
       - name: Validate original engine and AA entrypoints are present
         run: |
@@ -33,8 +33,16 @@ jobs:
           test -s "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/playback/MediaLibrarySessionCallback.kt"
           test -s "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/playback/MusicService.kt"
           test -s "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/playback/queues/YouTubeQueue.kt"
-      - name: Compile unmodified upstream Android app (no APK)
+      - name: Compile original upstream Android APK
         working-directory: ${{ runner.temp }}/hush
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace :app:compileGmsMobileArm64DebugKotlin
+          ./gradlew --no-daemon --stacktrace :app:assembleGmsMobileArm64Debug
+      - name: Upload original Hush APK for build validation
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HushLite-upstream-baseline-debug
+          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
