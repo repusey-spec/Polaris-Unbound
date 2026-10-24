@@ -13,7 +13,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.navigation.NavHostController
-import app.hush.music.ui.utils.LocalPlayerConnection
+import app.hush.music.LocalPlayerConnection
+import app.hush.music.ui.screens.Screens
 
 @Composable
 fun PolarisRadioScreen(navController: NavHostController) {
@@ -22,7 +23,7 @@ fun PolarisRadioScreen(navController: NavHostController) {
     Column(modifier = Modifier.padding(16.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = {}) { Text("Radio") }
-            Button(onClick = { navController.navigate("home") }) { Text("Streaming") }
+            Button(onClick = { navController.navigate(Screens.ROUTE_HOME) }) { Text("Streaming") }
         }
         PolarisRadioGrid(
             layout = PolarisRadioLayout(context),
