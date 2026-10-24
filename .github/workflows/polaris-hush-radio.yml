@@ -24,6 +24,26 @@ jobs:
         run: |
           git clone --depth 1 --branch v13.14.7 --recurse-submodules https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush"
           test "$(git -C "$RUNNER_TEMP/hush" rev-parse HEAD)" = "8f3e55d1114f1b844f0a21af8c365d090a43799f"
+      - name: Restore missing lyrics subprojects before Gradle configuration
+        run: |
+          set -euxo pipefail
+          LYRICS="$RUNNER_TEMP/hush/lyrics"
+          echo "Pinned lyrics commit: $(git -C "$LYRICS" rev-parse HEAD)"
+          ls -la "$LYRICS"
+          git -C "$RUNNER_TEMP/hush" submodule update --init --recursive lyrics
+          if [ ! -d "$LYRICS/musixmatch" ] || [ ! -d "$LYRICS/betterlyrics" ]; then
+            echo "Pinned lyrics checkout is incomplete; checking upstream current tree"
+            git clone --depth 1 https://github.com/ArchiveTuneApp/lyrics.git "$RUNNER_TEMP/lyrics-current"
+            for module in kugou lrclib simpmusic paxsenix betterlyrics unison youlyplus musixmatch; do
+              if [ ! -d "$LYRICS/$module" ] && [ -d "$RUNNER_TEMP/lyrics-current/$module" ]; then
+                cp -a "$RUNNER_TEMP/lyrics-current/$module" "$LYRICS/$module"
+              fi
+              test -f "$LYRICS/$module/build.gradle.kts" || {
+                echo "::error::Missing lyrics module $module; cannot configure Gradle"
+                exit 1
+              }
+            done
+          fi
       - name: Patch existing MediaLibrarySession and stage radio Kotlin sources
         run: |
           python3 polaris-hush/patch_hush_browse.py "$RUNNER_TEMP/hush"
