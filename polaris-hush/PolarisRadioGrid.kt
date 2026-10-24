@@ -5,7 +5,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,6 +14,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 /**
  * Polaris phone Radio tab content, ready to mount in Hush navigation.
@@ -31,7 +31,7 @@ fun PolarisRadioGrid(
     val slots = remember(revision) { layout.slots() }
     Column {
         repeat(4) { rowIndex ->
-            Row(horizontalArrangement = Arrangement.spacedBy(androidx.compose.ui.unit.Dp(8f))) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 repeat(4) { columnIndex ->
                     val slot = rowIndex * 4 + columnIndex
                     val stationId = slots[slot]
