@@ -53,11 +53,7 @@ fun PolarisRadioScreen(navController: NavHostController) {
         }
     }
 
-    Column(modifier = Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = {}) { Text("Radio") }
-            Button(onClick = { navController.navigate(Screens.ROUTE_HOME) }) { Text("Streaming") }
-        }
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         radioError?.let { Text(it) }
         if (selectedRadioId != null) Text(nowPlaying)
         PolarisRadioGrid(
