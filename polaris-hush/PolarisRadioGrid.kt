@@ -5,6 +5,13 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,25 +33,38 @@ fun PolarisRadioGrid(
     layout: PolarisRadioLayout,
     onPlayStation: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     var revision by remember { mutableIntStateOf(0) }
     var editingSlot by remember { mutableIntStateOf(-1) }
     val slots = remember(revision) { layout.slots() }
-    Column {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         repeat(4) { rowIndex ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 repeat(4) { columnIndex ->
                     val slot = rowIndex * 4 + columnIndex
                     val stationId = slots[slot]
                     val station = stationId?.let(RadioCatalog::find)
-                    Text(
-                        text = station?.title ?: "＋",
-                        modifier = Modifier
-                            .weight(1f)
-                            .combinedClickable(
-                                onClick = { stationId?.let(onPlayStation) },
-                                onLongClick = { editingSlot = slot },
-                            ),
-                    )
+                    if (station != null) {
+                        Image(
+                            bitmap = remember(station.id) { StationArt.bitmap(context, station.id, 256).asImageBitmap() },
+                            contentDescription = station.title,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .padding(2.dp)
+                                .combinedClickable(
+                                    onClick = { stationId?.let(onPlayStation) },
+                                    onLongClick = { editingSlot = slot },
+                                ),
+                        )
+                    } else {
+                        Text(
+                            text = "＋",
+                            modifier = Modifier.weight(1f).aspectRatio(1f)
+                                .combinedClickable(onClick = {}, onLongClick = { editingSlot = slot }),
+                        )
+                    }
                 }
             }
         }
