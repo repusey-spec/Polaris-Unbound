@@ -73,10 +73,9 @@ jobs:
           grep -F "versionCode='$EXPECTED_CODE'" /tmp/polaris-apk-badging.txt
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           EXPECTED_CERT=$(keytool -exportcert -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug | sha256sum | awk '{print $1}')
-          ACTUAL_CERT=$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/polaris-apk-signer.txt
           echo "Expected pinned cert SHA256: $EXPECTED_CERT"
-          echo "Actual APK cert SHA256: $ACTUAL_CERT"
-          test "$EXPECTED_CERT" = "$ACTUAL_CERT"
+          grep -Fi "$EXPECTED_CERT" /tmp/polaris-apk-signer.txt
       - name: Upload APK only if compile succeeds
         if: success()
         uses: actions/upload-artifact@v4
