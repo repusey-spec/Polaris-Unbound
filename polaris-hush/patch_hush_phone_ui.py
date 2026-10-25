@@ -26,5 +26,22 @@ s = s.replace(old, '''                                            when (tabOpene
 old = '''                                                NavigationTab.HOME -> Screens.ROUTE_HOME'''
 assert s.count(old) == 1
 s = s.replace(old, '''                                                NavigationTab.HOME -> "polaris_radio"''', 1)
+# The tabs belong to the app-wide Scaffold, not the Radio route.
+# This keeps them visible on Hush Home, playlists, search and settings.
+old = """                                topBar = {
+                                    if (shouldShowTopBar) {"""
+assert s.count(old) == 1, "Expected Hush scaffold topBar entry"
+s = s.replace(old, """                                topBar = {
+                                    Column {
+                                        app.hush.music.polaris.PolarisTopTabs(navController, currentRoute)
+                                        if (shouldShowTopBar) {""", 1)
+old = """                                    }
+                                },
+                                bottomBar = {"""
+assert s.count(old) == 1, "Expected Hush scaffold topBar terminator"
+s = s.replace(old, """                                        }
+                                    }
+                                },
+                                bottomBar = {""", 1)
 main.write_text(s)
 print("Polaris Radio mounted as default route; Hush Home remains available")
