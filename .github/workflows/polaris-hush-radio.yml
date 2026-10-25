@@ -64,6 +64,7 @@ jobs:
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           "$AAPT" dump badging "$APK" | tee /tmp/polaris-apk-badging.txt | grep -E "^(package:|application-label:)"
           grep -Fx "application-label:'Polaris'" /tmp/polaris-apk-badging.txt
+          grep -F "name='app.hush.music.polarisradio.debug'" /tmp/polaris-apk-badging.txt
       - name: Upload APK only if compile succeeds
         if: success()
         uses: actions/upload-artifact@v4
