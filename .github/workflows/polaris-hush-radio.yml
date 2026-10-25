@@ -54,6 +54,14 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace :app:assembleGmsMobileArm64Debug
+      - name: Verify installed APK label is Polaris
+        run: |
+          set -euo pipefail
+          APK=$(find "$RUNNER_TEMP/hush/app/build/outputs/apk/gmsMobileArm64/debug" -name '*.apk' -print -quit)
+          test -n "$APK"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | tee /tmp/polaris-apk-badging.txt | grep -E "^(package:|application-label:)"
+          grep -Fx "application-label:'Polaris'" /tmp/polaris-apk-badging.txt
       - name: Upload APK only if compile succeeds
         if: success()
         uses: actions/upload-artifact@v4
