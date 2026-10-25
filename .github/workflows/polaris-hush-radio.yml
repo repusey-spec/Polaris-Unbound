@@ -45,6 +45,9 @@ jobs:
           python3 polaris-hush/patch_hush_browse.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_radio_all.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_phone_ui.py "$RUNNER_TEMP/hush"
+          # Reuse existing stable Polaris debug identity across ephemeral runners.
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/hush/polaris-debug.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug >/dev/null
           python3 polaris-hush/patch_hush_branding.py "$RUNNER_TEMP/hush"
           mkdir -p "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris"
           cp polaris-hush/*.kt "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/"
@@ -66,6 +69,14 @@ jobs:
           "$AAPT" dump badging "$APK" | tee /tmp/polaris-apk-badging.txt | grep -E "^(package:|application-label:)"
           grep -Fx "application-label:'Polaris'" /tmp/polaris-apk-badging.txt
           grep -F "name='app.hush.music.polarisradio.debug'" /tmp/polaris-apk-badging.txt
+          EXPECTED_CODE=$((100000 + GITHUB_RUN_NUMBER))
+          grep -F "versionCode='$EXPECTED_CODE'" /tmp/polaris-apk-badging.txt
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          EXPECTED_CERT=$(keytool -exportcert -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug | sha256sum | awk '{print $1}')
+          ACTUAL_CERT=$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          echo "Expected pinned cert SHA256: $EXPECTED_CERT"
+          echo "Actual APK cert SHA256: $ACTUAL_CERT"
+          test "$EXPECTED_CERT" = "$ACTUAL_CERT"
       - name: Upload APK only if compile succeeds
         if: success()
         uses: actions/upload-artifact@v4
