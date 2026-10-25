@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,7 +31,7 @@ fun PolarisRadioScreen(navController: NavHostController) {
     val connection = LocalPlayerConnection.current
     val scope = rememberCoroutineScope()
     var radioError by remember { mutableStateOf<String?>(null) }
-    Column(modifier = Modifier.padding(16.dp)) {
+    Column(modifier = Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = {}) { Text("Radio") }
             Button(onClick = { navController.navigate(Screens.ROUTE_HOME) }) { Text("Streaming") }
