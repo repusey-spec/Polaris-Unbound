@@ -43,5 +43,9 @@ s = s.replace(old, """                                        }
                                     }
                                 },
                                 bottomBar = {""", 1)
+# Launcher label is Polaris, but Hush's in-app header may still say Hush Debug.
+header = 'text = stringResource(R.string.app_name)'
+assert s.count(header) == 1
+s = s.replace(header, 'text = "Polaris"', 1)
 main.write_text(s)
 print("Polaris Radio mounted as default route; Hush Home remains available")
