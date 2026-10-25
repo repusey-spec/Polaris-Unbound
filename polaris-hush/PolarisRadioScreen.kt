@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -31,17 +33,40 @@ fun PolarisRadioScreen(navController: NavHostController) {
     val connection = LocalPlayerConnection.current
     val scope = rememberCoroutineScope()
     var radioError by remember { mutableStateOf<String?>(null) }
+    var selectedRadioId by remember { mutableStateOf<String?>(null) }
+    var nowPlaying by remember { mutableStateOf("") }
+    LaunchedEffect(selectedRadioId) {
+        val id = selectedRadioId ?: return@LaunchedEffect
+        while (true) {
+            val cached = CurrentProgramResolver.cached(context, id)
+            if (cached != null) nowPlaying = cached.phoneText(id)
+            val result = try {
+                withContext(Dispatchers.IO) { CurrentProgramResolver.resolve(id) }
+            } catch (_: Exception) { null }
+            if (result != null) {
+                CurrentProgramResolver.save(context, id, result)
+                nowPlaying = result.phoneText(id)
+            } else if (cached == null) {
+                nowPlaying = CurrentProgramResolver.stationName(id)
+            }
+            delay(CurrentProgramResolver.nextRefreshDelay(id, result ?: cached))
+        }
+    }
+
     Column(modifier = Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = {}) { Text("Radio") }
             Button(onClick = { navController.navigate(Screens.ROUTE_HOME) }) { Text("Streaming") }
         }
         radioError?.let { Text(it) }
+        if (selectedRadioId != null) Text(nowPlaying)
         PolarisRadioGrid(
             layout = PolarisRadioLayout(context),
             onPlayStation = { id ->
                 scope.launch {
                     radioError = null
+                    selectedRadioId = id
+                    nowPlaying = CurrentProgramResolver.stationName(id)
                     val url = try {
                         withContext(Dispatchers.IO) {
                             if (PolarisRadioResolver.needsResolution(id)) PolarisRadioResolver.resolve(id)
