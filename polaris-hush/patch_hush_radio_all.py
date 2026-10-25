@@ -33,21 +33,8 @@ insert = '''                val radioStation = RadioCatalog.stations.firstOrNull
                     firstItem.mediaId == "polaris:station:" + it.id
                 }
                 if (radioStation != null) {
-                    val url = if (PolarisRadioResolver.needsResolution(radioStation.id)) {
-                        PolarisRadioResolver.resolve(radioStation.id)
-                    } else {
-                        PolarisRadioStreams.streams.first { it.id == radioStation.id }.url
-                    }
-                    val item = MediaItem.Builder()
-                        .setMediaId("polaris:station:" + radioStation.id)
-                        .setUri(url)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(radioStation.title)
-                                .setArtist("Polaris Radio")
-                                .setIsPlayable(true)
-                                .build()
-                        ).build()
+                    val url = PolarisRadioPlayback.resolveUrl(radioStation.id)
+                    val item = PolarisRadioPlayback.mediaItem(radioStation.id, url)
                     return@future MediaSession.MediaItemsWithStartPosition(listOf(item), 0, 0L)
                 }
 '''
@@ -58,6 +45,7 @@ s = s.replace(pkg, pkg + """
 import app.hush.music.polaris.RadioCatalog
 import app.hush.music.polaris.PolarisRadioStreams
 import app.hush.music.polaris.PolarisRadioResolver
+import app.hush.music.polaris.PolarisRadioPlayback
 """, 1)
 p.write_text(s)
 print("Patched 13 stations: dynamic URL resolution on selection, shared Hush MediaSession")
