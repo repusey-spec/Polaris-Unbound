@@ -65,23 +65,13 @@ fun PolarisRadioScreen(navController: NavHostController) {
                     nowPlaying = CurrentProgramResolver.stationName(id)
                     val url = try {
                         withContext(Dispatchers.IO) {
-                            if (PolarisRadioResolver.needsResolution(id)) PolarisRadioResolver.resolve(id)
-                            else PolarisRadioStreams.streams.firstOrNull { it.id == id }?.url
-                                ?: error("No stream URL for $id")
+                            PolarisRadioPlayback.resolveUrl(id)
                         }
                     } catch (e: Exception) {
                         radioError = "라디오 주소 확인 실패: ${e.message}"
                         return@launch
                     }
-                    val item = MediaItem.Builder()
-                        .setMediaId("polaris:station:$id")
-                        .setUri(url)
-                        .setMediaMetadata(
-                            androidx.media3.common.MediaMetadata.Builder()
-                                .setTitle(RadioCatalog.find(id)?.title ?: id)
-                                .setArtist("Polaris Radio")
-                                .build()
-                        ).build()
+                    val item = PolarisRadioPlayback.mediaItem(id, url)
                     val player = connection?.player
                     if (player == null) radioError = "재생 서비스에 연결되지 않았습니다."
                     else {
