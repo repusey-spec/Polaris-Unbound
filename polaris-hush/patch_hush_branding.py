@@ -14,4 +14,11 @@ for p in (root/"app/src").glob("*/res/values*/strings.xml"):
     import re
     txt=re.sub(r'(<string name="app_name"[^>]*>).*?(</string>)',r'\1Polaris\2',txt)
     p.write_text(txt)
-print("Polaris manifest label and app_name resources patched")
+# Isolate the experiment from existing Hush Debug and stable Polaris installations.
+gradle=root/"app/build.gradle.kts"
+g=gradle.read_text()
+needle='applicationIdSuffix = ".debug"'
+assert g.count(needle)==1
+g=g.replace(needle,'applicationIdSuffix = ".polarisradio.debug"')
+gradle.write_text(g)
+print("Polaris label set; isolated debug application ID suffix applied")
