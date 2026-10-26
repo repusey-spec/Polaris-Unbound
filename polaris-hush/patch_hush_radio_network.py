@@ -13,8 +13,8 @@ def once(before, after):
     s = s.replace(before, after, 1)
 
 once(
-    "        super.onMediaItemTransition(mediaItem, reason)\n",
-    "        super.onMediaItemTransition(mediaItem, reason)\n"
+    "        polarisRadioRecovery.onItemTransition(mediaItem)\n",
+    "        polarisRadioRecovery.onItemTransition(mediaItem)\n"
     "        app.hush.music.polaris.PolarisRadioNetwork.radioActive =\n"
     "            mediaItem?.mediaId?.startsWith(\"polaris:station:\") == true\n"
     "        // Hush's YouTube automix, prefetch and queue hydration do not apply to live radio.\n"
