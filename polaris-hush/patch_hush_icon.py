@@ -17,7 +17,7 @@ knob = Image.open(BytesIO(png)).convert("RGBA")
 sizes = {"mdpi": (48,108), "hdpi": (72,162), "xhdpi": (96,216),
          "xxhdpi": (144,324), "xxxhdpi": (192,432)}
 for density, (launcher_px, fg_px) in sizes.items():
-    out = hush_root / "app/src/main/res" / ("mipmap-" + density + "-v4")
+    out = hush_root / "app/src/main/res" / ("mipmap-" + density)
     out.mkdir(parents=True, exist_ok=True)
     knob.resize((fg_px, fg_px), Image.Resampling.LANCZOS).save(out / "ic_launcher_foreground.png")
     mono = Image.new("RGBA", (fg_px, fg_px))
