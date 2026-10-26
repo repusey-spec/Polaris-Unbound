@@ -50,7 +50,6 @@ jobs:
           python3 polaris-hush/patch_hush_radio_network.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_radio_transport.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_radio_projection.py "$RUNNER_TEMP/hush"
-          python3 polaris-hush/patch_hush_ui_build42.py "$RUNNER_TEMP/hush"
           # Reuse existing stable Polaris debug identity across ephemeral runners.
           base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/hush/polaris-debug.keystore"
           keytool -list -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug >/dev/null
@@ -63,7 +62,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/hush/app/src/main/java/app/hush/music/polaris"
           cp polaris-hush/StationArt.java polaris-hush/CurrentProgramResolver.java "$RUNNER_TEMP/hush/app/src/main/java/app/hush/music/polaris/"
           sed -i '/implementation(libs.guava)/a\    implementation("org.jsoup:jsoup:1.18.3")' "$RUNNER_TEMP/hush/app/build.gradle.kts"
-          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py polaris-hush/patch_hush_mini_player.py polaris-hush/patch_hush_branding.py polaris-hush/patch_hush_radio_recovery.py polaris-hush/patch_hush_radio_network.py polaris-hush/patch_hush_radio_transport.py polaris-hush/patch_hush_radio_projection.py polaris-hush/patch_hush_ui_build42.py polaris-hush/patch_hush_icon.py polaris-hush/patch_hush_ui42.py
+          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py polaris-hush/patch_hush_mini_player.py polaris-hush/patch_hush_branding.py polaris-hush/patch_hush_radio_recovery.py polaris-hush/patch_hush_radio_network.py polaris-hush/patch_hush_radio_transport.py polaris-hush/patch_hush_radio_projection.py polaris-hush/patch_hush_icon.py polaris-hush/patch_hush_ui42.py
       - name: Compile original Hush with Polaris radio
         working-directory: ${{ runner.temp }}/hush
         run: |

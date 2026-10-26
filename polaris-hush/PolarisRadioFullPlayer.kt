@@ -3,24 +3,28 @@ package app.hush.music.polaris
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,16 +34,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.Player
 import app.hush.music.R
 import app.hush.music.playback.PlayerConnection
 import kotlinx.coroutines.Dispatchers
@@ -47,144 +50,173 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * Dedicated live-radio now-playing view. Hush's ordinary music player remains
- * unchanged for non-radio media. Reuse the exact station tile artwork from the
- * 4x4 preset grid; do not fall through to the null YouTube-song metadata view.
+ * Full-size LIVE radio player, only when Media3 currentMediaItem is polaris:station:...
+ * Hush's existing full-song player stays completely untouched for Streaming.
+ *
+ * Radio station artwork is a 512 px rendering of the exact same station tile used
+ * on the radio page. There is deliberately no song progress slider on live radio.
  */
 @Composable
-fun PolarisRadioFullPlayer(connection: PlayerConnection, stationId: String) {
+fun PolarisRadioFullPlayer(
+    stationId: String,
+    playerConnection: PlayerConnection,
+    onClose: () -> Unit,
+) {
     val context = LocalContext.current
     val station = RadioCatalog.find(stationId)
-    val stationTitle = station?.title ?: CurrentProgramResolver.stationName(stationId)
-    val isPlaying by connection.isPlaying.collectAsStateWithLifecycle()
-    val playbackState by connection.playbackState.collectAsStateWithLifecycle()
-    var program by remember(stationId) { mutableStateOf("LIVE RADIO") }
-    val bitmap = remember(stationId) {
-        StationArt.bitmap(context, stationId, 1024).asImageBitmap()
+    val stationName = station?.title ?: CurrentProgramResolver.stationName(stationId)
+    val stationArt = remember(stationId) {
+        StationArt.bitmap(context, stationId, 512).asImageBitmap()
     }
+    val isPlaying by playerConnection.isPlaying.collectAsStateWithLifecycle()
+    val playbackState by playerConnection.playbackState.collectAsStateWithLifecycle()
+    var programme by remember(stationId) { mutableStateOf("LIVE RADIO") }
 
     LaunchedEffect(stationId) {
         val cached = CurrentProgramResolver.cached(context, stationId)
             ?.takeIf { CurrentProgramResolver.isCurrentNow(stationId, it) }
-        program = cached?.program?.takeIf { it.isNotBlank() && it != stationTitle }
-            ?: "LIVE RADIO"
+        programme = cached?.program?.takeIf { !it.isNullOrBlank() && it != stationName } ?: "LIVE RADIO"
         while (true) {
-            val entry = withContext(Dispatchers.IO) {
+            val resolved = withContext(Dispatchers.IO) {
                 runCatching { CurrentProgramResolver.resolve(stationId) }.getOrNull()
             }
-            if (entry != null) {
-                CurrentProgramResolver.save(context, stationId, entry)
-                program = entry.program?.takeIf { it.isNotBlank() && it != stationTitle }
-                    ?: "LIVE RADIO"
+            if (resolved != null) {
+                CurrentProgramResolver.save(context, stationId, resolved)
+                programme = resolved.program?.takeIf { !it.isNullOrBlank() && it != stationName } ?: "LIVE RADIO"
             }
-            delay(CurrentProgramResolver.nextRefreshDelay(stationId, entry ?: cached))
+            delay(CurrentProgramResolver.nextRefreshDelay(stationId, resolved ?: cached))
         }
     }
 
     val colors = MaterialTheme.colorScheme
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(colors.surfaceContainerHigh, colors.surface, colors.surfaceContainer),
-                ),
-            ),
-        contentAlignment = Alignment.TopCenter,
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.surface)
     ) {
-        val coverSize = minOf(maxWidth - 64.dp, maxHeight * 0.43f, 400.dp)
         Column(
-            modifier = Modifier.fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top,
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 24.dp),
         ) {
-            Text(
-                text = "POLARIS  ·  LIVE RADIO",
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.primary,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(20.dp))
-            Image(
-                bitmap = bitmap,
-                contentDescription = stationTitle,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.size(coverSize)
-                    .clip(RoundedCornerShape(24.dp)),
-            )
-            Spacer(Modifier.height(24.dp))
-            Text(
-                text = stationTitle,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                color = colors.onSurface,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = program,
-                style = MaterialTheme.typography.titleMedium,
-                color = colors.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(28.dp))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(26.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(
-                    onClick = connection::seekToPrevious,
-                    modifier = Modifier.size(64.dp),
+                Column {
+                    Text(
+                        text = "Polaris Radio",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "●  LIVE",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.primary,
+                    )
+                }
+                TextButton(onClick = onClose) { Text("닫기") }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = colors.surfaceContainer,
+                shadowElevation = 8.dp,
+                modifier = Modifier.widthIn(max = 332.dp).fillMaxWidth().aspectRatio(1f),
+            ) {
+                Image(
+                    bitmap = stationArt,
+                    contentDescription = stationName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(12.dp).clip(RoundedCornerShape(20.dp)),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Text(
+                text = programme,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stationName,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    modifier = Modifier.size(70.dp),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceContainerHighest),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                    onClick = { playerConnection.seekToPrevious() },
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.skip_previous),
                         contentDescription = "이전 라디오 채널",
-                        modifier = Modifier.size(34.dp),
                         tint = colors.onSurface,
+                        modifier = Modifier.size(30.dp),
                     )
                 }
-                FilledIconButton(
+                Button(
+                    modifier = Modifier.size(82.dp),
+                    shape = CircleShape,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     onClick = {
-                        if (playbackState == Player.STATE_ENDED) {
-                            connection.player.seekToDefaultPosition()
-                            connection.player.prepare()
-                            connection.player.play()
-                        } else if (isPlaying) {
-                            connection.player.pause()
-                        } else {
-                            connection.player.play()
-                        }
+                        if (isPlaying) playerConnection.player.pause() else playerConnection.player.play()
                     },
-                    modifier = Modifier.size(76.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = colors.primary,
-                        contentColor = colors.onPrimary,
-                    ),
                 ) {
                     Icon(
                         painter = painterResource(
                             if (isPlaying) R.drawable.pause else R.drawable.play,
                         ),
                         contentDescription = if (isPlaying) "일시정지" else "재생",
-                        modifier = Modifier.size(34.dp),
+                        modifier = Modifier.size(36.dp),
                     )
                 }
-                IconButton(
-                    onClick = connection::seekToNext,
-                    modifier = Modifier.size(64.dp),
+                Button(
+                    modifier = Modifier.size(70.dp),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceContainerHighest),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                    onClick = { playerConnection.seekToNext() },
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.skip_next),
                         contentDescription = "다음 라디오 채널",
-                        modifier = Modifier.size(34.dp),
                         tint = colors.onSurface,
+                        modifier = Modifier.size(30.dp),
                     )
                 }
             }
-            Spacer(Modifier.height(24.dp))
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = if (playbackState == androidx.media3.common.Player.STATE_BUFFERING)
+                    "라이브 방송 연결 중" else "실시간 라디오 · 채널 변경은 이전/다음 버튼",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(100.dp))
         }
     }
 }
