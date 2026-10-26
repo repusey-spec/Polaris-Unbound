@@ -10,7 +10,7 @@ old = '''                        "polaris:radio" -> {
                             emptyList()
                         }'''
 new = '''                        "polaris:radio" -> {
-                            RadioCatalog.stations.map { station ->
+                            PolarisRadioLayout(context).slots().filterNotNull().mapNotNull(RadioCatalog::find).map { station ->
                                 MediaItem.Builder()
                                     .setMediaId("polaris:station:" + station.id)
                                     .setMediaMetadata(
@@ -43,6 +43,7 @@ pkg = "package app.hush.music.playback\n"
 assert s.count(pkg) == 1
 s = s.replace(pkg, pkg + """
 import app.hush.music.polaris.RadioCatalog
+import app.hush.music.polaris.PolarisRadioLayout
 import app.hush.music.polaris.PolarisRadioStreams
 import app.hush.music.polaris.PolarisRadioResolver
 import app.hush.music.polaris.PolarisRadioPlayback

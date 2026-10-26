@@ -2,6 +2,7 @@ package app.hush.music.polaris
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,7 +31,7 @@ fun PolarisRadioScreen(navController: NavHostController) {
     val scope = rememberCoroutineScope()
     var radioError by remember { mutableStateOf<String?>(null) }
 
-    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp).statusBarsPadding().padding(top = 64.dp, bottom = 8.dp)) {
         radioError?.let { Text(it) }
         PolarisRadioGrid(
             layout = PolarisRadioLayout(context),
@@ -48,6 +49,7 @@ fun PolarisRadioScreen(navController: NavHostController) {
                     if (player == null) {
                         radioError = "재생 서비스에 연결되지 않았습니다."
                     } else {
+                        PolarisRadioNetwork.radioActive = true
                         player.setMediaItem(item)
                         player.prepare()
                         player.play()
