@@ -84,11 +84,21 @@ jobs:
           "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/polaris-apk-signer.txt
           echo "Expected pinned cert SHA256: $EXPECTED_CERT"
           grep -Fi "$EXPECTED_CERT" /tmp/polaris-apk-signer.txt
+      - name: Rename verified APK to end with build number
+        run: |
+          set -euo pipefail
+          APK_DIR="$RUNNER_TEMP/hush/app/build/outputs/apk/gmsMobileArm64/debug"
+          ORIGINAL_APK=$(find "$APK_DIR" -maxdepth 1 -type f -name '*.apk' -print -quit)
+          test -n "$ORIGINAL_APK"
+          TARGET_APK="$APK_DIR/Polaris_Build_${GITHUB_RUN_NUMBER}.apk"
+          mv "$ORIGINAL_APK" "$TARGET_APK"
+          test -s "$TARGET_APK"
+          echo "Final APK name: $(basename "$TARGET_APK")"
       - name: Upload APK only if compile succeeds
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Polaris-Hush-radio-integration-debug
-          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/*.apk
+          name: Polaris-Build-${{ github.run_number }}
+          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/Polaris_Build_*.apk
           if-no-files-found: error
           retention-days: 7
