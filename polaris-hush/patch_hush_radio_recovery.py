@@ -14,6 +14,8 @@ def replace_once(before, after):
 
 replace_once(
     "    @Inject\n    lateinit var database: MusicDatabase",
+    "    private val polarisRadioLoadErrorPolicy =\n"
+    "        app.hush.music.polaris.PolarisRadioLoadErrorPolicy()\n"
     "    private val polarisRadioRecovery by lazy {\n"
     "        app.hush.music.polaris.PolarisRadioRecovery(player)\n"
     "    }\n\n"
@@ -23,6 +25,8 @@ replace_once(
 replace_once(
     "        super.onMediaItemTransition(mediaItem, reason)",
     "        super.onMediaItemTransition(mediaItem, reason)\n"
+    "        polarisRadioLoadErrorPolicy.radioActive =\n"
+    "            mediaItem?.mediaId?.startsWith(\"polaris:station:\") == true\n"
     "        polarisRadioRecovery.onItemTransition(mediaItem)"
 )
 replace_once(
@@ -54,5 +58,18 @@ replace_once(
     "        if (this::player.isInitialized) polarisRadioRecovery.dispose()\n"
     "        super.onDestroy()"
 )
+replace_once(
+    "    private fun createMediaSourceFactory() =\n"
+    "        DefaultMediaSourceFactory(\n"
+    "            createDataSourceFactory(),\n"
+    "            DefaultExtractorsFactory(),\n"
+    "        )",
+    "    private fun createMediaSourceFactory() =\n"
+    "        DefaultMediaSourceFactory(\n"
+    "            createDataSourceFactory(),\n"
+    "            DefaultExtractorsFactory(),\n"
+    "        ).setLoadErrorHandlingPolicy(polarisRadioLoadErrorPolicy)"
+)
+
 p.write_text(s)
 print("Patched Hush Media3 service: radio-only error/reconnect lifecycle")

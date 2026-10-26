@@ -28,7 +28,6 @@ class PolarisRadioRecovery(private val player: Player) {
     private var epoch = 0L
     private var attempts = 0
     private var retryJob: Job? = null
-    private var bufferingJob: Job? = null
     private var stablePlaybackJob: Job? = null
 
     private fun activeId(): String? {
@@ -47,7 +46,6 @@ class PolarisRadioRecovery(private val player: Player) {
         epoch++
         attempts = 0
         retryJob?.cancel()
-        bufferingJob?.cancel()
         stablePlaybackJob?.cancel()
     }
 
@@ -57,7 +55,6 @@ class PolarisRadioRecovery(private val player: Player) {
         // resurrect a radio station by a scheduled network callback.
         epoch++
         retryJob?.cancel()
-        bufferingJob?.cancel()
         stablePlaybackJob?.cancel()
     }
 
@@ -65,7 +62,6 @@ class PolarisRadioRecovery(private val player: Player) {
         stablePlaybackJob?.cancel()
         if (!playing || activeId() == null) return
         retryJob?.cancel()
-        bufferingJob?.cancel()
         val capturedEpoch = epoch
         stablePlaybackJob = scope.launch {
             delay(15_000)
@@ -76,24 +72,12 @@ class PolarisRadioRecovery(private val player: Player) {
     }
 
     fun onPlaybackStateChanged(state: Int) {
-        bufferingJob?.cancel()
         if (activeId() == null || !player.playWhenReady) return
-        if (state == Player.STATE_BUFFERING) {
-            val id = activeId() ?: return
-            val capturedEpoch = epoch
-            // Media3 should retry short HLS stalls within the same MediaSource.
-            // Only a sustained stall warrants a fresh broadcaster URL.
-            bufferingJob = scope.launch {
-                delay(60_000)
-                if (epoch == capturedEpoch && activeId() == id &&
-                    player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
-                ) {
-                    Log.w("PolarisRadio", "Prolonged radio buffering; refresh broadcaster source: $id")
-                    scheduleRetry(0)
-                }
-            }
-        } else if (state == Player.STATE_ENDED && player.playWhenReady) {
-            scheduleRetry(0)
+        // v0.58 does NOT replace a live HLS MediaSource just for BUFFERING.
+        // The RadioTalk load-error policy retries segment/playlist loads
+        // inside that MediaSource; only a terminal error refreshes the URL.
+        if (state == Player.STATE_ENDED) {
+            scheduleRetry(100L)
         }
     }
 

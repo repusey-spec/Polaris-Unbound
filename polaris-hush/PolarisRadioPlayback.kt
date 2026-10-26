@@ -31,7 +31,8 @@ object PolarisRadioPlayback {
             )
         // Polaris v0.58: explicitly identify HLS to ExoPlayer and target 20s
         // from live edge. Some broadcasters return an extensionless HLS URL.
-        if (url.contains(".m3u8", ignoreCase = true)) {
+        val lower = url.lowercase(java.util.Locale.US)
+        if (lower.contains(".m3u8") || lower.contains("format=m3u8") || lower.contains("protocol=hls")) {
             builder.setMimeType(MimeTypes.APPLICATION_M3U8)
                 .setLiveConfiguration(
                     MediaItem.LiveConfiguration.Builder()
