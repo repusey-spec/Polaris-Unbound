@@ -29,6 +29,8 @@ class PolarisRadioRecovery(private val player: Player) {
     private var attempts = 0
     private var retryJob: Job? = null
     private var stablePlaybackJob: Job? = null
+    @Volatile var isRecovering: Boolean = false
+        private set
 
     private fun activeId(): String? {
         val mediaId = player.currentMediaItem?.mediaId ?: return null
@@ -43,6 +45,7 @@ class PolarisRadioRecovery(private val player: Player) {
             ?.takeIf { RadioCatalog.find(it) != null }
         if (newId == stationId) return
         stationId = newId
+        isRecovering = false
         epoch++
         attempts = 0
         retryJob?.cancel()
@@ -51,6 +54,7 @@ class PolarisRadioRecovery(private val player: Player) {
 
     fun onPlayWhenReadyChanged(ready: Boolean) {
         if (ready) return
+        isRecovering = false
         // A manual pause, loss of focus, or switching to Streaming must not
         // resurrect a radio station by a scheduled network callback.
         epoch++
@@ -61,6 +65,7 @@ class PolarisRadioRecovery(private val player: Player) {
     fun onIsPlayingChanged(playing: Boolean) {
         stablePlaybackJob?.cancel()
         if (!playing || activeId() == null) return
+        isRecovering = false
         retryJob?.cancel()
         val capturedEpoch = epoch
         stablePlaybackJob = scope.launch {
@@ -85,6 +90,7 @@ class PolarisRadioRecovery(private val player: Player) {
     fun onPlayerError(): Boolean {
         val id = activeId() ?: return false
         if (player.playWhenReady) {
+            isRecovering = true
             Log.w("PolarisRadio", "Terminal player error, refreshing source: $id")
             scheduleRetry(if (PolarisRadioResolver.needsResolution(id)) 100L else 750L)
         }
@@ -128,6 +134,7 @@ class PolarisRadioRecovery(private val player: Player) {
     }
 
     fun dispose() {
+        isRecovering = false
         scope.cancel()
     }
 }
