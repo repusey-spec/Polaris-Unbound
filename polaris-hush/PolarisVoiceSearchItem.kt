@@ -6,14 +6,11 @@ import androidx.media3.common.MediaMetadata
 /** Browser/search metadata only. Playback URLs are resolved on selection. */
 object PolarisVoiceSearchItem {
     fun mediaItem(id: String): MediaItem {
-        val station = RadioCatalog.find(id) ?: error("Unknown Polaris station")
+        require(RadioCatalog.find(id) != null) { "Unknown Polaris station" }
         return MediaItem.Builder()
             .setMediaId("polaris:station:" + id)
             .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(station.title)
-                    .setArtist("Polaris Radio")
-                    .setIsPlayable(true)
+                PolarisRadioMetadata.mediaMetadata(id).buildUpon()
                     .setIsBrowsable(false)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .build()

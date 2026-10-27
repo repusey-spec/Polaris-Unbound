@@ -18,17 +18,11 @@ object PolarisRadioPlayback {
         }
 
     fun mediaItem(id: String, url: String): MediaItem {
-        val station = RadioCatalog.find(id) ?: error("Unknown radio station $id")
+        require(RadioCatalog.find(id) != null) { "Unknown radio station $id" }
         val builder = MediaItem.Builder()
             .setMediaId("polaris:station:$id")
             .setUri(url)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(station.title)
-                    .setArtist("Polaris Radio")
-                    .setIsPlayable(true)
-                    .build()
-            )
+            .setMediaMetadata(PolarisRadioMetadata.mediaMetadata(id))
         // Polaris v0.58: explicitly identify HLS to ExoPlayer and target 20s
         // from live edge. Some broadcasters return an extensionless HLS URL.
         val lower = url.lowercase(java.util.Locale.US)

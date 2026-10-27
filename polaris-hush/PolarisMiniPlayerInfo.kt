@@ -2,6 +2,7 @@ package app.hush.music.polaris
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -69,6 +70,12 @@ fun RowScope.PolarisRadioNowPlaying(
     stationId: String,
     colors: MiniPlayerContentColors,
 ) {
+    // A restored dormant playlist entry must not advertise 89.1 as the
+    // current station until real radio playback has actually happened.
+    if (!PolarisRadioUiSession.hasStartedRadio) {
+        Spacer(modifier = Modifier.weight(1f))
+        return
+    }
     val context = LocalContext.current
     val station = RadioCatalog.find(stationId)?.title ?: CurrentProgramResolver.stationName(stationId)
     var programme by remember(stationId) { mutableStateOf("LIVE") }

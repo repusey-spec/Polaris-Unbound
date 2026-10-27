@@ -1,6 +1,7 @@
 package app.hush.music.polaris
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,6 +10,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -22,8 +24,9 @@ import app.hush.music.ui.screens.Screens
 @Composable
 fun PolarisTopTabs(navController: NavHostController, currentRoute: String?) {
     val isRadio = currentRoute == "polaris_radio"
+    Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
     Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Button(
@@ -58,5 +61,18 @@ fun PolarisTopTabs(navController: NavHostController, currentRoute: String?) {
                                else MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         ) { Text("Streaming") }
+    }
+    // User-requested settings link lives directly beneath the Radio/Streaming selector.
+    // Hush's header icons are suppressed only on Streaming's Home route.
+    if (currentRoute == Screens.ROUTE_HOME) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = { navController.navigate(Screens.ROUTE_SETTINGS) }) {
+                Text("설정하기")
+            }
+        }
+    }
     }
 }

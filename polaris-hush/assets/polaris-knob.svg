@@ -18,8 +18,10 @@
 <ellipse cx="256" cy="203" rx="137" ry="72" fill="url(#topShine)" stroke="#edf2f8" stroke-width="5"/>
 <ellipse cx="256" cy="199" rx="127" ry="63" fill="url(#glass)" stroke="#060a10" stroke-width="4"/>
 <path d="M160 190 Q188 148 263 144 Q326 145 356 178" fill="none" stroke="#ffffff" stroke-opacity=".34" stroke-width="3" stroke-linecap="round"/>
+<g transform="translate(31 0)">
 <path d="M183 187 L183 220 L222 204 Z" fill="none" stroke="#e8edf7" stroke-width="8" stroke-linejoin="round"/>
 <path d="M245 185 L245 220 M268 185 L268 220" stroke="#e8edf7" stroke-width="8" stroke-linecap="round"/>
+</g>
 <path d="M113 222 Q129 245 176 255" stroke="#fff" opacity=".45" fill="none" stroke-width="3"/>
 <path d="M331 256 Q377 249 400 227" stroke="#fff" opacity=".3" fill="none" stroke-width="3"/>
 </svg>
