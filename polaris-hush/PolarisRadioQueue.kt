@@ -25,6 +25,8 @@ class PolarisRadioQueue(
     private val scope: CoroutineScope,
 ) {
     private var serial = 0L
+    private var observedStation: String? = null
+    private var observedIndex = -1
     private var resolveJob: Job? = null
     private val placeholderAuthority = "polaris.invalid"
 
@@ -40,9 +42,15 @@ class PolarisRadioQueue(
     }
 
     fun onTransition(item: MediaItem?) {
-        ++serial
-        resolveJob?.cancel()
-        val id = radioId(item) ?: return
+        val id = radioId(item)
+        val currentIndex = player.currentMediaItemIndex
+        if (id != observedStation || currentIndex != observedIndex) {
+            ++serial
+            resolveJob?.cancel()
+            observedStation = id
+            observedIndex = currentIndex
+        }
+        if (id == null) return
         val order = PolarisRadioLayout(context).slots().filterNotNull()
         if (player.mediaItemCount == 1 && order.size > 1) {
             val selected = order.indexOf(id)
