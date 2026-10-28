@@ -116,8 +116,20 @@ once(service,
                 listOf(''',
     '''            val customLayout =
                 if (player.currentMediaItem?.mediaId?.startsWith("polaris:station:") == true) {
-                    emptyList()
-                } else listOf(''',
+                    // Only the mode switch remains; no Like/Repeat/Shuffle/Add in Radio.
+                    listOf(
+                        CommandButton.Builder()
+                            .setDisplayName("Streaming")
+                            .setIconResId(R.drawable.music_note)
+                            .setSessionCommand(app.hush.music.polaris.PolarisAAModeCommand.command)
+                            .build()
+                    )
+                } else listOf(
+                    CommandButton.Builder()
+                        .setDisplayName("Radio")
+                        .setIconResId(R.drawable.radio)
+                        .setSessionCommand(app.hush.music.polaris.PolarisAAModeCommand.command)
+                        .build(),''',
     "hide music-only custom actions during live radio")
 
 # A Media3 playlist is the source of the native AA queue button; attach all
@@ -140,4 +152,107 @@ once(service,
 ''',
     "populate queue and refresh button layout on media transition")
 
-print("Build 49: AA thumbnail Streaming home + radio queue + reciprocal browse links + radio-only controls")
+
+# Publish a single source-switch command to Android Auto. It changes the
+# selected playback source, not the Android Auto host's browse-page routing.
+once(callback,
+    '''        var toggleLike: () -> Unit = {}''',
+    '''        var onPolarisModeSwitch: () -> Unit = {}
+        var toggleLike: () -> Unit = {}''',
+    "AA mode switch callback")
+once(callback,
+    '''                    .add(MediaSessionConstants.CommandToggleLike)''',
+    '''                    .add(app.hush.music.polaris.PolarisAAModeCommand.command)
+                    .add(MediaSessionConstants.CommandToggleLike)''',
+    "AA switch command permissions")
+once(callback,
+    '''            when (customCommand.customAction) {
+                MediaSessionConstants.ACTION_TOGGLE_LIKE -> {''',
+    '''            when (customCommand.customAction) {
+                app.hush.music.polaris.PolarisAAModeCommand.ACTION -> {
+                    onPolarisModeSwitch()
+                }
+                MediaSessionConstants.ACTION_TOGGLE_LIKE -> {''',
+    "AA mode switch action")
+once(callback,
+    '''        internal suspend fun resolveVoiceMediaItems(''',
+    '''        internal suspend fun firstPolarisStreamingItem(): MediaItem? =
+            database.quickPicks().first().firstOrNull()
+                ?.toMediaItem(MusicService.HOME_QUICK_PICKS)
+                ?: database.recentSongs(16).first().firstOrNull()
+                    ?.toMediaItem(MusicService.RECENT)
+
+        internal suspend fun resolveVoiceMediaItems(''',
+    "Hush cached streaming recommendation for first mode switch")
+
+# A mode switch must have an actual playback action. Remember the previously
+# selected music item and radio station rather than resetting the user to 89.1.
+once(service,
+    '''            toggleLike = ::toggleLike''',
+    '''            onPolarisModeSwitch = ::switchPolarisMode
+            toggleLike = ::toggleLike''',
+    "wire AA switch to MusicService")
+
+mode_methods = """
+    private var polarisLastStreamingItem: MediaItem? = null
+    private var polarisLastRadioId: String? = null
+
+    private fun switchPolarisMode() {
+        val currentId = player.currentMediaItem?.mediaId.orEmpty()
+        if (currentId.startsWith("polaris:station:")) {
+            scope.launch {
+                val saved = polarisLastStreamingItem
+                    ?: withContext(Dispatchers.IO) {
+                        mediaLibrarySessionCallback.firstPolarisStreamingItem()
+                    }
+                if (saved == null) {
+                    app.hush.music.polaris.PolarisRadioDiagnostics.record(
+                        this@MusicService, "AA Streaming switch: no songs available"
+                    )
+                    return@launch
+                }
+                playQueue(ListQueue(items = listOf(saved)))
+            }
+        } else {
+            val radioId = polarisLastRadioId ?: "kr1"
+            scope.launch {
+                try {
+                    val url = withContext(Dispatchers.IO) {
+                        app.hush.music.polaris.PolarisRadioPlayback.resolveUrl(radioId)
+                    }
+                    app.hush.music.polaris.PolarisRadioNetwork.radioActive = true
+                    player.setMediaItem(
+                        app.hush.music.polaris.PolarisRadioPlayback.mediaItem(radioId, url)
+                    )
+                    player.prepare()
+                    player.play()
+                } catch (error: Exception) {
+                    app.hush.music.polaris.PolarisRadioDiagnostics.record(
+                        this@MusicService,
+                        "AA Radio switch failed=" + error.javaClass.simpleName
+                    )
+                }
+            }
+        }
+    }
+
+"""
+once(service,
+    '''    private fun createMediaSourceFactory() =''',
+    mode_methods + '''    private fun createMediaSourceFactory() =''',
+    "remember actual radio and streaming playback source")
+
+once(service,
+    '''        polarisRadioQueue.onTransition(mediaItem)
+        // Recalculate AA custom commands when Radio/Streaming changes.''',
+    '''        polarisRadioQueue.onTransition(mediaItem)
+        val changedId = mediaItem?.mediaId
+        if (changedId?.startsWith("polaris:station:") == true) {
+            polarisLastRadioId = changedId.removePrefix("polaris:station:")
+        } else if (mediaItem != null && mediaItem.mediaMetadata.isPlayable == true) {
+            polarisLastStreamingItem = mediaItem
+        }
+        // Recalculate AA custom commands when Radio/Streaming changes.''',
+    "capture source for reciprocal AA mode switch")
+
+print("Build 49: AA thumbnail Streaming home + radio queue + reciprocal browse links + mode-switch actions")
