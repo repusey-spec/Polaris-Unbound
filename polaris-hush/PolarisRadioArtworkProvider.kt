@@ -54,9 +54,9 @@ class PolarisRadioArtworkProvider : ContentProvider() {
         if (!dir.isDirectory && !dir.mkdirs()) {
             throw FileNotFoundException("Unable to create artwork directory")
         }
-        val file = File(dir, "$"+"{stationId}.png")
+        val file = File(dir, stationId + ".png")
         if (!file.isFile || file.length() == 0L) {
-            val temp = File(dir, "$"+"{stationId}.tmp")
+            val temp = File(dir, stationId + ".tmp")
             try {
                 temp.outputStream().use { out ->
                     if (!StationArt.bitmap(ctx, stationId, 256)
