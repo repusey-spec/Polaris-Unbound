@@ -19,6 +19,7 @@ workflow_manifest = (root / "app/src/main/AndroidManifest.xml").read_text()
 checks = {
     "no nested Build49 queue injection": "polarisRadioQueue.onTransition(" not in service,
     "no queue helper installed": "private val polarisRadioQueue" not in service,
+    "unsafe queue class absent from APK source": not (base / "polaris/PolarisRadioQueue.kt").exists(),
     "radio keeps direct Media3 single item playback": "player.setMediaItem(item)" in radio,
     "radio uses freshly resolved stream": "PolarisRadioPlayback.resolveUrl(id)" in radio,
     "radio playback sets live station URI": '.setUri(url)' in playback,
