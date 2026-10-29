@@ -98,16 +98,11 @@ once(
     "browse shuffled unsynced music",
 )
 # Resolve selected remote tracks in browsed playlists, not just DB rows.
-once(
-    '                            database.song(songId).first()?.toMediaItem(mediaId.substringBeforeLast(\'/\'))',
-    '                            polarisPlaylistSongItem(playlistId, songId, mediaId.substringBeforeLast(\'/\'))',
-    "selected shuffled song fallback",
-)
-once(
-    '                            database.song(songId).first()?.toMediaItem(mediaId.substringBeforeLast(\'/\'))',
-    '                            polarisPlaylistSongItem(playlistId, songId, mediaId.substringBeforeLast(\'/\'))',
-    "selected sorted song fallback",
-)
+# Both shuffled and sorted selection branches use the identical Hush lookup.
+old_selected = '                            database.song(songId).first()?.toMediaItem(mediaId.substringBeforeLast(\'/\'))'
+new_selected = '                            polarisPlaylistSongItem(playlistId, songId, mediaId.substringBeforeLast(\'/\'))'
+assert s.count(old_selected) == 2, "expected both shuffled and sorted paths"
+s = s.replace(old_selected, new_selected)
 once(
     '                    database.song(songId).first()?.toMediaItem(mediaId.substringBeforeLast(\'/\'))',
     '                    polarisPlaylistSongItem(playlistId, songId, mediaId.substringBeforeLast(\'/\'))',
