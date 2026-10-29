@@ -179,4 +179,28 @@ once(service,
 ''',
     "publish switch control as AA media button preference")
 
+
+# Avoid duplicate slow URL resolutions; queue builder already resolves selected.
+once(radio,
+    '''                    val url = try {
+                        withContext(Dispatchers.IO) { PolarisRadioPlayback.resolveUrl(id) }
+                    } catch (e: Exception) {
+                        radioError = "라디오 주소 확인 실패: ${e.message}"
+                        return@launch
+                    }
+''',
+    "",
+    "remove duplicate grid URL lookup")
+once(service,
+    '''                val url = withContext(Dispatchers.IO) {
+                    app.hush.music.polaris.PolarisRadioPlayback.resolveUrl(next)
+                }
+                if (serial != polarisSkipSerial ||
+                    player.currentMediaItem?.mediaId != "polaris:station:" + currentId) {
+                    return@launch
+                }
+''',
+    "",
+    "remove duplicate tuner URL lookup")
+
 print("Build 53: safe AA 13-station queue + reciprocal playback mode control + no giant browse shortcut")
