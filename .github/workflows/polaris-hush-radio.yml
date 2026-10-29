@@ -67,14 +67,17 @@ jobs:
           rm -f "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/PolarisRadioQueue.kt"  # Build 49 rollback
           python3 polaris-hush/patch_hush_playlists51.py "$RUNNER_TEMP/hush"
           python3 polaris-hush/patch_hush_playback51.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_aa53.py "$RUNNER_TEMP/hush"
           mkdir -p "$RUNNER_TEMP/hush/app/src/main/java/app/hush/music/polaris"
           cp polaris-hush/StationArt.java polaris-hush/CurrentProgramResolver.java "$RUNNER_TEMP/hush/app/src/main/java/app/hush/music/polaris/"
           sed -i '/implementation(libs.guava)/a\    implementation("org.jsoup:jsoup:1.18.3")' "$RUNNER_TEMP/hush/app/build.gradle.kts"
-          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py polaris-hush/patch_hush_mini_player.py polaris-hush/patch_hush_branding.py polaris-hush/patch_hush_radio_recovery.py polaris-hush/patch_hush_radio_network.py polaris-hush/patch_hush_radio_transport.py polaris-hush/patch_hush_radio_projection.py polaris-hush/patch_hush_icon.py polaris-hush/patch_hush_ui42.py polaris-hush/patch_hush_voice.py polaris-hush/patch_hush_ui47.py polaris-hush/patch_hush_radio_art48.py polaris-hush/patch_hush_aa49.py polaris-hush/patch_hush_aa50.py polaris-hush/verify_hush_aa50.py polaris-hush/patch_hush_playlists51.py polaris-hush/patch_hush_playback51.py polaris-hush/verify_hush_playlists51.py
+          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py polaris-hush/patch_hush_mini_player.py polaris-hush/patch_hush_branding.py polaris-hush/patch_hush_radio_recovery.py polaris-hush/patch_hush_radio_network.py polaris-hush/patch_hush_radio_transport.py polaris-hush/patch_hush_radio_projection.py polaris-hush/patch_hush_icon.py polaris-hush/patch_hush_ui42.py polaris-hush/patch_hush_voice.py polaris-hush/patch_hush_ui47.py polaris-hush/patch_hush_radio_art48.py polaris-hush/patch_hush_aa49.py polaris-hush/patch_hush_aa50.py polaris-hush/verify_hush_aa50.py polaris-hush/patch_hush_playlists51.py polaris-hush/patch_hush_playback51.py polaris-hush/verify_hush_playlists51.py polaris-hush/patch_hush_aa53.py polaris-hush/verify_hush_aa53.py
       - name: Verify Build 50 radio playback and AA feature guards
         run: python3 polaris-hush/verify_hush_aa50.py "$RUNNER_TEMP/hush"
       - name: Verify Build 51 playlist and playback request guards
         run: python3 polaris-hush/verify_hush_playlists51.py "$RUNNER_TEMP/hush"
+      - name: Verify Build 53 AA radio queue and mode-switch safety
+        run: python3 polaris-hush/verify_hush_aa53.py "$RUNNER_TEMP/hush"
       - name: Compile original Hush with Polaris radio
         working-directory: ${{ runner.temp }}/hush
         run: |
