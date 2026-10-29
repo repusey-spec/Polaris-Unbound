@@ -42,7 +42,7 @@ object PolarisRadioQueueBuilder {
             }.awaitAll()
         }
         val items = stationItems.mapNotNull { it.second }
-        val index = items.indexOfFirst { it.mediaId == "polaris:station:$"+"selectedId" }
+        val index = items.indexOfFirst { it.mediaId == "polaris:station:" + selectedId }
         check(index >= 0) { "Selected radio station has no playable stream" }
         if (items.size != ordered.size) {
             PolarisRadioDiagnostics.record(
