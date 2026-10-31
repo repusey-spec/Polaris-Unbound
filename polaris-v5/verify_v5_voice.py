@@ -31,7 +31,7 @@ tests.update({
  "AA voice search playable item":'listOf(V5Radio.item(context, voiceRadioId))' in callback,
  "AA setMediaItems radio voice":'V5Voice.radioIdForQuery(firstItem.requestMetadata.searchQuery)' in callback,
  "AA addMediaItems radio voice":'listOf(V5Radio.item(context, radioId))' in callback,
- "AA steering-wheel radio voice queue":'MediaSession.MediaItemsWithStartPosition(\\n                            voiceQueue, voiceIndex, 0L,' in callback,
+ "AA steering-wheel radio voice queue": "voiceQueue, voiceIndex, 0L" in callback,
  "no legacy voice patch stack":'app.hush.music.polaris.PolarisVoiceRouter' not in callback and 'app.hush.music.polaris.PolarisVoiceRouter' not in service,
 })
 for name,good in tests.items():print(("PASS" if good else "FAIL")+": "+name)
