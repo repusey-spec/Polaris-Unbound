@@ -134,10 +134,12 @@ add_replacement='''                    .flatMap { item ->
                         val query =
                             item.requestMetadata.searchQuery'''
 once(add_anchor,add_replacement,"radio onAddMediaItems resolves source URL")
-add_close='''                            resolved.ifEmpty { listOf(item) }
+add_close='''                                resolved.ifEmpty { listOf(item) }
+                            }
                         }
                     }.toMutableList()'''
-add_close_new='''                            resolved.ifEmpty { listOf(item) }
+add_close_new='''                                resolved.ifEmpty { listOf(item) }
+                            }
                         }
                         }
                     }.toMutableList()'''
