@@ -36,6 +36,6 @@ g=g.replace(signing_anchor,'''        getByName("debug") {
 # label/versionName stay unchanged; only this isolated experiment is affected.
 version_anchor='versionCode = 177'
 assert g.count(version_anchor)==1, "Pinned upstream Hush versionCode changed"
-g=g.replace(version_anchor, 'versionCode = 100000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)')
+g=g.replace(version_anchor, 'versionCode = 100000 + (System.getenv("POLARIS_BUILD_NUMBER")?.toIntOrNull() ?: System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)')
 gradle.write_text(g)
 print("Polaris label, isolated package ID, persistent signing and increasing versionCode patched")
