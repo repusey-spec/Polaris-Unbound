@@ -227,7 +227,8 @@ g=replace_unique(g,'    implementation(libs.guava)\n','    implementation(libs.g
 gradle.write_text(g)
 
 m=manifest.read_text()
-m=replace_unique(m,'android:label="@string/app_name"','android:label="Polaris v5"',"v5 launcher label")
+assert m.count('android:label="@string/app_name"') >= 1
+m=m.replace('android:label="@string/app_name"','android:label="Polaris v5"')
 provider = """        <provider
             android:name="app.hush.music.polarisv5.V5StationArtProvider"
             android:authorities="\u0024{applicationId}.v5art"
