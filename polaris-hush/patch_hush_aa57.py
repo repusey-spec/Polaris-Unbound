@@ -146,29 +146,6 @@ add_close_new='''                                resolved.ifEmpty { listOf(item)
 once(add_close,add_close_new,"radio add branch braces")
 callback.write_text(s)
 
-# Make a radio/streaming mode switch use the same validated radio queue as
-# direct AA station selection, instead of the obsolete one-item radio path.
-service_s=service.read_text()
-radio_old='''                    val url = withContext(Dispatchers.IO) {
-                        app.hush.music.polaris.PolarisRadioPlayback.resolveUrl(radioId)
-                    }
-                    if (!app.hush.music.polaris.PolarisPlaybackRequestGate.isCurrent(request)) {
-                        return@launch
-                    }
-                    app.hush.music.polaris.PolarisRadioNetwork.radioActive = true
-                    player.setMediaItem(
-                        app.hush.music.polaris.PolarisRadioPlayback.mediaItem(radioId, url)
-                    )
-                    player.prepare()'''
-radio_new='''                    val selectedQueue = withContext(Dispatchers.IO) {
-                        app.hush.music.polaris.PolarisRadioQueueBuilder.build(this@MusicService, radioId)
-                    }
-                    if (!app.hush.music.polaris.PolarisPlaybackRequestGate.isCurrent(request)) {
-                        return@launch
-                    }
-                    app.hush.music.polaris.PolarisRadioNetwork.radioActive = true
-                    player.setMediaItems(selectedQueue.items, selectedQueue.index, 0L)
-                    player.prepare()'''
-assert service_s.count(radio_old)==1,"mode switch playback anchor mismatch"
-service.write_text(service_s.replace(radio_old,radio_new,1))
-print("Build57: AA Radio getItem + playlist browse-only folders + playable streaming fallback + addItem + validated radio switch")
+# Build53 already routes AA source switch through PolarisRadioQueueBuilder.
+# Do not patch that path a second time.
+print("Build57: radio getItem + playlist browse-only + playable fallback + radio addMediaItems")
