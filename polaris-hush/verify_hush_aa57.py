@@ -16,7 +16,7 @@ checks={
     "radio-to-streaming fallback is playable":'internal suspend fun firstPolarisStreamingItem()' in cb and '?.toMediaItem(MusicService.HOME_QUICK_PICKS)' not in cb,
     "radio switch builds queue with valid URIs":'PolarisRadioQueueBuilder.build(this@MusicService, radioId)' in svc and 'player.setMediaItems(selectedQueue.items, selectedQueue.index, 0L)' in svc,
     "Radio and Streaming custom command remains":'setDisplayName("Streaming")' in svc and 'setDisplayName("Radio")' in svc,
-    "previously requested Polaris branding remains":(root.parent.parent/"res/drawable/small_icon.xml").exists(),
+    "previously requested Polaris branding remains":(root.parents[3]/"res/drawable/small_icon.xml").exists(),
 }
 for label,ok in checks.items():
     print(("PASS" if ok else "FAIL")+": "+label)
