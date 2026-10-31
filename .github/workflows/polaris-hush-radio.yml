@@ -20,6 +20,13 @@ jobs:
           java-version: '21'
       - uses: android-actions/setup-android@v4
       - uses: gradle/actions/setup-gradle@v4
+      - name: Assign install build number (CI retry of 57)
+        run: |
+          if [ "$GITHUB_RUN_NUMBER" = "59" ]; then
+            echo "POLARIS_BUILD_NUMBER=57" >> "$GITHUB_ENV"
+          else
+            echo "POLARIS_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          fi
       - name: Checkout pinned full Hush
         run: |
           git clone --depth 1 --branch v13.14.7 --recurse-submodules https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush"
@@ -100,7 +107,7 @@ jobs:
           "$AAPT" dump badging "$APK" | tee /tmp/polaris-apk-badging.txt | grep -E "^(package:|application-label:)"
           grep -Fx "application-label:'Polaris'" /tmp/polaris-apk-badging.txt
           grep -F "name='app.hush.music.polarisradio.debug'" /tmp/polaris-apk-badging.txt
-          EXPECTED_CODE=$((100000 + GITHUB_RUN_NUMBER))
+          EXPECTED_CODE=$((100000 + POLARIS_BUILD_NUMBER))
           grep -F "versionCode='$EXPECTED_CODE'" /tmp/polaris-apk-badging.txt
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           EXPECTED_CERT=$(keytool -exportcert -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug | sha256sum | awk '{print $1}')
@@ -113,7 +120,7 @@ jobs:
           APK_DIR="$RUNNER_TEMP/hush/app/build/outputs/apk/gmsMobileArm64/debug"
           ORIGINAL_APK=$(find "$APK_DIR" -maxdepth 1 -type f -name '*.apk' -print -quit)
           test -n "$ORIGINAL_APK"
-          TARGET_APK="$APK_DIR/Polaris_Build_${GITHUB_RUN_NUMBER}.apk"
+          TARGET_APK="$APK_DIR/Polaris_Build_${POLARIS_BUILD_NUMBER}.apk"
           mv "$ORIGINAL_APK" "$TARGET_APK"
           test -s "$TARGET_APK"
           echo "Final APK name: $(basename "$TARGET_APK")"
