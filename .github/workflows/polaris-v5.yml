@@ -45,10 +45,12 @@ jobs:
           python3 -m pip install --quiet --disable-pip-version-check pillow cairosvg
           base64 -d polaris-v5/v5-debug-keystore.b64 > "$RUNNER_TEMP/hush/polaris-v5-debug.keystore"
           keytool -list -keystore "$RUNNER_TEMP/hush/polaris-v5-debug.keystore" -storepass android -alias polarisdebug >/dev/null
-          python3 -m py_compile polaris-v5/patch_v5.py polaris-v5/icons_v5.py polaris-v5/verify_v5.py
+          python3 -m py_compile polaris-v5/patch_v5.py polaris-v5/icons_v5.py polaris-v5/verify_v5.py polaris-v5/patch_v5_voice.py polaris-v5/verify_v5_voice.py
           python3 polaris-v5/patch_v5.py "$RUNNER_TEMP/hush"
+          python3 polaris-v5/patch_v5_voice.py "$RUNNER_TEMP/hush"
           python3 polaris-v5/icons_v5.py "$RUNNER_TEMP/hush"
           python3 polaris-v5/verify_v5.py "$RUNNER_TEMP/hush"
+          python3 polaris-v5/verify_v5_voice.py "$RUNNER_TEMP/hush"
       - name: Compile Polaris v5 APK
         working-directory: ${{ runner.temp }}/hush
         run: |
