@@ -16,7 +16,7 @@ for name in ("RadioPresets","CurrentProgramResolver","StationArt"):
     source=repo/f"app/src/main/java/com/polarisunbound/app/{name}.java"
     checks["v0.58 preserved "+name] = dest.read_bytes()==source.read_bytes()
 checks.update({
-    "pinned Hush v13.14.8":'13.14.8' not in gradle and 'versionName = "5.0.0"' in gradle,
+    "pinned Hush v13.14.8":'versionName = "5.0.0"' in gradle and 'versionCode = 500000 +' in gradle,
     "separate v5 package":'applicationIdSuffix = ".polarisv5"' in gradle,
     "two AA browse roots":'V5Radio.ROOT -> V5Radio.browse(context)' in cb and 'V5Radio.STREAMING -> {' in cb,
     "native AA 13-station queue":'val radioQueue = V5Radio.queue(context)' in cb,
