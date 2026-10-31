@@ -19,14 +19,14 @@ source = source.replace(needle, '''                        MusicService.ROOT -> 
                                     "polaris:radio",
                                     "Radio",
                                     null,
-                                    drawableUri(R.drawable.radio),
+                                    null, // Vehicle UI: no decorative icon above Radio
                                     MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
                                 ),
                                 browsableMediaItem(
                                     "polaris:streaming",
                                     "Streaming",
                                     null,
-                                    drawableUri(R.drawable.playlist_play),
+                                    null, // Vehicle UI: no decorative icon above Streaming
                                     MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
                                 ),
                             )
