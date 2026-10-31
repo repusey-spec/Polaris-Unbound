@@ -37,6 +37,38 @@ for density, (launcher_px, fg_px) in sizes.items():
     b.save(out / "ic_launcher_round.png")
     Image.new("RGBA",(launcher_px,launcher_px),(17,23,32,255)).save(out / "ic_launcher_background.png")
 
+# The Android Auto dashboard/mini media card may use the notification small
+# icon rather than the launcher icon. Give both resource names a real Polaris
+# monochrome mark (white silhouette on transparent background), not a color
+# adaptive launcher foreground or the old Hush white vector.
+base_alpha = knob.getchannel("A")
+bbox = base_alpha.getbbox()
+assert bbox is not None, "Polaris artwork has no opaque pixels"
+cropped = base_alpha.crop(bbox)
+for density, (launcher_px, _) in sizes.items():
+    size = launcher_px // 2
+    fit = max(1, int(size * 0.82))
+    scale = min(fit / cropped.width, fit / cropped.height)
+    w = max(1, int(round(cropped.width * scale)))
+    h = max(1, int(round(cropped.height * scale)))
+    mask = Image.new("L", (size, size), 0)
+    mask.paste(cropped.resize((w, h), Image.Resampling.LANCZOS), ((size - w) // 2, (size - h) // 2))
+    mark = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+    mark.putalpha(mask)
+    out = hush_root / "app/src/main/res" / ("drawable-" + density)
+    out.mkdir(parents=True, exist_ok=True)
+    mark.save(out / "polaris_notification_small.png")
+
+small_icon_xml = '''<?xml version="1.0" encoding="utf-8"?>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/polaris_notification_small"
+    android:gravity="center" />
+'''
+for name in ("small_icon.xml", "app_icon_small.xml"):
+    target = hush_root / "app/src/main/res/drawable" / name
+    assert target.is_file(), f"Missing upstream small icon: {name}"
+    target.write_text(small_icon_xml)
+
 # The adaptive XML already points to mipmap/ic_launcher_foreground.
 # Change the solid background swatch and the in-app alternative icon.
 for palette in (hush_root / "app/src/main/res").glob("values*/colors.xml"):
