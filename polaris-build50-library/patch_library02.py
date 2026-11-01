@@ -137,7 +137,8 @@ c = once(c,
 "prevent microphone action from corrupting song queue")
 
 assert c.count('"polaris:voice_search"') >= 4
-assert c.count('MusicService.PLAYLIST -> {') == 1
+browse_after = c[c.index('        override fun onGetChildren('):c.index('        override fun onGetItem(')]
+assert browse_after.count('                        MusicService.PLAYLIST -> {') == 1, "Hush original browse route duplicated"
 callback.write_text(c)
 
 s = service.read_text()
