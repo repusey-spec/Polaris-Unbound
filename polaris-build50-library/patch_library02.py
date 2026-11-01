@@ -112,13 +112,13 @@ c = c[:on_item] + after_item
 # returning the current queue would restart it, which is NOT acceptable.
 c = once(c,
 '''                val firstItem = mediaItems.firstOrNull() ?: return@future defaultResult
-                val voiceQuery =''',
+''',
 '''                val firstItem = mediaItems.firstOrNull() ?: return@future defaultResult
                 if (firstItem.mediaId == "polaris:voice_search") {
                     requestPolarisVoiceSearch()
                     throw NoPlaybackChange("voice input requested without changing playback")
                 }
-                val voiceQuery =''',
+''',
 "intercept play on microphone row and preserve audio timeline")
 
 # Car controllers can also send addMediaItems; in that case the action
