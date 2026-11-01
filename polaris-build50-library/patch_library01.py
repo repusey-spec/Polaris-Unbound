@@ -41,7 +41,7 @@ playlist_end = browse.index('\n                        else -> {\n', playlist_st
 # Hush's ORIGINAL local playlist implementation is the only source of
 # favourites, downloads and personal playlists. No new network or database logic.
 playlist_block = browse[playlist_start:playlist_end]
-assert playlist_block.endswith('                        }'), "Hush PLAYLIST boundary moved"
+assert playlist_block.rstrip().endswith('                        }'), "Hush PLAYLIST boundary moved"
 playlist_body = playlist_block[len('                        MusicService.PLAYLIST -> {\n'):]
 playlist_body, after = playlist_body.rsplit('\n                        }', 1)
 assert after.strip() == ""
