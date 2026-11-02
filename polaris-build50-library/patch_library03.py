@@ -52,7 +52,7 @@ new_func='''        private fun polarisVoiceSearchItem(): MediaItem =
          */
         private suspend fun requestPolarisVoiceSearch() {
             withContext(Dispatchers.Main.immediate) {
-                val actions = listOf(Intent.ACTION_VOICE_ASSIST, Intent.ACTION_ASSIST)
+                val actions = listOf("android.intent.action.VOICE_ASSIST", Intent.ACTION_ASSIST)
                 var requested = false
                 for (action in actions) {
                     try {
