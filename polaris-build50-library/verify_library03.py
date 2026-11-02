@@ -43,7 +43,7 @@ checks={
  'requestPolarisVoiceSearch()' in browse and
  'NoPlaybackChange("voice input requested without changing playback")' not in cb,
 "voice uses ASSIST rather than obsolete ACTION_VOICE_COMMAND":
- 'Intent.ACTION_VOICE_ASSIST' in cb and
+ '"android.intent.action.VOICE_ASSIST"' in cb and
  'Intent.ACTION_ASSIST' in cb and
  'Intent.ACTION_VOICE_COMMAND' not in cb,
 "Hush playlist entries are unmodified":
