@@ -29,8 +29,10 @@ class PolarisDownloadStore(context: Context) {
             .put("token", task.token).put("state", task.state.name)) }
         val stream = file.startWrite()
         try {
-            stream.write(rows.toString().toByteArray(Charsets.UTF_8))
+            val bytes = rows.toString().toByteArray(Charsets.UTF_8)
+            stream.write(bytes)
             file.finishWrite(stream)
+            if (!file.readFully().contentEquals(bytes)) throw java.io.IOException("download queue commit not durable")
         } catch (error: Exception) {
             file.failWrite(stream)
             PolarisErrorReport.failure("download-queue-save", error)
