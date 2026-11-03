@@ -8,6 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
@@ -18,10 +19,14 @@ import java.io.IOException
 class PolarisChunkingDataSourceTest {
     private class Source(val full: Int = 11, val known: Boolean = true) : DataSource {
         var position = 0; var end = 0; var failureAt = -1; var eofAt = -1
+        var range416Total: Int? = null
+        var changeTag = false
         val original = IOException("network read failed")
         val starts = mutableListOf<Long>()
         override fun addTransferListener(listener: TransferListener) { }
         override fun open(spec: DataSpec): Long {
+            if (spec.position >= full && range416Total != null) throw HttpDataSource.InvalidResponseCodeException(
+                416, "Range", null, mapOf("Content-Range" to listOf("bytes */$range416Total")), spec, byteArrayOf())
             position = spec.position.toInt(); end = minOf(full, position + spec.length.toInt())
             starts += spec.position
             return if (known) (end - position).toLong() else C.LENGTH_UNSET.toLong()
@@ -32,8 +37,9 @@ class PolarisChunkingDataSourceTest {
             if (position >= end) return C.RESULT_END_OF_INPUT
             buffer[offset] = position.toByte(); position++; return 1
         }
-        override fun getResponseHeaders(): Map<String, List<String>> = if (known)
-            mapOf("Content-Range" to listOf("bytes ${starts.last()}-${end - 1}/$full")) else emptyMap()
+        override fun getResponseHeaders(): Map<String, List<String>> = (if (known)
+            mapOf("Content-Range" to listOf("bytes ${starts.last()}-${end - 1}/$full")) else emptyMap()) +
+            (if (changeTag) mapOf("ETag" to listOf(if (starts.size > 1) "changed" else "original")) else emptyMap())
         override fun getUri(): Uri = Uri.parse("https://example.invalid/audio")
         override fun close() { }
     }
@@ -69,5 +75,31 @@ class PolarisChunkingDataSourceTest {
         val source = ChunkingDataSource(Source(), 4)
         source.open(request().buildUpon().setPosition(3).setLength(5).build())
         assertArrayEquals(ByteArray(5) { (it + 3).toByte() }, drain(source))
+    }
+    @Test fun explicit416TotalCanProveTheEndOfAnUnknownLengthResponse() {
+        val source = ChunkingDataSource(Source(full = 4, known = false).apply { range416Total = 4 }, 4)
+        assertEquals(-1L, source.open(request()))
+        assertArrayEquals(ByteArray(4) { it.toByte() }, drain(source))
+    }
+    @Test fun unproven416CannotHideMissingBytes() {
+        val source = ChunkingDataSource(Source(full = 4, known = false).apply { range416Total = 9 }, 4)
+        source.open(request())
+        try { drain(source); fail("still missing bytes") }
+        catch (error: HttpDataSource.InvalidResponseCodeException) { assertEquals(416, error.responseCode) }
+    }
+    @Test fun aChangedEntityIsNotConcatenatedIntoTheSameFile() {
+        val source = ChunkingDataSource(Source().apply { changeTag = true }, 4)
+        source.open(request())
+        try { drain(source); fail("entity changed") }
+        catch (error: IOException) { assertTrue(error.message!!.contains("entity changed")) }
+    }
+    @Test fun originalReadFailureIsVisibleInTheExistingExportableReport() {
+        val context = RuntimeEnvironment.getApplication()
+        PolarisErrorReport.install(context)
+        val source = ChunkingDataSource(Source().apply { failureAt = 5 }, 4)
+        source.open(request()); try { drain(source) } catch (_: IOException) { }
+        val report = PolarisErrorReport.dump(context)
+        assertTrue(report.contains("download-read id=song offset=5 expected=11"))
+        assertTrue(report.contains("network read failed"))
     }
 }

@@ -17,11 +17,15 @@ class ChunkingDataSource(private val upstream: DataSource, private val chunkSize
     private var read = 0L
     private var remainingChunk = 0L
     private var opened = false
+    private var sourceLength = -1L
+    private var entityTag: String? = null
     override fun addTransferListener(listener: TransferListener) = upstream.addTransferListener(listener)
     override fun open(dataSpec: DataSpec): Long {
         spec = dataSpec
         total = dataSpec.length
         read = 0
+        sourceLength = -1
+        entityTag = null
         opened = true
         openChunk()
         return total
@@ -35,12 +39,17 @@ class ChunkingDataSource(private val upstream: DataSource, private val chunkSize
             remainingChunk = if (length >= 0) minOf(length, count) else count
             val range = upstream.responseHeaders.entries.firstOrNull { it.key.equals("Content-Range", true) }
                 ?.value?.firstOrNull()
+            val tag = upstream.responseHeaders.entries.firstOrNull { it.key.equals("ETag", true) }?.value?.firstOrNull()
+            if (entityTag != null && tag != null && entityTag != tag) throw IOException("download entity changed between chunks")
+            if (entityTag == null) entityTag = tag
             val parsed = range?.let { Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(it.trim()) }
             if (parsed != null) {
                 val start = parsed.groupValues[1].toLong()
                 val end = parsed.groupValues[2].toLong()
                 val full = parsed.groupValues[3].toLong()
                 if (start != request.position + read || end < start || full <= end) throw IOException("invalid download range")
+                if (sourceLength >= 0 && sourceLength != full) throw IOException("download total changed between chunks")
+                sourceLength = full
                 remainingChunk = minOf(remainingChunk, end - start + 1)
                 if (total < 0) total = full - request.position
                 if (read + remainingChunk > total) throw IOException("download range exceeds expected end")
@@ -48,8 +57,14 @@ class ChunkingDataSource(private val upstream: DataSource, private val chunkSize
                 total = read + length
             }
         } catch (error: InvalidResponseCodeException) {
-            // 416 only proves EOF when we have already reached a trusted declared length.
-            if (error.responseCode == 416 && total >= 0 && read == total) remainingChunk = 0
+            val end = error.headerFields.entries.firstOrNull { it.key.equals("Content-Range", true) }?.value?.firstOrNull()
+                ?.let { Regex("bytes \\*/(\\d+)").matchEntire(it.trim()) }?.groupValues?.get(1)?.toLongOrNull()
+            // A server's explicit unsatisfied-range total can prove a clean EOF even
+            // when the initial response had no length. An unproven 416 stays an error.
+            if (error.responseCode == 416 && (total >= 0 && read == total || total < 0 && end == request.position + read)) {
+                total = read
+                remainingChunk = 0
+            }
             else { log(error); throw error }
         } catch (error: Exception) { log(error); throw error }
     }

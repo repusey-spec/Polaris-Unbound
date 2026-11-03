@@ -109,4 +109,12 @@ class PolarisSerialDownloadsTest {
         q.start(); runCurrent()
         assertFalse(transferred); assertTrue(q.snapshot().isEmpty()); q.stop()
     }
+    @Test fun aStorageFailureAtClaimTimeIsReportedWithoutStartingBytes() = runTest {
+        var writes = 0; var transferred = false; var reported: Throwable? = null
+        val q = PolarisSerialDownloads(backgroundScope, persist = { if (++writes > 1) throw IOException("disk full") },
+            changed = {}, failed = { _, _ -> }, fatal = { reported = it }) { transferred = true }
+        q.enqueue("song", ""); q.start(); runCurrent()
+        assertFalse(transferred); assertEquals("disk full", reported?.message)
+        assertEquals(PolarisSerialDownloads.State.QUEUED, q.snapshot().single().state); assertFalse(q.pending.value); q.stop()
+    }
 }

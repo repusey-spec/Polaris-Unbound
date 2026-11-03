@@ -72,13 +72,14 @@ class PolarisSerialDownloads(
     fun clear() { snapshot().forEach { remove(it.id) } }
 
     /** Called by the foreground service, never by merely opening the library. */
-    fun start() = synchronized(lock) {
+    fun start(): Unit = synchronized(lock) {
         wanted = true
         if (worker?.isCompleted == false) { wake.trySend(Unit); return@synchronized }
         worker = scope.launch(CoroutineExceptionHandler { _, error ->
             synchronized(lock) { active = null; mutablePending.value = false }
             fatal(error)
         }) {
+            try {
             for (signal in wake) {
                 while (currentCoroutineContext().isActive) {
                     val next = synchronized(lock) { tasks.values.firstOrNull { it.state == State.QUEUED } } ?: break
@@ -133,7 +134,15 @@ class PolarisSerialDownloads(
                         }
                     }
                 }
-                synchronized(lock) { saveLocked() }
+            }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                synchronized(lock) {
+                    active = null
+                    tasks.replaceAll { _, task -> if (task.state == State.ACTIVE) task.copy(state = State.QUEUED) else task }
+                    mutablePending.value = false
+                }
+                fatal(error)
             }
         }
         val current = worker!!

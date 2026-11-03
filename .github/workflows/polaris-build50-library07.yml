@@ -8,6 +8,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: polaris-downloads07-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   compile:
     runs-on: ubuntu-latest
@@ -113,6 +116,26 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace :app:testGmsMobileArm64DebugUnitTest --tests 'app.hush.music.polaris.PolarisDownloadIntegrityTest' --tests 'app.hush.music.polaris.PolarisSerialDownloadsTest' --tests 'app.hush.music.polaris.PolarisDownloadRetryTest' --tests 'app.hush.music.polaris.PolarisChunkingDataSourceTest' --tests 'app.hush.music.polaris.PolarisDownloadStoreTest' --tests 'app.hush.music.polaris.PolarisSourcePolicyTest' --tests 'app.hush.music.polaris.PolarisResolverTest' --tests 'app.hush.music.polaris.PolarisRadioRegressionTest' --tests 'app.hush.music.polaris.PolarisCarNavigationTest' --tests 'app.hush.music.polaris.PolarisPlaybackJobsTest'
+      - name: Analyze all simulation results before permitting APK assembly
+        run: |
+          python3 - <<'PYTEST'
+          from pathlib import Path
+          import os, json, xml.etree.ElementTree as ET
+          root = Path(os.environ['RUNNER_TEMP']) / 'hush'
+          files = list((root / 'app/build/test-results/testGmsMobileArm64DebugUnitTest').glob('TEST-*.xml'))
+          suites = [ET.parse(p).getroot() for p in files]
+          total = sum(int(s.get('tests', '0')) for s in suites)
+          bad = sum(int(s.get(k, '0')) for s in suites for k in ['failures', 'errors', 'skipped'])
+          expected = {'PolarisDownloadIntegrityTest', 'PolarisSerialDownloadsTest', 'PolarisDownloadRetryTest', 'PolarisChunkingDataSourceTest', 'PolarisDownloadStoreTest', 'PolarisSourcePolicyTest', 'PolarisResolverTest', 'PolarisRadioRegressionTest', 'PolarisCarNavigationTest', 'PolarisPlaybackJobsTest'}
+          seen = {s.get('name', '').rsplit('.', 1)[-1] for s in suites}
+          assert expected <= seen, ('missing simulation classes', expected - seen)
+          assert total >= 58 and bad == 0, (total, bad)
+          report = {'tests': total, 'failures_errors_skipped': bad, 'classes': sorted(seen), 'apk_assembly_permitted': True}
+          (root / 'polaris-simulation-summary.json').write_text(json.dumps(report, indent=2))
+          print(json.dumps(report))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'Simulation analysis: {total} tests passed; no failures, errors or skipped tests. APK assembly permitted.\n')
+          PYTEST
       - name: Compile Polaris Build50 HushLibrary07 APK
         working-directory: ${{ runner.temp }}/hush
         run: |
@@ -158,6 +181,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Polaris-50.7-regression-results
-          path: ${{ runner.temp }}/hush/app/build/test-results/testGmsMobileArm64DebugUnitTest/*.xml
+          path: |
+            ${{ runner.temp }}/hush/app/build/test-results/testGmsMobileArm64DebugUnitTest/*.xml
+            ${{ runner.temp }}/hush/polaris-simulation-summary.json
           if-no-files-found: warn
           retention-days: 7

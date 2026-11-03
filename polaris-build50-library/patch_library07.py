@@ -137,6 +137,10 @@ s = once(s, old, '''                val superseded = downloadedFileStore.get(med
                 downloadedFileStore.record(entry)
                 superseded?.let { previous -> runCatching { previous.delete() } }''', 'old file retained until durable replacement index')
 s = once(s, '            } catch (error: Exception) {\n                android.util.Log.w(TAG, "file download failed:', '            } catch (error: Exception) {\n                app.hush.music.polaris.PolarisErrorReport.failure("download-file id=$mediaId", error)\n                android.util.Log.w(TAG, "file download failed:', 'file failure persisted')
+s = once(s, '                publishFileDownload(mediaId, title, Download.STATE_STOPPED, 0L, 0L, startedAt)',
+    '                if (serialQueue.contains(mediaId)) publishFileDownload(mediaId, title, Download.STATE_STOPPED, 0L, 0L, startedAt)', 'removed tasks cannot return as ghost paused rows')
+s = once(s, '                val onProgress: (Long, Long) -> Unit = progress@{ written, total ->',
+    '                val onProgress: (Long, Long) -> Unit = progress@{ written, total ->\n                    if (!isActive) return@progress', 'cancelled tasks stop publishing progress')
 old = '''                    failureReason = Download.FAILURE_REASON_UNKNOWN,
                 )
             }
@@ -189,6 +193,11 @@ s = s[:start] + '''        private fun copyToFile(
                 app.hush.music.polaris.PolarisDownloadValidation.commit(part, target, keepGoing)
                 app.hush.music.polaris.PolarisErrorReport.record("download-file-committed id=$mediaId bytes=$written")
             } catch (error: Exception) {
+                if (error is CancellationException || !keepGoing()) {
+                    part.delete()
+                    app.hush.music.polaris.PolarisErrorReport.record("download-cancelled id=$mediaId")
+                    throw CancellationException("download cancelled", error)
+                }
                 app.hush.music.polaris.PolarisErrorReport.failure("download-validation id=$mediaId expected=$declaredLength actual=${part.length()}", error)
                 part.delete()
                 throw error
@@ -255,6 +264,7 @@ s = s[:start] + '''        @Synchronized private fun persist() {
     }
 '''
 s = once(s, 'json.decodeFromString<DownloadedFileIndex>(indexFile.readText())', 'json.decodeFromString<DownloadedFileIndex>(String(android.util.AtomicFile(indexFile).readFully(), Charsets.UTF_8))', 'index recovery reads atomic backup')
+s = once(s, '                    if (indexFile.isFile) {', '                    if (indexFile.isFile || File(indexFile.path + ".bak").isFile) {', 'index backup survives missing base file')
 path.write_text(s)
 
 path = base / 'playback/MusicService.kt'
