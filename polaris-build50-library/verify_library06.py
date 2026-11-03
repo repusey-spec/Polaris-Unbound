@@ -23,6 +23,8 @@ checks = {
  'player token is obtained before playback template becomes ready': 'browser != null && registered' in client,
  'previous full radio queues and malformed URL fixes retained': 'PolarisRadioPlaylist.set' in svc and 'PolarisRadioRequests.resolve(spec)' in svc,
  'next-track errors include queue and transition evidence': 'queue-near-error index=' in svc and 'transition reason=' in svc,
+ 'one failed track cannot cancel the shared service job': svc.count('scopeJob = app.hush.music.polaris.PolarisPlaybackJobs.createServiceJob()') == 2 and 'scopeJob = Job()' not in svc,
+ 'background failures are isolated and identified by their own track': 'PolarisPlaybackJobs.prefetch(mediaId' in svc and 'prefetch id=' in svc,
  'updated version with original package': 'versionCode = 100568' in gradle and 'versionName = "50.6"' in gradle and 'applicationIdSuffix = ".polarisradio.debug"' in gradle,
 }
 for name, value in checks.items(): print(('PASS' if value else 'FAIL') + ': ' + name)
