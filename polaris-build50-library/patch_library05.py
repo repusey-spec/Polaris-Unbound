@@ -169,7 +169,9 @@ screen.write_text(s)
 recovery = polaris / 'PolarisRadioRecovery.kt'
 s = recovery.read_text()
 s = once(s, '                player.setMediaItem(freshItem)',
-    '                player.replaceMediaItem(player.currentMediaItemIndex, freshItem)', 'repair current source without deleting queue')
+    '''                val refreshedIndex = player.currentMediaItemIndex
+                player.replaceMediaItem(refreshedIndex, freshItem)
+                player.seekToDefaultPosition(refreshedIndex)''', 'repair current source at live edge without deleting queue')
 recovery.write_text(s)
 projection = polaris / 'PolarisProjectionRecovery.kt'
 s = projection.read_text()
