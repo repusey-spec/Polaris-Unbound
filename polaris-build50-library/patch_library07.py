@@ -124,6 +124,18 @@ s = once(s, '                val result = downloadToFile(mediaId, title, started
 s = once(s, 'import kotlinx.coroutines.launch', 'import kotlinx.coroutines.launch\nimport kotlinx.coroutines.ensureActive', 'cancellation at commit boundary')
 s = once(s, '                downloadedFileStore.record(entry)', '''                downloadedFileStore.record(entry)
                 app.hush.music.polaris.PolarisErrorReport.record("download-index-committed id=$mediaId bytes=${entry.bytes}")''', 'index commit evidence')
+# Delete a superseded name only once the replacement index is durable.
+old = '''                downloadedFileStore
+                    .get(mediaId)
+                    ?.let { previous -> resolvedDownloadedFile(previous) }
+                    ?.takeIf { previous -> previous != result.file }
+                    ?.let { previous -> runCatching { previous.delete() } }
+                downloadedFileStore.record(entry)'''
+s = once(s, old, '''                val superseded = downloadedFileStore.get(mediaId)
+                    ?.let { previous -> resolvedDownloadedFile(previous) }
+                    ?.takeIf { previous -> previous != result.file }
+                downloadedFileStore.record(entry)
+                superseded?.let { previous -> runCatching { previous.delete() } }''', 'old file retained until durable replacement index')
 s = once(s, '            } catch (error: Exception) {\n                android.util.Log.w(TAG, "file download failed:', '            } catch (error: Exception) {\n                app.hush.music.polaris.PolarisErrorReport.failure("download-file id=$mediaId", error)\n                android.util.Log.w(TAG, "file download failed:', 'file failure persisted')
 old = '''                    failureReason = Download.FAILURE_REASON_UNKNOWN,
                 )
@@ -184,6 +196,8 @@ s = s[:start] + '''        private fun copyToFile(
         }
 ''' + s[end:]
 s = s.replace('private const val DEFAULT_MAX_PARALLEL_DOWNLOADS = 6', 'private const val DEFAULT_MAX_PARALLEL_DOWNLOADS = 1')
+s = once(s, '        fun removeAllDownloads() {', '        fun removeAllDownloads() {\n            serialQueue.clear()', 'cancel before clearing old files')
+s = once(s, '            serialQueue.clear()\n            fileDownloads.value = emptyMap()', '            fileDownloads.value = emptyMap()', 'avoid second clear after file removal')
 assert 'fileDownloadJobs' not in s
 path.write_text(s)
 
@@ -209,14 +223,29 @@ path.write_text(s)
 # Atomic download-index writes must not silently report completion after a failed save.
 path = base / 'downloads/DownloadedFileStore.kt'
 s = path.read_text()
+# Keep the in-memory index consistent when a durable record cannot be saved.
+start = s.index('        fun record(entry: DownloadedFile) {')
+end = s.index('\n        /** Drops the record', start)
+s = s[:start] + '''        @Synchronized fun record(entry: DownloadedFile) {
+            ensureLoaded()
+            val before = LinkedHashMap(entries)
+            entries.remove(entry.mediaId)
+            entries[entry.mediaId] = entry
+            while (entries.size > MAX_ENTRIES) entries.remove(entries.keys.first())
+            try { persist() }
+            catch (error: Exception) { entries.clear(); entries.putAll(before); throw error }
+        }
+''' + s[end:]
 start = s.index('        private fun persist() {')
 s = s[:start] + '''        @Synchronized private fun persist() {
             val snapshot = DownloadedFileIndex(entries = entries.values.toList())
             val atomic = android.util.AtomicFile(indexFile)
             val stream = atomic.startWrite()
             try {
-                stream.write(json.encodeToString(snapshot).toByteArray(Charsets.UTF_8))
+                val bytes = json.encodeToString(snapshot).toByteArray(Charsets.UTF_8)
+                stream.write(bytes)
                 atomic.finishWrite(stream)
+                if (!atomic.readFully().contentEquals(bytes)) throw java.io.IOException("download index commit not durable")
             } catch (error: Exception) {
                 atomic.failWrite(stream)
                 app.hush.music.polaris.PolarisErrorReport.failure("download-index-save", error)
