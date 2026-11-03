@@ -41,6 +41,25 @@ callback.write_text(s)
 # code 2000 error or changing the proven source engines/retry policy.
 service = base / 'playback/MusicService.kt'
 s = service.read_text()
+assert s.count('scopeJob = Job()') == 2, 'shared service job anchors changed'
+s = s.replace('scopeJob = Job()', 'scopeJob = app.hush.music.polaris.PolarisPlaybackJobs.createServiceJob()')
+s = once(s, '''                try {
+                    playbackUrlPrefetchSemaphore.withPermit {
+                        resolveAndCachePlaybackUrl(mediaId)
+                    }
+                } catch (_: CancellationException) {
+                    null
+                } finally {
+                    playbackUrlPrefetchInFlight.remove(mediaId, deferred)
+                }''', '''                try {
+                    app.hush.music.polaris.PolarisPlaybackJobs.prefetch(mediaId, { failedId, failure ->
+                        app.hush.music.polaris.PolarisErrorReport.failure("prefetch id=" + failedId, failure)
+                    }) {
+                        playbackUrlPrefetchSemaphore.withPermit { resolveAndCachePlaybackUrl(mediaId) }
+                    }
+                } finally {
+                    playbackUrlPrefetchInFlight.remove(mediaId, deferred)
+                }''', 'isolate expected prefetch failures and preserve cancellation')
 s = once(s, '        super.onMediaItemTransition(mediaItem, reason)', '''        super.onMediaItemTransition(mediaItem, reason)
         app.hush.music.polaris.PolarisErrorReport.record("transition reason=" + reason +
             " index=" + player.currentMediaItemIndex + " queue=" + player.mediaItemCount +
@@ -93,4 +112,4 @@ s = once(s, '        unitTests.isReturnDefaultValues = true',
 s = once(s, 'versionCode = 100567', 'versionCode = 100568', 'version code')
 s = once(s, 'versionName = "50.5"', 'versionName = "50.6"', 'version name')
 gradle.write_text(s)
-print('PASS 50.6: separate CAL UI, opposite-source browse, own-engine search, same playback session and next-track diagnostics')
+print('PASS 50.6: CAL navigation, own-engine search, isolated track failures and next-track diagnostics')
