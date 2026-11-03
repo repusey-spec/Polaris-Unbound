@@ -93,6 +93,10 @@ c = c[:start] + c[end:]
 start = c.index('        private fun polarisVoiceSearchItem(): MediaItem =')
 end = c.index('        private fun browsableMediaItem(', start)
 c = c[:start] + c[end:]
+c = once(c, '''                .search(query, YouTube.SearchFilter.FILTER_SONG)
+                .getOrNull()''', '''                .search(query, YouTube.SearchFilter.FILTER_SONG)
+                .onFailure { app.hush.music.polaris.PolarisErrorReport.failure("search-youtube", it) }
+                .getOrNull()''', 'report native music search failures instead of silently empty results')
 callback.write_text(c)
 
 service = base / 'playback/MusicService.kt'
@@ -182,6 +186,21 @@ s = once(s, '        val error = info.exception', '''        val error = info.ex
             cause = cause?.cause
         }''', 'malformed addresses do not enter fast retry loop')
 policy.write_text(s)
+
+# Preserve old evidence but prevent a 50.4 last-error from being mistaken for a
+# fresh 50.5 failure after installing the update.
+report = polaris / 'PolarisErrorReport.kt'
+s = report.read_text()
+s = once(s, 'appendLine("ERROR stage=$stage ${PolarisErrorReport.item(item)}")',
+    'appendLine("ERROR build=${BuildConfig.VERSION_NAME} code=${BuildConfig.VERSION_CODE} at=${Date()} stage=$stage ${PolarisErrorReport.item(item)}")', 'error build and timestamp')
+s = once(s, '.putString("last-error", safe)?.apply()',
+    '.putString("last-error", safe)?.putInt("last-error-build", BuildConfig.VERSION_CODE)?.apply()', 'remember producing build')
+s = once(s, '            appendLine(prefs.getString("last-error", "아직 기록된 오류가 없습니다."))', '''            val lastError = prefs.getString("last-error", null)
+            if (lastError != null && prefs.getInt("last-error-build", -1) != BuildConfig.VERSION_CODE) {
+                appendLine("[이전 빌드에서 남은 오류 기록입니다. 현재 빌드의 새 오류가 아닙니다.]")
+            }
+            appendLine(lastError ?: "아직 기록된 오류가 없습니다.")''', 'label errors retained from old APK')
+report.write_text(s)
 
 # A 24dp vector has transparent negative space at all densities. Never reuse a
 # 108dp adaptive foreground bitmap with gravity=center as a notification icon.
