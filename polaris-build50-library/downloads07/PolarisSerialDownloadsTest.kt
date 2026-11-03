@@ -100,4 +100,13 @@ class PolarisSerialDownloadsTest {
         assertEquals(listOf("first"), order)
         assertEquals(PolarisSerialDownloads.State.PAUSED, q.snapshot().last().state); assertFalse(q.pending.value); q.stop()
     }
+    @Test fun failedQueuePersistenceDoesNotStartAnUnrecordedTransfer() = runTest {
+        var transferred = false
+        val original = IOException("storage write failed")
+        val q = PolarisSerialDownloads(backgroundScope, persist = { throw original }, changed = {}, failed = { _, _ -> }) { transferred = true }
+        try { q.enqueue("song", ""); fail("durable enqueue must fail") }
+        catch (error: IOException) { assertSame(original, error) }
+        q.start(); runCurrent()
+        assertFalse(transferred); assertTrue(q.snapshot().isEmpty()); q.stop()
+    }
 }
