@@ -1,7 +1,7 @@
 name: Polaris Build50 HushLibrary 06 (Hush 13.14.7)
 on:
   push:
-    branches: [experiment/build50-hush-library-06-car-ui]
+    branches: [experiment/build50-hush-library-06-track-isolation]
     paths:
       - 'polaris-build50-library/**'
       - '.github/workflows/polaris-build50-library06.yml'
@@ -108,7 +108,7 @@ jobs:
         working-directory: ${{ runner.temp }}/hush
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace :app:testGmsMobileArm64DebugUnitTest --tests 'app.hush.music.polaris.PolarisSourcePolicyTest' --tests 'app.hush.music.polaris.PolarisResolverTest' --tests 'app.hush.music.polaris.PolarisRadioRegressionTest' --tests 'app.hush.music.polaris.PolarisCarNavigationTest'
+          ./gradlew --no-daemon --stacktrace :app:testGmsMobileArm64DebugUnitTest --tests 'app.hush.music.polaris.PolarisSourcePolicyTest' --tests 'app.hush.music.polaris.PolarisResolverTest' --tests 'app.hush.music.polaris.PolarisRadioRegressionTest' --tests 'app.hush.music.polaris.PolarisCarNavigationTest' --tests 'app.hush.music.polaris.PolarisPlaybackJobsTest'
       - name: Compile Polaris Build50 HushLibrary06 APK
         working-directory: ${{ runner.temp }}/hush
         run: |
