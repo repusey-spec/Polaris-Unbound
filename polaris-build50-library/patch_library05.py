@@ -211,6 +211,11 @@ for path in res.glob('mipmap-anydpi*/ic_launcher*.xml'):
     s = path.read_text()
     s = s.replace('<monochrome android:drawable="@mipmap/ic_launcher_monochrome"', '<monochrome android:drawable="@drawable/polaris_small_icon"')
     path.write_text(s)
+shim = root / 'waze-shim/build.gradle.kts'
+s = shim.read_text()
+s = once(s, '        include("values/ic_launcher_background.xml")',
+    '        include("values/ic_launcher_background.xml")\n        include("drawable/polaris_small_icon.xml")', 'include referenced monochrome vector in generated shim icon resources')
+shim.write_text(s)
 
 gradle = root / 'app/build.gradle.kts'
 g = gradle.read_text()
