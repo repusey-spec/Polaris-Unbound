@@ -21,8 +21,10 @@ class PolarisDownloadService : Service() {
     @Inject lateinit var downloads: DownloadUtil
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var observer: Job? = null
+    private var latestStartId = 0
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         PolarisErrorReport.install(this)
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Polaris 다운로드", NotificationManager.IMPORTANCE_LOW))
@@ -34,8 +36,11 @@ class PolarisDownloadService : Service() {
         if (observer == null) observer = scope.launch {
             downloads.serialDownloadPending.collectLatest { pending ->
                 if (!pending) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    delay(500)
+                    if (!downloads.serialDownloadPending.value) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelfResult(latestStartId)
+                    }
                 }
             }
         }
