@@ -1,0 +1,9 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <!-- Transparent knob outline with play/pause marks; no opaque square/disc. -->
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5" android:strokeLineJoin="round"
+        android:pathData="M2,10 C2,6 22,6 22,10 C22,14 2,14 2,10 Z M2,10 L2,15 C2,20 22,20 22,15 L22,10" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M8,8.8 L8,11.4 L11,10.1 Z M13,8.8 L14,8.8 L14,11.4 L13,11.4 Z M16,8.8 L17,8.8 L17,11.4 L16,11.4 Z" />
+</vector>
