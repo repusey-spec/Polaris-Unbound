@@ -62,6 +62,12 @@ class PolarisDownloadsActivity : ComponentActivity() {
                                     }
                                 }
                                 Row {
+                                    TextButton(enabled = tasks.any { it.state == PolarisSerialDownloads.State.QUEUED || it.state == PolarisSerialDownloads.State.PAUSED },
+                                        onClick = { downloadUtil.resumeSerialDownloads() }) { Text("시작 / 재개") }
+                                    TextButton(enabled = tasks.any { it.state == PolarisSerialDownloads.State.ACTIVE || it.state == PolarisSerialDownloads.State.QUEUED },
+                                        onClick = { downloadUtil.pauseSerialDownloads() }) { Text("일시정지") }
+                                }
+                                Row {
                                     TextButton(enabled = failed.isNotEmpty(), onClick = { downloadUtil.retryAllFailedDownloads() }) { Text("실패 전체 재시도") }
                                     TextButton(enabled = failed.isNotEmpty(), onClick = { failed.forEach { downloadUtil.discardFailedDownload(it.id) } }) { Text("실패 전체 정리") }
                                 }
