@@ -99,7 +99,12 @@ class PolarisStreamDiagnosticsTest {
     @Test fun resolutionFailurePreservesOriginalException() = runBlocking {
         val error=IllegalStateException("secret")
         try { PlaybackTrace.resolution("VVUvWmHAWDQ","download-file") { throw error };fail() }
-        catch (caught: IllegalStateException) { assertSame(error,caught) }
+        catch (caught: IllegalStateException) {
+            // Coroutine stack-trace recovery can copy an exception and retain its original cause.
+            assertEquals(error.javaClass, caught.javaClass)
+            assertEquals(error.message, caught.message)
+            assertTrue(generateSequence<Throwable>(caught) { it.cause }.take(12).any { it === error })
+        }
         assertTrue(events.last().contains("outcome=failure"));assertFalse(events.joinToString().contains("secret"))
     }
 }
