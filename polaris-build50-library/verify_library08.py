@@ -17,6 +17,8 @@ checks={
  'authentication final failures honor auto-skip preference': 'polarisFinalPlaybackFailure(error, "authentication")' in s and 'playback-decision=' in s and 'nextWindowIndex != player.currentMediaItemIndex' in s,
  'all app updater flavors disabled': '"UPDATER_AVAILABLE", "true"' not in g and 'if (!BuildConfig.UPDATER_AVAILABLE) return false' in (b/'utils/Updater.kt').read_text(),
  'inactive collection does not show progress toolbar': 'hasActiveDownloads(songs.map { it.song.id }, downloads)' in (b/'ui/screens/playlist/LocalPlaylistScreen.kt').read_text(),
+ 'shared playback resolver has an overall deadline': 'PolarisDownloadPolicy.resolve(deadline' in s and 'polarisScheduleRecoveryReset' in s,
+ 'legacy failed controls preserve completed audio': 'polarisDownloads.discardFailedDownload' in (b/'ui/screens/playlist/DownloadManagementScreen.kt').read_text(),
  '50.8 update identity and existing car UI intact': 'versionCode = 100570' in g and 'versionName = "50.8"' in g and (b/'polaris/PolarisCarScreens.kt').exists(),
 }
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)

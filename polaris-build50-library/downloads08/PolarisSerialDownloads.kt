@@ -144,7 +144,8 @@ class PolarisSerialDownloads(
                             synchronized(lock) {
                                 if (tasks[task.id]?.token == task.token && tasks[task.id]?.state == State.ACTIVE) {
                                     val failure = tasks.getValue(task.id).copy(state = State.FAILED,
-                                        error = PolarisDownloadPolicy.reason(error), updatedAt = System.currentTimeMillis())
+                                        error = PolarisDownloadPolicy.reason(error), updatedAt = System.currentTimeMillis(),
+                                        tempPath = if (error is PolarisVerificationTimeout) tasks.getValue(task.id).tempPath else "")
                                     tasks[task.id] = failure
                                     changed(failure)
                                     failed(failure, error)

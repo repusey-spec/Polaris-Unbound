@@ -13,6 +13,12 @@ for src in (here/'downloads08').glob('*.kt'):
 p=b/'playback/DownloadUtil.kt'; s=p.read_text()
 s=once(s, '        val serialDownloadPending get() = serialQueue.pending', '''        val serialDownloadPending get() = serialQueue.pending
         val serialDownloadTasks get() = serialQueue.entries
+        private fun recordDownloadProgress(id: String, stage: String, bytes: Long = 0L, expected: Long = -1L, tempPath: String = "") {
+            val previous = serialQueue.snapshot().firstOrNull { it.id == id }
+            serialQueue.progress(id, stage, bytes, expected, tempPath)
+            if (previous?.stage != stage) app.hush.music.polaris.PolarisErrorReport.record(
+                "download-phase id=$id stage=$stage prior=${previous?.stage} priorElapsedMs=${System.currentTimeMillis() - (previous?.updatedAt ?: System.currentTimeMillis())} bytes=$bytes expected=$expected")
+        }
         private fun cleanFailedPart(task: app.hush.music.polaris.PolarisSerialDownloads.Task) {
             if (task.tempPath.isBlank()) return
             val part = File(task.tempPath)
@@ -46,8 +52,8 @@ start=s.index('        private suspend fun downloadToFile('); end=s.index('     
 block=s[start:end]
 block=once(block, '            startedAt: Long,', '            startedAt: Long,\n            resolveDeadline: Long,', 'download budget parameter')
 block=once(block, '                    lastPublished.set(now)', '''                    lastPublished.set(now)
-                    serialQueue.progress(mediaId, "수신", written, total)''', 'live transfer phase')
-block=once(block, '                resolveSpotiFLACDownloadUri(mediaId)?.takeIf', '''                serialQueue.progress(mediaId, "주소 조회")
+                    recordDownloadProgress(mediaId, "수신", written, total)''', 'live transfer phase')
+block=once(block, '                resolveSpotiFLACDownloadUri(mediaId)?.takeIf', '''                recordDownloadProgress(mediaId, "주소 조회")
                 app.hush.music.polaris.PolarisDownloadPolicy.resolve(resolveDeadline, { SystemClock.elapsedRealtime() }) {
                     kotlinx.coroutines.runInterruptible { resolveSpotiFLACDownloadUri(mediaId) }
                 }?.takeIf''', 'interruptible provider resolution within common deadline')
@@ -59,9 +65,9 @@ s=s.replace('        private fun fetchToFile(\n', '        private suspend fun f
 start=s.index('        private suspend fun copyToFile('); end=s.index('        /**\n         * Publishes progress', start)
 block=s[start:end]
 block=block.replace('val dataSource = downloadUpstreamFactory.createDataSource()', 'val dataSource = boundedFileDownloadFactory.createDataSource()')
-block=block.replace('                app.hush.music.polaris.PolarisDownloadValidation.validate(part, keepGoing)', '''                serialQueue.progress(mediaId, "검증", part.length(), part.length(), part.absolutePath)
+block=block.replace('                app.hush.music.polaris.PolarisDownloadValidation.validate(part, keepGoing)', '''                recordDownloadProgress(mediaId, "검증", part.length(), part.length(), part.absolutePath)
                 app.hush.music.polaris.PolarisDownloadValidation.validate(appContext, part, true, keepGoing)''',1)
-block=block.replace('                app.hush.music.polaris.PolarisDownloadValidation.validate(part, keepGoing)', '''                serialQueue.progress(mediaId, "검증", written, expected, part.absolutePath)
+block=block.replace('                app.hush.music.polaris.PolarisDownloadValidation.validate(part, keepGoing)', '''                recordDownloadProgress(mediaId, "검증", written, expected, part.absolutePath)
                 app.hush.music.polaris.PolarisDownloadValidation.validate(appContext, part, expected > 0, keepGoing)''',1)
 block=block.replace('} catch (error: Exception) { part.delete(); throw error }', '} catch (error: Exception) { if (error !is app.hush.music.polaris.PolarisVerificationTimeout) part.delete(); throw error }')
 block=block.replace('                part.delete()\n                throw error', '                if (error !is app.hush.music.polaris.PolarisVerificationTimeout) part.delete()\n                throw error')
@@ -108,6 +114,45 @@ s=once(s, '    private fun skipOnError() {', '''    private fun polarisFinalPlay
 s=once(s, 'consecutivePlaybackErr <= MAX_CONSECUTIVE_ERR && nextWindowIndex != C.INDEX_UNSET', 'consecutivePlaybackErr <= MAX_CONSECUTIVE_ERR && nextWindowIndex != C.INDEX_UNSET && nextWindowIndex != player.currentMediaItemIndex', 'prevent one-item repeat loop')
 s=once(s,'            player.seekTo(nextWindowIndex, C.TIME_UNSET)', '''            app.hush.music.polaris.PolarisErrorReport.record("playback-skip from=${player.currentMediaItem?.mediaId} to=${player.getMediaItemAt(nextWindowIndex).mediaId} consecutive=$consecutivePlaybackErr")
             player.seekTo(nextWindowIndex, C.TIME_UNSET)''','record actual skip')
+# Share a 30 second recovery budget across URL refresh attempts for a playing item.
+s=once(s, '    private val playbackStreamRecoveryTracker = PlaybackStreamRecoveryTracker()',
+    '    private val playbackStreamRecoveryTracker = PlaybackStreamRecoveryTracker()\n    private val polarisPlaybackRecoveryDeadlines = java.util.concurrent.ConcurrentHashMap<String, Long>()', 'playback recovery clock')
+s=once(s, '                    resolveAndCachePlaybackUrlInternal(mediaId, preferredClientOverride)', '\n'.join([
+    '                    val deadline = polarisPlaybackRecoveryDeadlines[mediaId] ?: (android.os.SystemClock.elapsedRealtime() + app.hush.music.polaris.PolarisDownloadPolicy.RESOLVE_MS)',
+    '                    app.hush.music.polaris.PolarisDownloadPolicy.resolve(deadline, { android.os.SystemClock.elapsedRealtime() }) {',
+    '                        resolveAndCachePlaybackUrlInternal(mediaId, preferredClientOverride)',
+    '                    }']), 'bound shared playback resolution not just the waiting caller')
+anchor='        // A "no enabled source can serve this track" failure arrives here as a generic source'
+s=once(s, anchor, '\n'.join([
+    '        val recoveryDeadline = polarisPlaybackRecoveryDeadlines.getOrPut(currentMediaId) { android.os.SystemClock.elapsedRealtime() + app.hush.music.polaris.PolarisDownloadPolicy.RESOLVE_MS }',
+    '        if (android.os.SystemClock.elapsedRealtime() >= recoveryDeadline || generateSequence<Throwable>(error) { it.cause }.take(12).any { it is app.hush.music.polaris.PolarisResolutionTimeout }) {',
+    '            polarisFinalPlaybackFailure(error, "resolution-timeout")',
+    '            return',
+    '        }',
+    ''])+anchor, 'exhausted time budget is a final failure')
+# READY is not evidence that a damaged sample was actually playable. Reset only after progress.
+a=s.index('            playbackStreamRecoveryTracker.onPlaybackRecovered(currentMediaId)')
+z=s.index('            if (player.isPlaying && urlRefreshJob',a)
+s=s[:a]+'            polarisScheduleRecoveryReset(currentMediaId)\n'+s[z:]
+s=once(s, '    private fun polarisFinalPlaybackFailure(', '\n'.join([
+    '    private var polarisRecoveryResetJob: Job? = null',
+    '    private fun polarisScheduleRecoveryReset(id: String?) {',
+    '        if (id == null || !player.isPlaying) return',
+    '        polarisRecoveryResetJob?.cancel()',
+    '        val position = player.currentPosition',
+    '        polarisRecoveryResetJob = scope.launch {',
+    '            delay(1_500L)',
+    '            if (app.hush.music.polaris.PolarisPlaybackFailurePolicy.recovered(id, player.currentMediaItem?.mediaId, player.playWhenReady, player.isPlaying, position, player.currentPosition)) {',
+    '                playbackStreamRecoveryTracker.onPlaybackRecovered(id)',
+    '                polarisPlaybackRecoveryDeadlines.remove(id)',
+    '                consecutivePlaybackErr = 0',
+    '            }',
+    '        }',
+    '    }',
+    '',
+    '    private fun polarisFinalPlaybackFailure(']), 'reset retry counters only after genuine playback progress')
+s=once(s, '        super.onMediaItemTransition(mediaItem, reason)',
+    '        super.onMediaItemTransition(mediaItem, reason)\n        mediaItem?.mediaId?.let { polarisPlaybackRecoveryDeadlines.remove(it) }', 'manual selection gets a fresh recovery budget')
 p.write_text(s)
 
 # Completed rows must not count as an active download forever.
@@ -135,7 +180,15 @@ s=s[:idx]+'''                item {
                         app.hush.music.polaris.PolarisDownloadsActivity.open(context)
                     }) { Text("다운로드 관리 · 실패 확인/재시도") }
                 }
-'''+s[idx:];p.write_text(s)
+'''+s[idx:];# The original failed-row buttons use the same safe API as the new management screen.
+s=once(s, '    val playerConnection = LocalPlayerConnection.current',
+    '    val playerConnection = LocalPlayerConnection.current\n    val polarisDownloads = LocalDownloadUtil.current', 'capture download util for failed actions')
+a=s.index('                    title = failedTitle,');z=s.index('                    title = completedTitle,',a)
+f=s[a:z]
+start=f.index('                        onPrimaryAction = {');end=f.index('                        onRemove = ',start)
+f=f[:start]+'                        onPrimaryAction = { polarisDownloads.retryFailedDownload(download.request.id) },\n'+f[end:]
+f=once(f,'onRemove = { sendRemoveDownloads(context, listOf(download.request.id)) }','onRemove = { polarisDownloads.discardFailedDownload(download.request.id) }','failed row clear preserves completed files')
+s=s[:a]+f+s[z:];p.write_text(s)
 
 # Distributions and all automatic/manual app updater paths use this same false flag.
 p=r/'app/build.gradle.kts';s=p.read_text()

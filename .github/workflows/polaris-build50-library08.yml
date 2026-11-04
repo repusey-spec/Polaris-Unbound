@@ -130,10 +130,10 @@ jobs:
           suites = [ET.parse(p).getroot() for p in files]
           total = sum(int(s.get('tests', '0')) for s in suites)
           bad = sum(int(s.get(k, '0')) for s in suites for k in ['failures', 'errors', 'skipped'])
-          expected = {'PolarisDownloadIntegrityTest', 'PolarisSerialDownloadsTest', 'PolarisDownloadRetryTest', 'PolarisChunkingDataSourceTest', 'PolarisDownloadStoreTest', 'PolarisSourcePolicyTest', 'PolarisResolverTest', 'PolarisRadioRegressionTest', 'PolarisCarNavigationTest', 'PolarisPlaybackJobsTest', 'PolarisDownloadPolicyTest', 'PolarisFailedDownloadsTest'}
+          expected = {'PolarisDownloadIntegrityTest', 'PolarisSerialDownloadsTest', 'PolarisDownloadRetryTest', 'PolarisChunkingDataSourceTest', 'PolarisDownloadStoreTest', 'PolarisSourcePolicyTest', 'PolarisResolverTest', 'PolarisRadioRegressionTest', 'PolarisCarNavigationTest', 'PolarisPlaybackJobsTest', 'PolarisDownloadPolicyTest', 'PolarisFailedDownloadsTest', 'PolarisDownloadMigrationTest'}
           seen = {s.get('name', '').rsplit('.', 1)[-1] for s in suites}
           assert expected <= seen, ('missing simulation classes', expected - seen)
-          assert total >= 73 and bad == 0, (total, bad)
+          assert total >= 79 and bad == 0, (total, bad)
           report = {'tests': total, 'failures_errors_skipped': bad, 'classes': sorted(seen), 'apk_assembly_permitted': True}
           (root / 'polaris-simulation-summary.json').write_text(json.dumps(report, indent=2))
           print(json.dumps(report))

@@ -59,4 +59,15 @@ class PolarisDownloadPolicyTest {
         assertFalse(app.hush.music.BuildConfig.UPDATER_AVAILABLE)
         assertFalse(app.hush.music.utils.Updater.isUpdateAvailable("v13.14.8", "50.8"))
     }
+    @Test fun readyOrUnmovingDamagedFileDoesNotResetTheRetryBudget() {
+        assertFalse(PolarisPlaybackFailurePolicy.recovered("a","a",true,false,1000,1000))
+        assertFalse(PolarisPlaybackFailurePolicy.recovered("a","a",true,true,1000,1001))
+    }
+    @Test fun lateRecoveryCannotOverrideUserStopOrTrackChange() {
+        assertFalse(PolarisPlaybackFailurePolicy.recovered("a","b",true,true,1000,3000))
+        assertFalse(PolarisPlaybackFailurePolicy.recovered("a","a",false,true,1000,3000))
+    }
+    @Test fun actualProgressResetsRecoveryBudget() {
+        assertTrue(PolarisPlaybackFailurePolicy.recovered("a","a",true,true,1000,2500))
+    }
 }

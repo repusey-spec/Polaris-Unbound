@@ -40,6 +40,8 @@ object PolarisDownloadPolicy {
 
 object PolarisPlaybackFailurePolicy {
     enum class Decision { SKIP, STOP, WAIT }
+    fun recovered(expectedId: String, actualId: String?, wanted: Boolean, playing: Boolean, start: Long, position: Long): Boolean =
+        expectedId == actualId && wanted && playing && position - start >= 1_000L
     fun decide(autoSkip: Boolean, connected: Boolean, wanted: Boolean, failures: Int, current: Int, next: Int): Decision = when {
         !wanted -> Decision.STOP
         !connected -> Decision.WAIT
