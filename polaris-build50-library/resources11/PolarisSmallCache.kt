@@ -7,5 +7,9 @@ class PolarisSmallCache<T>(private val limit: Int = 512) {
     }
     @Synchronized operator fun get(key: String): T? = values[key]
     @Synchronized operator fun set(key: String, value: T) { values[key] = value }
+    @Synchronized fun remove(key: String, expected: T): Boolean {
+        if (values[key] != expected) return false
+        values.remove(key); return true
+    }
     @Synchronized fun size(): Int = values.size
 }

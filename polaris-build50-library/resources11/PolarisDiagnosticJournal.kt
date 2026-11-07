@@ -15,6 +15,7 @@ object PolarisDiagnosticJournal {
     private val error = java.util.concurrent.atomic.AtomicReference<String?>(null)
     @Volatile private var savedError: String? = null
     private val diskLock = Any()
+    @Volatile private var lastWriteError = "none"
     @Volatile private var directory: File? = null
     private val writer = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "PolarisJournal").apply { isDaemon = true } }
     fun install(context: Context) {
@@ -37,8 +38,10 @@ object PolarisDiagnosticJournal {
         writer.scheduleWithFixedDelay({ flush() }, 2, 2, TimeUnit.SECONDS)
     }
     fun record(channel: String, event: String) {
-        val safe = PolarisSourcePolicy.redact(event.take(4_000))
-        queues[channel]?.add("wall=${System.currentTimeMillis()} mono=${SystemClock.elapsedRealtime()} $safe")
+        runCatching {
+            val safe = PolarisSourcePolicy.redact(event.take(4_000))
+            queues[channel]?.add("wall=${System.currentTimeMillis()} mono=${SystemClock.elapsedRealtime()} $safe")
+        }
     }
     private fun append(channel: String, value: String) {
         val dir = directory ?: return
@@ -65,6 +68,7 @@ object PolarisDiagnosticJournal {
         }
         queues.forEach { (channel, queue) ->
             runCatching { val batch = queue.drain(); if (batch.isNotEmpty()) append(channel, batch) }
+                .onFailure { lastWriteError = "wall=${System.currentTimeMillis()} type=${it.javaClass.simpleName}" }
         }
     }
     fun rememberError(value: String) { error.set(value.take(20_000)) }
@@ -76,6 +80,7 @@ object PolarisDiagnosticJournal {
     fun dump(channel: String): String = synchronized(diskLock) {
         val dir = directory
         buildString {
+            if (lastWriteError != "none") appendLine("journal-write-error $lastWriteError")
             if (dir != null) for (name in listOf("$channel.previous.log", "$channel.log")) {
                 runCatching { val f = File(dir, name); if (f.exists()) append(f.readText().takeLast(FILE_LIMIT)) }
             }

@@ -90,6 +90,7 @@ object BotGuardTokenGenerator {
     private var permanentlyBroken = false
 
     private val mutex = Mutex()
+    private val activeCalls = java.util.concurrent.atomic.AtomicInteger()
     private var engine: BotGuardEngine? = null
     private var engineSessionId: String? = null
     private var cachedSessionToken: String? = null
@@ -250,6 +251,10 @@ object BotGuardTokenGenerator {
      */
     suspend fun onAppBackgrounded() {
         mutex.withLock {
+            if (activeCalls.get() > 0) {
+                PolarisResourceDiagnostics.event("botguard background-cleanup-deferred active=${activeCalls.get()}")
+                return
+            }
             if (engine != null) {
                 Timber.tag(TAG).d("Releasing engine (app backgrounded)")
                 destroyEngineLocked()
@@ -290,6 +295,8 @@ object BotGuardTokenGenerator {
         sessionId: String,
         forceNewEngine: Boolean,
     ): PoTokenResult {
+        activeCalls.incrementAndGet()
+        try {
         val (eng, sessionTok, wasNew) =
             mutex.withLock {
                 val needsNew =
@@ -335,6 +342,7 @@ object BotGuardTokenGenerator {
             }
         }
         return result
+        } finally { activeCalls.decrementAndGet() }
     }
 
     /** Caller owns mutex. Clear references before a non-cancellable Main teardown. */
@@ -414,7 +422,8 @@ object BotGuardTokenGenerator {
             postToBotGuard(GENERATE_IT_URL, "[ \"$REQUEST_KEY\", \"$botguardResponse\" ]") { body ->
                 try {
                     val (tokenU8, lifetimeSec) = parseIntegrityToken(body)
-                    expiry = Instant.now().plusSeconds(lifetimeSec).minus(10, ChronoUnit.MINUTES)
+                    require(lifetimeSec > 0) { "Invalid integrity token lifetime" }
+                    expiry = Instant.now().plusSeconds(lifetimeSec).minusSeconds(minOf(600L, lifetimeSec / 10))
 
                     webView.evaluateJavascript(
                         """

@@ -58,7 +58,7 @@ object PolarisResourceDiagnostics {
                 if (Build.VERSION.SDK_INT >= 30) {
                     val trace = StringBuilder()
                     for (exit in am.getHistoricalProcessExitReasons(app.packageName, 0, 8)) {
-                        event("previous-exit wall=${exit.timestamp} process=${exit.processName} reason=${exit.reason} status=${exit.status} importance=${exit.importance} pssKb=${exit.pss} rssKb=${exit.rss}")
+                        event("previous-exit wall=${exit.timestamp} process=${exit.processName} reason=${exit.reason} status=${exit.status} importance=${exit.importance} reasonName=${exitReason(exit.reason)} pssKb=${exit.pss} rssKb=${exit.rss}")
                         if (exit.reason == android.app.ApplicationExitInfo.REASON_ANR && trace.length < 48_000) {
                             runCatching {
                                 exit.traceInputStream?.bufferedReader()?.use { reader ->
@@ -76,16 +76,21 @@ object PolarisResourceDiagnostics {
         monitor.scheduleWithFixedDelay({ runCatching {
             val now = SystemClock.elapsedRealtime()
             if (heartbeatPending.get()) {
-                val lag = now - heartbeatAt
+                val lag = SystemClock.uptimeMillis() - heartbeatAt
                 if (lag >= 3_000 && now - lastStackAt >= 30_000) {
                     lastStackAt = now
                     event("main-stall delayMs=$lag AA=$aa $playback $metrics")
                     event("main-stack ${Looper.getMainLooper().thread.stackTrace.take(20).joinToString(" <- ")}")
+                    runCatching {
+                        Thread.getAllStackTraces().entries.asSequence()
+                            .filter { (t, _) -> listOf("ExoPlayer", "Audio", "DefaultDispatcher", "OkHttp", "PolarisJournal").any { t.name.contains(it) } }
+                            .take(8).forEach { (thread, stack) -> event("worker-stack name=${thread.name.take(80)} state=${thread.state} ${stack.take(12).joinToString(" <- ")}") }
+                    }
                 }
             } else if (heartbeatPending.compareAndSet(false, true)) {
-                heartbeatAt = now
+                heartbeatAt = SystemClock.uptimeMillis()
                 main.post {
-                    val lag = SystemClock.elapsedRealtime() - heartbeatAt
+                    val lag = SystemClock.uptimeMillis() - heartbeatAt
                     if (lag >= 1_000) event("main-resumed delayMs=$lag")
                     heartbeatPending.set(false)
                 }
@@ -126,10 +131,15 @@ object PolarisResourceDiagnostics {
             if (Build.VERSION.SDK_INT >= 30) am.setProcessStateSummary("AA=$aa $metrics".take(120).toByteArray(Charsets.US_ASCII))
         }.onFailure { event("sample unavailable=${it.javaClass.simpleName}") }
     }
+    private fun exitReason(reason: Int): String = when(reason) {
+        1 -> "exit-self"; 2 -> "signal"; 3 -> "low-memory"; 4 -> "java-crash"; 5 -> "native-crash"
+        6 -> "ANR"; 7 -> "initialization"; 8 -> "permission-change"; 9 -> "excessive-resources"
+        10 -> "user-request"; 11 -> "user-stop"; 12 -> "dependency-death"; 13 -> "other"; else -> "platform-$reason"
+    }
     fun dump(): String = buildString {
         appendLine("Coverage: own app/process, public device memory/thermal/storage pressure, AA/audio callbacks, available own-process exit/ANR history.")
         appendLine("Unavailable without privileged capture: kernel/watchdog, full system logcat, other apps' heaps, AudioFlinger internals. No automatic bugreport/ADB capture. A missing ANR record does not exclude a phone-wide freeze/reboot.")
-        appendLine("sampling=30s; Main heartbeat=2s; all wall times epoch ms; mono=elapsedRealtime ms")
+        appendLine("sampling=30s; Main heartbeat=2s (uptime, excluding sleep); wall=epoch ms; mono=elapsedRealtime ms")
         appendLine(PolarisDiagnosticJournal.dump("resource"))
         for (name in listOf("uncaught.txt", "previous-anr.txt")) runCatching {
             val file = File(directory, name)
