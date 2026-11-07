@@ -137,8 +137,8 @@ object PolarisResourceDiagnostics {
         10 -> "user-request"; 11 -> "user-stop"; 12 -> "dependency-death"; 13 -> "other"; else -> "platform-$reason"
     }
     fun dump(): String = buildString {
-        appendLine("Coverage: own app/process, public device memory/thermal/storage pressure, AA/audio callbacks, available own-process exit/ANR history.")
-        appendLine("Unavailable without privileged capture: kernel/watchdog, full system logcat, other apps' heaps, AudioFlinger internals. No automatic bugreport/ADB capture. A missing ANR record does not exclude a phone-wide freeze/reboot.")
+        appendLine("수집 범위: 앱 메모리·스레드·파일 핸들, 공개 시스템 메모리·발열·저장소 상태, AA·오디오 이벤트, 시스템이 제공하는 이 앱의 종료·ANR 이력.")
+        appendLine("권한상 수집 불가: 커널·시스템 watchdog, 전체 logcat, 다른 앱 메모리, AudioFlinger 내부. ADB/시스템 버그리포트를 자동 수집하지 않습니다. ANR 기록이 없더라도 휴대폰 전체 멈춤·재부팅을 배제할 수 없습니다.")
         appendLine("sampling=30s; Main heartbeat=2s (uptime, excluding sleep); wall=epoch ms; mono=elapsedRealtime ms")
         appendLine(PolarisDiagnosticJournal.dump("resource"))
         for (name in listOf("uncaught.txt", "previous-anr.txt")) runCatching {

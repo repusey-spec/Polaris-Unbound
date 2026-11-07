@@ -64,7 +64,9 @@ class PolarisResourcePolicyTest {
         var id=""
         val task=async(start=CoroutineStart.UNDISPATCHED) { suspendCancellableCoroutine<String> { id=pending.add(it) } }
         pending.cancelAll();pending.complete(id,"late")
-        assertEquals(0,pending.size);assertTrue(task.isCancelled)
+        assertEquals(0,pending.size)
+        withTimeout(5_000) { task.join() }
+        assertTrue(task.isCancelled)
     }
     @Test fun decipherFailureExpiresAfterShortRecoveryWindow() {
         app.hush.music.utils.StreamClientAvailability.forgetAll()

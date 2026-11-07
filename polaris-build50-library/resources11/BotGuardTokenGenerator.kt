@@ -360,11 +360,11 @@ object BotGuardTokenGenerator {
 
     private class BotGuardEngine private constructor(
         private val webView: WebView,
-        private val readySignal: CancellableContinuation<BotGuardEngine>,
+        private var readySignal: CancellableContinuation<BotGuardEngine>?,
     ) {
         private val scope = MainScope()
         private val main = Handler(Looper.getMainLooper())
-        private var closed = false
+        @Volatile private var closed = false
         private val pendingMints = PolarisPendingRequests<String>()
         init { PolarisResourceDiagnostics.engine(1) }
         private fun onMain(block: () -> Unit) {
@@ -372,7 +372,7 @@ object BotGuardTokenGenerator {
         }
         private lateinit var expiry: Instant
 
-        val isExpired: Boolean get() = Instant.now().isAfter(expiry)
+        val isExpired: Boolean get() = closed || Instant.now().isAfter(expiry)
 
         fun startBootstrap() {
             scope.launch(exceptionHandler) {
@@ -448,7 +448,24 @@ object BotGuardTokenGenerator {
         @JavascriptInterface
         fun onMinterReady() {
             Timber.tag(TAG).d("Minter ready")
-            onMain { if (!closed && readySignal.isActive) readySignal.resume(this@BotGuardEngine) }
+            onMain {
+                if (closed) return@onMain
+                val waiter = readySignal
+                readySignal = null
+                // Bootstrap clients capture the creating coroutine; replace them after handoff.
+                webView.webChromeClient = object : WebChromeClient() {
+                    override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                        if (m.message().contains("Uncaught")) signalError(PoTokenException("BotGuard JS error"))
+                        return false
+                    }
+                }
+                webView.webViewClient = object : WebViewClient() {
+                    override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                        signalError(PoTokenException("BotGuard renderer gone")); return true
+                    }
+                }
+                if (!closed && waiter?.isActive == true) waiter.resume(this@BotGuardEngine)
+            }
         }
 
         @JavascriptInterface
@@ -498,7 +515,10 @@ object BotGuardTokenGenerator {
 
         private fun signalError(error: Throwable) = onMain {
             if (!closed) {
-                if (readySignal.isActive) readySignal.resumeWithException(error)
+                PolarisResourceDiagnostics.event("botguard failure type=${error.javaClass.simpleName}")
+                val waiter = readySignal
+                readySignal = null
+                if (waiter?.isActive == true) waiter.resumeWithException(error)
                 close()
             }
         }
@@ -540,7 +560,9 @@ object BotGuardTokenGenerator {
             if (closed) return
             closed = true
             pendingMints.cancelAll()
-            if (readySignal.isActive) readySignal.cancel(CancellationException("BotGuard closed"))
+            val waiter = readySignal
+            readySignal = null
+            if (waiter?.isActive == true) waiter.cancel(CancellationException("BotGuard closed"))
             scope.cancel()
             runCatching { webView.stopLoading() }
             runCatching { webView.removeJavascriptInterface(JS_BRIDGE) }

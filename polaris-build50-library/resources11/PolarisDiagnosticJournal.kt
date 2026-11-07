@@ -19,6 +19,7 @@ object PolarisDiagnosticJournal {
     @Volatile private var directory: File? = null
     private val writer = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "PolarisJournal").apply { isDaemon = true } }
     fun install(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT >= 28 && android.app.Application.getProcessName() != context.packageName) return
         if (!installed.compareAndSet(false, true)) return
         val app = context.applicationContext
         writer.execute {
