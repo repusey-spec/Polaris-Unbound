@@ -12,7 +12,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class, manifest = Config.NONE)
 class PolarisRecovery14Test {
     @Test fun unlikeSurvivesStoreRecreationAndStaleRemoteLike() {
-        val c = RuntimeEnvironment.getApplication<Application>()
+        val c = RuntimeEnvironment.getApplication()
         PolarisLikeIntents(c).record("account1", "song", false)
         assertEquals(false, PolarisLikeIntents(c).desired("account1", "song"))
     }
