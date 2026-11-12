@@ -52,4 +52,20 @@ class PolarisRecovery14Test {
         repeat(100) { routes.openedFile("active"); routes.openedFile("new$it") }
         assertTrue(routes.wasFile("active"))
     }
+    @Test fun acknowledgedLikeEventuallyAllowsLaterRemoteChanges() {
+        var now = 1000L
+        val store = PolarisLikeIntents(RuntimeEnvironment.getApplication()) { now }
+        store.record("expiry", "song", false); store.acknowledge("expiry", "song", false)
+        assertEquals(false, store.desired("expiry", "song"))
+        now += 31_000L
+        assertNull(store.desired("expiry", "song"))
+        assertEquals(false, store.desired("expiry", "song", 500L))
+    }
+    @Test fun outboxKeepsOfflineUnlikeAndDropsAcknowledgedEntry() {
+        val store = PolarisLikeIntents(RuntimeEnvironment.getApplication())
+        store.record("outbox", "song", false)
+        assertTrue(store.pending("outbox").contains("song" to false))
+        store.acknowledge("outbox", "song", false)
+        assertFalse(store.pending("outbox").contains("song" to false))
+    }
 }

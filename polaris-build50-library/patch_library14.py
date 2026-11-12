@@ -82,20 +82,46 @@ s=once(s,'        private val syncMutex = Mutex()', '''        private val polar
         private val syncMutex = Mutex()''')
 s=once(s,'        fun likeSong(s: SongEntity) {\n            if (s.isLocal) return','''        fun likeSong(s: SongEntity) {
             if (s.isLocal) return
-            polarisLikeIntents.record(polarisLikeAccount(), s.id, s.liked)''')
+            val localAccount = polarisLikeAccount()
+            polarisLikeIntents.record(localAccount, s.id, s.liked)''')
 s=once(s,'                likeVideoWithRetry(s, gen)','''                polarisLikeRemoteMutex.withLock {
-                    val desired = polarisLikeIntents.desired(polarisLikeAccount(), s.id)
-                    if (desired != null && desired != s.liked) return@withLock Result.failure<io.ktor.client.statement.HttpResponse>(IllegalStateException("Superseded like intent"))
-                    likeVideoWithRetry(s, gen)
+                    val desired = polarisLikeIntents.latest(localAccount, s.id)
+                    if (polarisLikeAccount() != localAccount || (desired != null && desired != s.liked)) return@withLock Result.failure<io.ktor.client.statement.HttpResponse>(IllegalStateException("Superseded like intent"))
+                    likeVideoWithRetry(s, gen).onSuccess { polarisLikeIntents.acknowledge(localAccount, s.id, s.liked) }
                 }''')
-s=s.replace('                                        if (dbSong == null) {','''                                        if (polarisLikeIntents.desired(polarisLikeAccount(), song.id) == false) {
+s=s.replace('                                        if (dbSong == null) {','''                                        if (polarisLikeIntents.desired(likeAccount, song.id, likeSnapshotStartedAt) == false) {
                                             if (dbSong != null && dbSong.song.liked) update(dbSong.song.copy(liked = false, likedDate = null))
                                             return@withTransaction
                                         }
                                         if (dbSong == null) {''', 1)
 # Never un-like a locally liked song from a stale absent remote snapshot.
 s=once(s,'                                    .filterNot { it.id in remoteIds }','''                                    .filterNot { it.id in remoteIds }
-                                    .filterNot { polarisLikeIntents.desired(polarisLikeAccount(), it.id) == true }''')
+                                    .filterNot { polarisLikeIntents.desired(likeAccount, it.id, likeSnapshotStartedAt) == true }''')
+# Replay a bounded pending outbox before reading the remote liked snapshot.
+a=s.index('        suspend fun syncLikedSongs(');z=s.index('        suspend fun syncLibrarySongs(',a)
+block=s[a:z]
+block=once(block, '                val gen = syncGeneration.get()\n                YouTube', '                val gen = syncGeneration.get()\n                val likeAccount = polarisLikeAccount()\n                polarisFlushPendingLikes(likeAccount, gen)\n                val likeSnapshotStartedAt = System.currentTimeMillis()\n                YouTube')
+block=block.replace('                        if (!isSyncStillEnabled(gen)) return@onSuccess', '                        if (!isSyncStillEnabled(gen) || polarisLikeAccount() != likeAccount) return@onSuccess')
+s=s[:a]+block+s[z:]
+s=once(s, '        private suspend fun likeVideoWithRetry(', '''        private suspend fun polarisFlushPendingLikes(account: String, gen: Long) {
+            for ((id, desired) in polarisLikeIntents.pending(account).take(20)) {
+                if (!isSyncStillEnabled(gen) || polarisLikeAccount() != account) return
+                val song = database.getSongById(id)?.song ?: continue
+                polarisLikeRemoteMutex.withLock {
+                    if (polarisLikeIntents.latest(account, id) == desired && polarisLikeAccount() == account) {
+                        likeVideoWithRetry(song.copy(liked = desired), gen)
+                            .onSuccess { polarisLikeIntents.acknowledge(account, id, desired) }
+                    }
+                }
+            }
+        }
+
+        private suspend fun likeVideoWithRetry(''')
+s=once(s, '            gen: Long,\n        ): Result<io.ktor.client.statement.HttpResponse>', '            gen: Long,\n            account: String = polarisLikeAccount(),\n        ): Result<io.ktor.client.statement.HttpResponse>')
+s=once(s, '                if (!isSyncStillEnabled(gen)) return result', '                if (!isSyncStillEnabled(gen) || polarisLikeAccount() != account) return result')
+a=s.index('                val targetVideoId =', s.index('        private suspend fun likeVideoWithRetry('))
+z=s.index('                Timber.d(',a)
+s=s[:a]+'                val targetVideoId = song.id\n'+s[z:]
 p.write_text(s)
 p=r/'app/build.gradle.kts';p.write_text(p.read_text().replace('versionName = "50.13"','versionName = "50.14"').replace('versionCode = 100575','versionCode = 100576'))
 print('50.14 local-file YouTube recovery and persistent unlike protection applied')
