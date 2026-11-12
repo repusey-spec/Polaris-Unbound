@@ -72,6 +72,9 @@ s=once(s,'        setMediaNotificationProvider(','''        ioScope.launch {
 # Metadata recovery may finish after a user toggles the heart: update only the latest row.
 s=once(s, '        database.query {\n            if (song == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (song.song.duration == -1) {\n                update(song.song.copy(duration = duration))', '        database.transaction {\n            val latest = getSongByIdBlocking(mediaId)?.song\n            if (latest == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (latest.duration == -1) {\n                update(latest.copy(duration = duration))')
 s=once(s, '                currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)', '                if (currentMediaMetadata.value?.id == mediaId) currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)')
+# Quarantined files exist for repair, but cannot label or supply a recovered remote stream.
+s=once(s, '        if (label.contains(PlaybackSourceLabels.DOWNLOADED, ignoreCase = true)) return label', '        if (mediaId in polarisDamagedLocalIds) return label\n        if (label.contains(PlaybackSourceLabels.DOWNLOADED, ignoreCase = true)) return label')
+s=once(s, '        return playbackUrlCache[mediaId]?.takeIf { cached ->\n            cached.isValidFor(', '        return playbackUrlCache[mediaId]?.takeIf { cached ->\n            if (mediaId in polarisDamagedLocalIds && !cached.isYouTubeStream) return@takeIf false\n            cached.isValidFor(')
 p.write_text(s)
 p=b/'utils/SyncUtils.kt';s=p.read_text()
 s=once(s,'        private val syncMutex = Mutex()', '''        private val polarisLikeIntents = app.hush.music.polaris.PolarisLikeIntents(context)

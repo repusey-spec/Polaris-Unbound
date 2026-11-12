@@ -19,6 +19,8 @@ like_call=u[u.index('private suspend fun likeVideoWithRetry'):u.index('fun likeS
 assert 'val targetVideoId = song.id' in like_call and 'getSetVideoId' not in like_call
 assert 'polarisFlushPendingLikes(likeAccount, gen)' in u
 assert 'notifyChildrenChanged(LIKED' in s
+assert 'if (mediaId in polarisDamagedLocalIds) return label' in s
+assert 'mediaId in polarisDamagedLocalIds && !cached.isYouTubeStream' in s
 assert 'update(latest.copy(duration = duration))' in s and 'currentMediaMetadata.value?.id == mediaId' in s
 assert 'versionCode = 100576' in (r/'app/build.gradle.kts').read_text()
 report={'changed_sources':sorted(changed),'prior_startup_audio_io_fixes_preserved':True,'damaged_file_preserved_and_online_cache_isolated':True,'unlike_intent_persisted':True}
