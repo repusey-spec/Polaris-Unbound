@@ -66,6 +66,10 @@ class PolarisLocalPrefetchGateTest {
         try {
             PolarisLocalPrefetchGate.lookup<String>({ null }, { throw failure }, { error("network") })
             fail("must propagate to existing prefetch failure handler")
-        } catch (actual: IllegalStateException) { assertSame(failure, actual) }
+        } catch (actual: IllegalStateException) {
+            // Coroutine stack-trace recovery may copy an exception across dispatchers.
+            assertEquals(failure.javaClass, actual.javaClass)
+            assertEquals(failure.message, actual.message)
+        }
     }
 }
