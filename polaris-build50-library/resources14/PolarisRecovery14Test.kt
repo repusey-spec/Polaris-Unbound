@@ -37,4 +37,16 @@ class PolarisRecovery14Test {
         PolarisOnlineRecovery.remoteSpec(androidx.media3.datasource.DataSpec.Builder().setUri(android.net.Uri.parse("song")).build(),
             "song", android.net.Uri.parse("file:///broken.flac"))
     }
+    @Test fun prefetchingNeighbourCannotEraseCurrentLocalEvidence() {
+        val routes = PolarisLocalRoutes()
+        routes.openedFile("playing"); routes.openedFile("prefetched")
+        assertTrue(routes.wasFile("playing")); assertTrue(routes.wasFile("prefetched"))
+        routes.openedRemote("playing")
+        assertFalse(routes.wasFile("playing")); assertTrue(routes.wasFile("prefetched"))
+    }
+    @Test fun localEvidenceIsBounded() {
+        val routes = PolarisLocalRoutes()
+        repeat(1000) { routes.openedFile("track$it") }
+        assertFalse(routes.wasFile("track0")); assertTrue(routes.wasFile("track999"))
+    }
 }

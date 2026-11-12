@@ -9,7 +9,7 @@ for f in (h/'resources14').glob('*.kt'):
 p=b/'playback/MusicService.kt';s=p.read_text()
 s=once(s,'    private val forceYouTubeOnceMediaIds =','''    // Session-local quarantine: preserve the user's file, never feed its bytes to this retry.
     private val polarisDamagedLocalIds = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
-    @Volatile private var polarisLastLocalId: String? = null
+    private val polarisLocalRoutes = app.hush.music.polaris.PolarisLocalRoutes()
     private val forceYouTubeOnceMediaIds =''')
 s=once(s,'        ownedLocalPlaybackFile(mediaId)?.let { local ->','        (if (mediaId in polarisDamagedLocalIds) null else ownedLocalPlaybackFile(mediaId))?.let { local ->')
 s=once(s,'        val forceYouTubeOnce = mediaId in forceYouTubeOnceMediaIds','        val forceYouTubeOnce = mediaId in forceYouTubeOnceMediaIds || mediaId in polarisDamagedLocalIds')
@@ -27,19 +27,20 @@ s=s[:a]+'''        if (mediaId !in polarisDamagedLocalIds && downloadedFileStore
             app.hush.music.polaris.PolarisErrorReport.record("local-recovery id=$mediaId route=youtube reason=missing-or-length-mismatch file=preserved")
         }
         if (mediaId in polarisDamagedLocalIds) {
+            polarisLocalRoutes.openedRemote(mediaId)
             val remote = runBlocking(Dispatchers.IO) { resolveAndCachePlaybackUrl(mediaId) }
             return app.hush.music.polaris.PolarisOnlineRecovery.remoteSpec(dataSpec, mediaId, remote.url.toUri())
         }
 ''' +s[a:]
-s=once(s,'            return dataSpec.withUri(downloaded.toUri())','            polarisLastLocalId = mediaId\n            return dataSpec.withUri(downloaded.toUri())')
+s=once(s,'            return dataSpec.withUri(downloaded.toUri())','            polarisLocalRoutes.openedFile(mediaId)\n            return dataSpec.withUri(downloaded.toUri())')
 a=s.index('        val downloadedEntry =',s.index('        val unreadableStoredBytes ='));z=s.index('        // A track whose bytes came from our own SpotiFLAC',a)
-s=s[:a]+'''        if (!isLocalMedia && polarisLastLocalId == currentMediaId && unreadableStoredBytes &&
+s=s[:a]+'''        if (!isLocalMedia && polarisLocalRoutes.wasFile(currentMediaId) && unreadableStoredBytes &&
             currentMediaId !in polarisDamagedLocalIds && playbackStreamRecoveryTracker.registerRetryAttempt(currentMediaId)) {
             val resumePosition = player.currentPosition.coerceAtLeast(0L)
             val resumeIndex = player.currentMediaItemIndex
             if (polarisDamagedLocalIds.size >= 64) polarisDamagedLocalIds.clear()
             polarisDamagedLocalIds.add(currentMediaId)
-            polarisLastLocalId = null
+            polarisLocalRoutes.openedRemote(currentMediaId)
             cancelPlaybackUrlPrefetch(currentMediaId)
             playbackUrlResolutionInFlight.entries.removeIf { (key, job) ->
                 if (PlaybackResolutionKeys.mediaIdOf(key) == currentMediaId) { job.cancel(); true } else false

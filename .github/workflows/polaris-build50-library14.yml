@@ -172,7 +172,7 @@ jobs:
           expected = {'PolarisDownloadIntegrityTest', 'PolarisSerialDownloadsTest', 'PolarisDownloadRetryTest', 'PolarisChunkingDataSourceTest', 'PolarisDownloadStoreTest', 'PolarisSourcePolicyTest', 'PolarisResolverTest', 'PolarisRadioRegressionTest', 'PolarisCarNavigationTest', 'PolarisPlaybackJobsTest', 'PolarisDownloadPolicyTest', 'PolarisFailedDownloadsTest', 'PolarisDownloadMigrationTest', 'PolarisStreamDiagnosticsTest', 'PolarisResolverCancellationTest', 'PolarisPlayerContextRetryTest', 'PolarisResourcePolicyTest', 'PolarisAudioBufferTest', 'PolarisCheckpointTest', 'PolarisDisabledUpdaterTest', 'PolarisLocalPrefetchGateTest', 'PolarisRecovery14Test'}
           seen = {s.get('name', '').rsplit('.', 1)[-1] for s in suites}
           assert expected <= seen, ('missing simulation classes', expected - seen)
-          assert total >= 144 and bad == 0, (total, bad)
+          assert total >= 146 and bad == 0, (total, bad)
           extractor_files = list((root.parent / 'polaris-newpipe/extractor/build/test-results/test').glob('TEST-*PolarisSignatureTest.xml'))
           assert extractor_files, 'missing extractor regression results'
           extractor_suites = [ET.parse(p).getroot() for p in extractor_files]
