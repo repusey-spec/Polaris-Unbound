@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Independent 50.12/50.13 generated-source boundary and executed-test audit."""
 from pathlib import Path
-import hashlib, json, re, sys, xml.etree.ElementTree as ET
+import hashlib, json, re, sys, zipfile, xml.etree.ElementTree as ET
 root = Path(sys.argv[2]); snapshot = root/'polaris-baseline12.json'
 service = 'app/src/main/kotlin/app/hush/music/playback/MusicService.kt'
 updater = 'app/src/main/kotlin/app/hush/music/utils/UpdateNotificationManager.kt'
@@ -26,7 +26,19 @@ if sys.argv[1] == 'snapshot':
     print('Recorded generated 50.12 source boundary'); sys.exit(0)
 old = json.loads(snapshot.read_text()); current = hashes()
 changed = {p for p in old['hashes'].keys() | current.keys() if old['hashes'].get(p) != current.get(p)}
-assert changed == allowed, ('unexpected/missing changed paths', changed ^ allowed)
+# The existing pinned Hush copy task regenerates this packaged bridge archive during tests.
+# Permit exactly that non-source build product only after compilation; keep every other
+# asset/source byte under the original strict boundary comparison.
+generated = 'app/src/mobile/assets/waze-shims.zip'
+generated_changes = changed & {generated}
+assert not generated_changes or sys.argv[1] == 'final', 'bridge archive changed before build'
+assert changed - generated_changes == allowed, ('unexpected/missing changed paths', (changed - generated_changes) ^ allowed)
+if generated_changes:
+    producer = root/'waze-shim/build/outputs/apk/waze-shims.zip'
+    assert producer.is_file() and hashlib.sha256(producer.read_bytes()).hexdigest() == current[generated], 'bridge asset does not match build output'
+    with zipfile.ZipFile(root/generated) as archive:
+        assert archive.namelist() and archive.testzip() is None, 'invalid generated bridge archive'
+
 assert (root/report_source).read_text() == old['report_source'].replace('STREAM REQUEST DIAGNOSTICS (50.12)', 'STREAM REQUEST DIAGNOSTICS (${BuildConfig.VERSION_NAME})'), 'only diagnostic version text may change'
 s = (root/service).read_text(); baseline = old['service']
 # Strip only the three reviewed functions and one new field. Every other service byte
@@ -62,7 +74,8 @@ assert all(x not in h for x in ['GlobalScope', 'Thread(', 'Executors', 'Coroutin
 assert 'versionName = "50.13"' in (root/'app/build.gradle.kts').read_text()
 assert 'versionCode = 100575' in (root/'app/build.gradle.kts').read_text()
 report = {'changed_paths':sorted(changed), 'resolver_fallback_audio_queue_radio_unchanged':True,
-          'single_flight_semaphore_cancellation_retained':True, 'source_boundary_passed':True}
+          'single_flight_semaphore_cancellation_retained':True, 'source_boundary_passed':True,
+          'build_generated_asset_changes':{p:current[p] for p in sorted(generated_changes)}}
 if sys.argv[1] == 'final':
     suites = [ET.parse(p).getroot() for p in (root/'app/build/test-results/testGmsMobileArm64DebugUnitTest').glob('TEST-*.xml')]
     for name, minimum in new_tests.items():
