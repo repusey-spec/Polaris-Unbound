@@ -6,8 +6,9 @@ root = Path(sys.argv[2]); snapshot = root/'polaris-baseline12.json'
 service = 'app/src/main/kotlin/app/hush/music/playback/MusicService.kt'
 updater = 'app/src/main/kotlin/app/hush/music/utils/UpdateNotificationManager.kt'
 helper = 'app/src/main/kotlin/app/hush/music/polaris/PolarisLocalPrefetchGate.kt'
+report_source = 'app/src/main/kotlin/app/hush/music/polaris/PolarisErrorReport.kt'
 new_tests = {'PolarisLocalPrefetchGateTest': 8, 'PolarisDisabledUpdaterTest': 2}
-allowed = {service, updater, 'app/build.gradle.kts', helper} | {
+allowed = {service, updater, 'app/build.gradle.kts', helper, report_source} | {
     'app/src/test/kotlin/app/hush/music/polaris/'+name+'.kt' for name in new_tests}
 def hashes():
     files = list((root/'app/src').rglob('*')) + [root/'app/build.gradle.kts']
@@ -21,11 +22,12 @@ def block(s, name):
 if sys.argv[1] == 'snapshot':
     s = (root/service).read_text()
     assert 'localPlaybackEvidence(mediaId' in block(s, 'startPlaybackUrlPrefetch').split('lateinit var deferred')[0]
-    snapshot.write_text(json.dumps({'hashes':hashes(), 'service':s, 'updater':(root/updater).read_text()}))
+    snapshot.write_text(json.dumps({'hashes':hashes(), 'service':s, 'updater':(root/updater).read_text(), 'report_source':(root/report_source).read_text()}))
     print('Recorded generated 50.12 source boundary'); sys.exit(0)
 old = json.loads(snapshot.read_text()); current = hashes()
 changed = {p for p in old['hashes'].keys() | current.keys() if old['hashes'].get(p) != current.get(p)}
 assert changed == allowed, ('unexpected/missing changed paths', changed ^ allowed)
+assert (root/report_source).read_text() == old['report_source'].replace('STREAM REQUEST DIAGNOSTICS (50.12)', 'STREAM REQUEST DIAGNOSTICS (${BuildConfig.VERSION_NAME})'), 'only diagnostic version text may change'
 s = (root/service).read_text(); baseline = old['service']
 # Strip only the three reviewed functions and one new field. Every other service byte
 # (including stream resolution/fallback, queue, audio, radio and lifecycle) must match.

@@ -71,6 +71,8 @@ s = s[:a] + block + s[z:]; p.write_text(s)
 for f in (here/'resources13').glob('*.kt'):
     dest = r/'app/src/test/kotlin/app/hush/music/polaris'/f.name if f.name.endswith('Test.kt') else b/'polaris'/f.name
     dest.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(f, dest)
+p = b/'polaris/PolarisErrorReport.kt'; s = p.read_text()
+s = once(s, 'STREAM REQUEST DIAGNOSTICS (50.12)', 'STREAM REQUEST DIAGNOSTICS (${BuildConfig.VERSION_NAME})'); p.write_text(s)
 p = r/'app/build.gradle.kts'; s = p.read_text()
 s = once(s, 'versionCode = 100574', 'versionCode = 100575')
 s = once(s, 'versionName = "50.12"', 'versionName = "50.13"'); p.write_text(s)
