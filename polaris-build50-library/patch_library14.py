@@ -70,7 +70,7 @@ s=once(s,'        setMediaNotificationProvider(','''        ioScope.launch {
         }
         setMediaNotificationProvider(''')
 # Metadata recovery may finish after a user toggles the heart: update only the latest row.
-s=once(s, '        database.query {\n            if (song == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (song.song.duration == -1) {\n                update(song.song.copy(duration = duration))', '        database.query {\n            val latest = getSongById(mediaId)?.song\n            if (latest == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (latest.duration == -1) {\n                update(latest.copy(duration = duration))')
+s=once(s, '        database.query {\n            if (song == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (song.song.duration == -1) {\n                update(song.song.copy(duration = duration))', '        database.transaction {\n            val latest = getSongByIdBlocking(mediaId)?.song\n            if (latest == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (latest.duration == -1) {\n                update(latest.copy(duration = duration))')
 s=once(s, '                currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)', '                if (currentMediaMetadata.value?.id == mediaId) currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)')
 p.write_text(s)
 p=b/'utils/SyncUtils.kt';s=p.read_text()
