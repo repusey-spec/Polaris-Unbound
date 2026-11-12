@@ -4,7 +4,8 @@ package app.hush.music.polaris
 internal class PolarisLocalRoutes {
     private val files = LinkedHashSet<String>()
     @Synchronized fun openedFile(id: String) {
-        if (id !in files && files.size >= 64) files.remove(files.first())
+        files.remove(id)
+        if (files.size >= 64) files.remove(files.first())
         files.add(id)
     }
     @Synchronized fun openedRemote(id: String) { files.remove(id) }

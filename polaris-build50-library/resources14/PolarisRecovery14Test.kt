@@ -48,5 +48,8 @@ class PolarisRecovery14Test {
         val routes = PolarisLocalRoutes()
         repeat(1000) { routes.openedFile("track$it") }
         assertFalse(routes.wasFile("track0")); assertTrue(routes.wasFile("track999"))
+        routes.openedFile("active")
+        repeat(100) { routes.openedFile("active"); routes.openedFile("new$it") }
+        assertTrue(routes.wasFile("active"))
     }
 }
