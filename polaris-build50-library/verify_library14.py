@@ -16,6 +16,7 @@ assert 'removeDownload' not in recovery and 'player.currentMediaItemIndex != res
 assert 'polarisLikeIntents.desired(polarisLikeAccount(), song.id) == false' in u
 assert 'polarisLikeRemoteMutex.withLock' in u and 'polarisLikeIntents.record' in u
 assert 'notifyChildrenChanged(LIKED' in s
+assert 'update(latest.copy(duration = duration))' in s and 'currentMediaMetadata.value?.id == mediaId' in s
 assert 'versionCode = 100576' in (r/'app/build.gradle.kts').read_text()
 report={'changed_sources':sorted(changed),'prior_startup_audio_io_fixes_preserved':True,'damaged_file_preserved_and_online_cache_isolated':True,'unlike_intent_persisted':True}
 if sys.argv[1]=='final':

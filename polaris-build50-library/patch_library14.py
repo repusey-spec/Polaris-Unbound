@@ -65,11 +65,16 @@ s=once(s,'        setMediaNotificationProvider(','''        ioScope.launch {
             }
         }
         setMediaNotificationProvider(''')
+# Metadata recovery may finish after a user toggles the heart: update only the latest row.
+s=once(s, '            } else if (song.song.duration == -1) {\n                update(song.song.copy(duration = duration))', '            } else {\n                val latest = getSongById(mediaId)?.song\n                if (latest != null && latest.duration == -1) update(latest.copy(duration = duration))')
+s=once(s, '                currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)', '                if (currentMediaMetadata.value?.id == mediaId) currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)')
 p.write_text(s)
 p=b/'utils/SyncUtils.kt';s=p.read_text()
 s=once(s,'        private val syncMutex = Mutex()', '''        private val polarisLikeIntents = app.hush.music.polaris.PolarisLikeIntents(context)
         private val polarisLikeRemoteMutex = Mutex()
-        private fun polarisLikeAccount() = YouTube.currentPlaybackAuthState().sessionId.orEmpty()
+        private fun polarisLikeAccount() = YouTube.dataSyncId?.takeIf { it.isNotBlank() }
+            ?: YouTube.cookie.orEmpty().split(';').map { it.trim() }.firstOrNull { it.startsWith("SAPISID=") }?.substringAfter('=')
+            ?: "local"
         private val syncMutex = Mutex()''')
 s=once(s,'        fun likeSong(s: SongEntity) {\n            if (s.isLocal) return','''        fun likeSong(s: SongEntity) {
             if (s.isLocal) return
