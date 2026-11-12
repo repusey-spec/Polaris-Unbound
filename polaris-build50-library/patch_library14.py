@@ -21,6 +21,9 @@ s=s[:a]+'''        if (mediaId !in polarisDamagedLocalIds && downloadedFileStore
             playbackUrlCache.remove(mediaId)
             extractorPlaybackUrlCache.remove(mediaId)
             cancelPlaybackUrlPrefetch(mediaId)
+            playbackUrlResolutionInFlight.entries.removeIf { (key, job) ->
+                if (PlaybackResolutionKeys.mediaIdOf(key) == mediaId) { job.cancel(); true } else false
+            }
             app.hush.music.polaris.PolarisErrorReport.record("local-recovery id=$mediaId route=youtube reason=missing-or-length-mismatch file=preserved")
         }
         if (mediaId in polarisDamagedLocalIds) {
@@ -66,7 +69,7 @@ s=once(s,'        setMediaNotificationProvider(','''        ioScope.launch {
         }
         setMediaNotificationProvider(''')
 # Metadata recovery may finish after a user toggles the heart: update only the latest row.
-s=once(s, '            } else if (song.song.duration == -1) {\n                update(song.song.copy(duration = duration))', '            } else {\n                val latest = getSongById(mediaId)?.song\n                if (latest != null && latest.duration == -1) update(latest.copy(duration = duration))')
+s=once(s, '        database.query {\n            if (song == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (song.song.duration == -1) {\n                update(song.song.copy(duration = duration))', '        database.query {\n            val latest = getSongById(mediaId)?.song\n            if (latest == null) {\n                insert(mediaMetadata.copy(duration = duration))\n            } else if (latest.duration == -1) {\n                update(latest.copy(duration = duration))')
 s=once(s, '                currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)', '                if (currentMediaMetadata.value?.id == mediaId) currentMediaMetadata.value = currentMediaMetadata.value?.copy(liked = updatedSong.liked)')
 p.write_text(s)
 p=b/'utils/SyncUtils.kt';s=p.read_text()
