@@ -1,4 +1,4 @@
-name: Polaris Build50 HushLibrary 13 (Hush 13.14.7)
+name: Polaris 50.13 Fresh Rebuild (100575)
 on:
   push:
     branches: [experiment/build50-hush-library-13-startup-io]
@@ -185,7 +185,18 @@ jobs:
         working-directory: ${{ runner.temp }}/hush
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace :app:assembleGmsMobileArm64Debug
+          # Force a new signed package; compiled dependency caches remain reusable.
+          cat > "$RUNNER_TEMP/fresh-package13.gradle" <<'GRADLE'
+          allprojects {
+              tasks.configureEach {
+                  if (name == 'packageGmsMobileArm64Debug') {
+                      outputs.upToDateWhen { false }
+                      outputs.doNotCacheIf('User requested a freshly packaged APK') { true }
+                  }
+              }
+          }
+          GRADLE
+          ./gradlew --no-daemon --stacktrace --init-script "$RUNNER_TEMP/fresh-package13.gradle" :app:assembleGmsMobileArm64Debug
       - name: Verify installed APK label is Polaris
         run: |
           set -euo pipefail
@@ -209,7 +220,7 @@ jobs:
           APK_DIR="$RUNNER_TEMP/hush/app/build/outputs/apk/gmsMobileArm64/debug"
           ORIGINAL_APK=$(find "$APK_DIR" -maxdepth 1 -type f -name '*.apk' -print -quit)
           test -n "$ORIGINAL_APK"
-          TARGET_APK="$APK_DIR/Polaris_Build50_HushLibrary_13.apk"
+          TARGET_APK="$APK_DIR/Polaris_50.13_100575_Rebuild_13.apk"
           mv "$ORIGINAL_APK" "$TARGET_APK"
           test -s "$TARGET_APK"
           echo "Final APK name: $(basename "$TARGET_APK")"
@@ -217,15 +228,15 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Polaris-Build50-HushLibrary-13
-          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/Polaris_Build50_HushLibrary_13.apk
+          name: Polaris-50.13-100575-Fresh-Rebuild
+          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/Polaris_50.13_100575_Rebuild_13.apk
           if-no-files-found: error
           retention-days: 7
       - name: Upload regression test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Polaris-50.13-regression-results
+          name: Polaris-50.13-Rebuild-regression-results
           path: |
             ${{ runner.temp }}/hush/app/build/test-results/testGmsMobileArm64DebugUnitTest/*.xml
             ${{ runner.temp }}/hush/polaris-simulation-summary.json
