@@ -1,7 +1,7 @@
-name: Polaris 6.0 InterTune core release
+name: Polaris 6.0.1 InterTune stream 403 fix
 on:
   push:
-    branches: [experiment/polaris-6-intertune]
+    branches: [experiment/polaris-6-stream-403-fix]
     paths: ['polaris6/**', '.github/workflows/polaris6.yml']
   workflow_dispatch:
 permissions:
@@ -32,6 +32,8 @@ jobs:
           base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
           git -C "$RUNNER_TEMP/intertune" apply --check "$RUNNER_TEMP/polaris.patch"
           git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$GITHUB_WORKSPACE/polaris6/stream_403_fix.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/stream_403_fix.patch"
           base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/intertune/polaris.jks"
           cat > "$RUNNER_TEMP/intertune/keystore.properties" <<'EOF'
           storeFile=../polaris.jks
@@ -44,23 +46,23 @@ jobs:
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.13113456' 'cmake;3.31.6' > /dev/null
       - name: Tests and minified core release
         working-directory: ${{ runner.temp }}/intertune
-        run: ./gradlew :app:testCoreReleaseUnitTest --tests "com.dd3boh.outertune.polaris.*" --tests "com.dd3boh.outertune.playback.BadCachedCopyTest" --tests "com.dd3boh.outertune.playback.RecoveryTest" --tests "com.dd3boh.outertune.playback.ResumePointTest" --tests "com.dd3boh.outertune.playback.BluetoothResumeTest" :app:assembleCoreRelease :app:assembleCoreReleaseAndroidTest --stacktrace --max-workers=2
+        run: ./gradlew :app:testCoreReleaseUnitTest --tests "com.dd3boh.outertune.polaris.*" --tests "com.dd3boh.outertune.playback.BadCachedCopyTest" --tests "com.dd3boh.outertune.playback.RecoveryTest" --tests "com.dd3boh.outertune.playback.ResumePointTest" --tests "com.dd3boh.outertune.playback.BluetoothResumeTest" --tests "com.dd3boh.outertune.utils.StreamCheckTokenlessTest" :app:assembleCoreRelease :app:assembleCoreReleaseAndroidTest --stacktrace --max-workers=2
       - name: Verify install identity and signature
         run: |
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.0_100600.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_6.0_100600.apk > delivery/apk-badging.txt
-          grep "package: name='app.hush.music.polarisradio.debug' versionCode='100600' versionName='6.0'" delivery/apk-badging.txt
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_6.0_100600.apk > delivery/signature.txt
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.0.1_100601.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_6.0.1_100601.apk > delivery/apk-badging.txt
+          grep "package: name='app.hush.music.polarisradio.debug' versionCode='100601' versionName='6.0.1'" delivery/apk-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_6.0.1_100601.apk > delivery/signature.txt
           grep '477721bae3a205d4e6369e76482868978b74931a0b2c4dfe85f3b07a7b40bea8' delivery/signature.txt
-          sha256sum delivery/Polaris_6.0_100600.apk > delivery/SHA256.txt
+          sha256sum delivery/Polaris_6.0.1_100601.apk > delivery/SHA256.txt
           cp "$RUNNER_TEMP/intertune/app/build/outputs/mapping/coreRelease/mapping.txt" delivery/ProGuard-mapping.txt
           cp -r "$RUNNER_TEMP/intertune/app/build/test-results/testCoreReleaseUnitTest" delivery/test-results
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/androidTest/core/release/"*.apk delivery/Polaris_6.0_tests.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/androidTest/core/release/"*.apk delivery/Polaris_6.0.1_tests.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Polaris-6.0-100600
+          name: Polaris-6.0.1-100601
           path: delivery/
           retention-days: 30
   smoke:
@@ -71,7 +73,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Polaris-6.0-100600
+          name: Polaris-6.0.1-100601
           path: delivery
       - name: Enable emulator KVM
         run: |
@@ -86,12 +88,12 @@ jobs:
           disable-animations: true
           script: |
             python3 polaris6/smoke.py
-            adb install -r delivery/Polaris_6.0_tests.apk
+            adb install -r delivery/Polaris_6.0.1_tests.apk
             adb shell am instrument -w app.hush.music.polarisradio.debug.test/androidx.test.runner.AndroidJUnitRunner | tee smoke/session-test.txt
             grep 'OK (1 test)' smoke/session-test.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Polaris-6.0-smoke
+          name: Polaris-6.0.1-smoke
           path: smoke/
           retention-days: 14

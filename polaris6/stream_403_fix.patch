@@ -1,0 +1,83 @@
+diff --git a/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt b/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt
+--- a/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt
++++ b/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt
+@@ -759,12 +759,14 @@
+             var byReading = false
+             if (status != null && !StreamCheck.accept(status)) {
+                 val past = wire.readPast(url, from)
+                 Log.i(TAG, "[$videoId] [${client.clientName}] a read past 512 KB got ${past ?: "no answer"} with ${kind.words}, $at")
+-                if (past != null && StreamCheck.accept(past)) {
+-                    status = past
+-                    byReading = true
+-                }
++                if (StreamCheck.rescueDeniedWebHead(status, past, pot != null)) {
++                    status = past
++                    byReading = true
++                } else if (pot == null && past != null && StreamCheck.accept(past)) {
++                    Log.w(TAG, "[$videoId] [${client.clientName}] tokenless ranged probe $past cannot override HEAD $status")
++                }
+             }
+             val how = listOfNotNull(kind.words, at.takeIf { afterMs > 0 }, "by a read past 512 KB".takeIf { byReading })
+             return TrialCheck(url, status, kind, how.joinToString(", "))
+         }
+diff --git a/app/src/main/java/com/dd3boh/outertune/utils/StreamCheck.kt b/app/src/main/java/com/dd3boh/outertune/utils/StreamCheck.kt
+--- a/app/src/main/java/com/dd3boh/outertune/utils/StreamCheck.kt
++++ b/app/src/main/java/com/dd3boh/outertune/utils/StreamCheck.kt
+@@ -42,9 +42,16 @@
+         else -> Verdict.REFUSED
+     }
+ 
+     /** Whether a url whose check got [status] passed it. */
+-    fun accept(status: Int?): Boolean = verdict(status) == Verdict.PASS
++    fun accept(status: Int?): Boolean = verdict(status) == Verdict.PASS
++
++    /** A tiny ranged read can return 206 although the full tokenless stream fails with 403.
++     * Do not promote a rejected web HEAD based only on a tokenless range probe.
++     * A token-bearing request retains the original fallback behavior.
++     */
++    fun rescueDeniedWebHead(head: Int?, probe: Int?, hasProofToken: Boolean): Boolean =
++        head != null && !accept(head) && hasProofToken && accept(probe)
+ 
+     /**
+      * The clients whose address plays a song to its end without a po token: VISIONOS under each
+      * of its names. Probed on 27 Sep 2026; IOS and ANDROID stop at 512 KB.
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -51,10 +51,10 @@
+     defaultConfig {
+         applicationId = "app.hush.music.polarisradio.debug"
+         minSdk = 24
+         targetSdk = 36
+-        versionCode = 100600
+-        versionName = "6.0"
++        versionCode = 100601
++        versionName = "6.0.1"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         // Obfuscated, not encrypted, and the difference matters. Anything the app can read, so
+         // can anyone holding the apk. What this does buy is that `strings app.apk | grep` no
+diff --git a/app/src/test/java/com/dd3boh/outertune/utils/StreamCheckTokenlessTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/StreamCheckTokenlessTest.kt
+new file mode 100644
+--- /dev/null
++++ b/app/src/test/java/com/dd3boh/outertune/utils/StreamCheckTokenlessTest.kt
+@@ -0,0 +1,19 @@
++package com.dd3boh.outertune.utils
++
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class StreamCheckTokenlessTest {
++    @Test fun tokenlessPartial206DoesNotRescueHead403() {
++        assertFalse(StreamCheck.rescueDeniedWebHead(403, 206, false))
++    }
++
++    @Test fun tokenBearingProbeRetainsOriginalFallback() {
++        assertTrue(StreamCheck.rescueDeniedWebHead(403, 206, true))
++    }
++
++    @Test fun deniedProbeDoesNotRescue() {
++        assertFalse(StreamCheck.rescueDeniedWebHead(403, 403, true))
++    }
++}
