@@ -20,7 +20,7 @@ for i in range(20):
  tree=snap('step-%02d'%i)
  nodes=list(tree.iter('node'));texts=[n.attrib.get('text','') for n in nodes]
  if 'Radio' in texts and 'Streaming' in texts:break
- candidates=[n for n in nodes if n.attrib.get('enabled')=='true' and n.attrib.get('text','').strip().lower() in ['get started','start','next','skip','not now','no','done','finish','continue','allow','while using the app','ok']]
+ candidates=[n for n in nodes if n.attrib.get('enabled')=='true' and (n.attrib.get('text','') or n.attrib.get('content-desc','')).strip().lower() in ['get started','start','next','skip','skip setup','not now','no thanks','no','done','finish','continue','allow','while using the app','ok']]
  if not candidates:break
  tap(candidates[-1])
 tree=snap('home')
