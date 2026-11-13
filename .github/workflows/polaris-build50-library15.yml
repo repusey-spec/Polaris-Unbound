@@ -1,0 +1,258 @@
+name: Polaris 50.15 account preservation and liked library
+on:
+  push:
+    branches: [experiment/build50-hush-library-15-account-likes]
+    paths:
+      - 'polaris-build50-library/**'
+      - '.github/workflows/polaris-build50-library15.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: polaris-stream15-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Checkout pinned full Hush
+        run: |
+          git clone --depth 1 --branch v13.14.7 --recurse-submodules https://github.com/maxinjohn/Hush.git "$RUNNER_TEMP/hush"
+          test "$(git -C "$RUNNER_TEMP/hush" rev-parse HEAD)" = "8f3e55d1114f1b844f0a21af8c365d090a43799f"
+      - name: Restore missing lyrics subprojects from pinned Hush overlays
+        run: |
+          set -euxo pipefail
+          HUSH="$RUNNER_TEMP/hush"
+          LYRICS="$HUSH/lyrics"
+          git -C "$HUSH" submodule update --init --recursive lyrics
+          for module in kugou lrclib simpmusic paxsenix betterlyrics unison youlyplus musixmatch; do
+            if [ -d "$HUSH/overlays/lyrics/$module" ]; then
+              mkdir -p "$LYRICS/$module"
+              cp -a "$HUSH/overlays/lyrics/$module/." "$LYRICS/$module/"
+            fi
+            test -f "$LYRICS/$module/build.gradle.kts" || {
+              echo "::error::Missing Gradle module: $module"
+              exit 1
+            }
+          done
+      - name: Patch existing MediaLibrarySession and stage radio Kotlin sources
+        run: |
+          python3 polaris-hush/patch_hush_browse.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_all.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_phone_ui.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_mini_player.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_recovery.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_network.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_transport.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_projection.py "$RUNNER_TEMP/hush"
+          # Reuse existing stable Polaris debug identity across ephemeral runners.
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/hush/polaris-debug.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug >/dev/null
+          python3 polaris-hush/patch_hush_branding.py "$RUNNER_TEMP/hush"
+          python3 -m pip install --quiet --disable-pip-version-check pillow cairosvg
+          python3 polaris-hush/patch_hush_icon.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_ui42.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_voice.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_ui47.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_radio_art48.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_aa49.py "$RUNNER_TEMP/hush"
+          python3 polaris-hush/patch_hush_aa50.py "$RUNNER_TEMP/hush"
+          mkdir -p "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris"
+          cp polaris-hush/*.kt "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/"
+          rm -f "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/PolarisRadioQueue.kt"  # Build 49 rollback
+          mkdir -p "$RUNNER_TEMP/hush/app/src/main/java/app/hush/music/polaris"
+          cp polaris-hush/StationArt.java polaris-hush/CurrentProgramResolver.java "$RUNNER_TEMP/hush/app/src/main/java/app/hush/music/polaris/"
+          sed -i '/implementation(libs.guava)/a\    implementation("org.jsoup:jsoup:1.18.3")' "$RUNNER_TEMP/hush/app/build.gradle.kts"
+          python3 -m py_compile polaris-hush/patch_hush_browse.py polaris-hush/patch_hush_radio_all.py polaris-hush/patch_hush_phone_ui.py polaris-hush/patch_hush_mini_player.py polaris-hush/patch_hush_branding.py polaris-hush/patch_hush_radio_recovery.py polaris-hush/patch_hush_radio_network.py polaris-hush/patch_hush_radio_transport.py polaris-hush/patch_hush_radio_projection.py polaris-hush/patch_hush_icon.py polaris-hush/patch_hush_ui42.py polaris-hush/patch_hush_voice.py polaris-hush/patch_hush_ui47.py polaris-hush/patch_hush_radio_art48.py polaris-hush/patch_hush_aa49.py polaris-hush/patch_hush_aa50.py polaris-hush/verify_hush_aa50.py
+      - name: Verify Build 50 radio playback and AA feature guards
+        run: python3 polaris-hush/verify_hush_aa50.py "$RUNNER_TEMP/hush"
+      - name: Apply audited Hush native library and remove broken inversion UI
+        run: |
+          set -euo pipefail
+          python3 -m py_compile polaris-build50-library/patch_library01.py polaris-build50-library/verify_library01.py
+          python3 polaris-build50-library/patch_library01.py "$RUNNER_TEMP/hush"
+          # Build49 mode-switch command is no longer registered. Exclude its
+          # orphan source file from this APK without deleting repo originals.
+          rm -f "$RUNNER_TEMP/hush/app/src/main/kotlin/app/hush/music/polaris/PolarisAAModeCommand.kt"
+          python3 polaris-build50-library/verify_library01.py "$RUNNER_TEMP/hush"
+      - name: Verify and apply ONLY three 50.2 changes
+        run: |
+          set -euo pipefail
+          python3 -m py_compile polaris-build50-library/patch_library02.py polaris-build50-library/verify_library02.py
+          python3 polaris-build50-library/patch_library02.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library02.py "$RUNNER_TEMP/hush"
+      - name: Apply and regression-check 50.3 root, radio, voice, and branding fixes
+        run: |
+          set -euo pipefail
+          python3 -m py_compile polaris-build50-library/patch_library03.py polaris-build50-library/verify_library03.py
+          python3 polaris-build50-library/patch_library03.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library03.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.4 source isolation and persistent reports
+        run: |
+          python3 polaris-build50-library/patch_library04.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library04.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.5 radio restore, queue, native search and small icon fixes
+        run: |
+          python3 polaris-build50-library/patch_library05.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library05.py "$RUNNER_TEMP/hush"
+      - name: Apply and verify 50.6 template navigation and own-engine search
+        run: |
+          python3 polaris-build50-library/patch_library06.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library06.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.7 serial downloads and completion validation
+        run: |
+          python3 polaris-build50-library/patch_library07.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library07.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.8 bounded verification, failed download controls and playback recovery
+        run: |
+          python3 polaris-build50-library/patch_library08.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library08.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.9 stream request diagnostics
+        run: |
+          python3 polaris-build50-library/patch_library09.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library09.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.10 resolver cancellation and authenticated context retry
+        run: |
+          python3 polaris-build50-library/patch_library10.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library10.py "$RUNNER_TEMP/hush"
+      - name: Checkout and patch pinned extractor for signature recovery and bounded JS
+        run: |
+          git clone --depth 1 --branch v0.26.3 https://github.com/TeamNewPipe/NewPipeExtractor.git "$RUNNER_TEMP/polaris-newpipe"
+          test "$(git -C "$RUNNER_TEMP/polaris-newpipe" rev-parse HEAD)" = "caae86c943857cc6e1a762e3488d6a14e9cf7800"
+          python3 polaris-build50-library/patch_extractor11.py "$RUNNER_TEMP/polaris-newpipe"
+      - name: Apply 50.11 resource cleanup, audio route policy and forensic diagnostics
+        run: |
+          python3 polaris-build50-library/patch_library11.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library11.py "$RUNNER_TEMP/hush"
+      - name: Apply 50.12 reusable PCM, background artwork and bounded checkpoint work
+        run: |
+          python3 polaris-build50-library/patch_library12.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library12.py "$RUNNER_TEMP/hush"
+      - name: Snapshot 50.12 then apply startup and local evidence fixes
+        run: |
+          python3 polaris-build50-library/cross_validate13.py snapshot "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/patch_library13.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/cross_validate13.py source "$RUNNER_TEMP/hush"
+      - name: Apply 50.14 streaming parser, local recovery and unlike fixes
+        run: |
+          python3 polaris-build50-library/verify_library14.py snapshot "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/patch_extractor14.py "$RUNNER_TEMP/polaris-newpipe"
+          python3 polaris-build50-library/patch_library14.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library14.py source "$RUNNER_TEMP/hush"
+      - name: Apply 50.15 account-safe recovery and liked library preservation
+        run: |
+          python3 polaris-build50-library/verify_library15.py snapshot "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/patch_library15.py "$RUNNER_TEMP/hush"
+          python3 polaris-build50-library/verify_library15.py source "$RUNNER_TEMP/hush"
+      - name: Test signature parser and interrupt/deadline safety before APK
+        working-directory: ${{ runner.temp }}/hush
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace -p ../polaris-newpipe :extractor:test --tests '*PolarisSignatureTest' -x :extractor:checkstyleMain
+      - name: Simulate download failures and queue lifecycle before APK assembly
+        working-directory: ${{ runner.temp }}/hush
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace :app:testGmsMobileArm64DebugUnitTest --tests 'app.hush.music.polaris.*'
+      - name: Analyze all simulation results before permitting APK assembly
+        run: |
+          python3 - <<'PYTEST'
+          from pathlib import Path
+          import os, json, xml.etree.ElementTree as ET
+          root = Path(os.environ['RUNNER_TEMP']) / 'hush'
+          files = list((root / 'app/build/test-results/testGmsMobileArm64DebugUnitTest').glob('TEST-*.xml'))
+          suites = [ET.parse(p).getroot() for p in files]
+          total = sum(int(s.get('tests', '0')) for s in suites)
+          bad = sum(int(s.get(k, '0')) for s in suites for k in ['failures', 'errors', 'skipped'])
+          expected = {'PolarisDownloadIntegrityTest', 'PolarisSerialDownloadsTest', 'PolarisDownloadRetryTest', 'PolarisChunkingDataSourceTest', 'PolarisDownloadStoreTest', 'PolarisSourcePolicyTest', 'PolarisResolverTest', 'PolarisRadioRegressionTest', 'PolarisCarNavigationTest', 'PolarisPlaybackJobsTest', 'PolarisDownloadPolicyTest', 'PolarisFailedDownloadsTest', 'PolarisDownloadMigrationTest', 'PolarisStreamDiagnosticsTest', 'PolarisResolverCancellationTest', 'PolarisPlayerContextRetryTest', 'PolarisResourcePolicyTest', 'PolarisAudioBufferTest', 'PolarisCheckpointTest', 'PolarisDisabledUpdaterTest', 'PolarisLocalPrefetchGateTest', 'PolarisRecovery14Test', 'PolarisAccountRecovery15Test'}
+          seen = {s.get('name', '').rsplit('.', 1)[-1] for s in suites}
+          assert expected <= seen, ('missing simulation classes', expected - seen)
+          assert total >= 163 and bad == 0, (total, bad)
+          extractor_files = list((root.parent / 'polaris-newpipe/extractor/build/test-results/test').glob('TEST-*PolarisSignatureTest.xml'))
+          assert extractor_files, 'missing extractor regression results'
+          extractor_suites = [ET.parse(p).getroot() for p in extractor_files]
+          extractor_tests = sum(int(s.get('tests', '0')) for s in extractor_suites)
+          extractor_bad = sum(int(s.get(k, '0')) for s in extractor_suites for k in ['failures', 'errors', 'skipped'])
+          assert extractor_tests >= 7 and extractor_bad == 0, (extractor_tests, extractor_bad)
+          report = {'extractor_tests': extractor_tests, 'tests': total, 'failures_errors_skipped': bad, 'classes': sorted(seen), 'apk_assembly_permitted': True}
+          (root / 'polaris-simulation-summary.json').write_text(json.dumps(report, indent=2))
+          print(json.dumps(report))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f'Simulation analysis: {total} tests passed; no failures, errors or skipped tests. APK assembly permitted.\n')
+          PYTEST
+      - name: Cross-validate executed regressions and unchanged playback boundaries
+        run: python3 polaris-build50-library/verify_library15.py final "$RUNNER_TEMP/hush"
+      - name: Compile Polaris 50.15 APK
+        working-directory: ${{ runner.temp }}/hush
+        run: |
+          chmod +x ./gradlew
+          # Force a new signed package; compiled dependency caches remain reusable.
+          cat > "$RUNNER_TEMP/fresh-package15.gradle" <<'GRADLE'
+          allprojects {
+              tasks.configureEach {
+                  if (name == 'packageGmsMobileArm64Debug') {
+                      outputs.upToDateWhen { false }
+                      outputs.doNotCacheIf('User requested a freshly packaged APK') { true }
+                  }
+              }
+          }
+          GRADLE
+          ./gradlew --no-daemon --stacktrace --init-script "$RUNNER_TEMP/fresh-package15.gradle" :app:assembleGmsMobileArm64Debug
+      - name: Verify installed APK label is Polaris
+        run: |
+          set -euo pipefail
+          APK=$(find "$RUNNER_TEMP/hush/app/build/outputs/apk/gmsMobileArm64/debug" -name '*.apk' -print -quit)
+          test -n "$APK"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | tee /tmp/polaris-apk-badging.txt | grep -E "^(package:|application-label:)"
+          grep -Fx "application-label:'Polaris'" /tmp/polaris-apk-badging.txt
+          grep -F "name='app.hush.music.polarisradio.debug'" /tmp/polaris-apk-badging.txt
+          EXPECTED_CODE=100577
+          grep -F "versionName='50.15'" /tmp/polaris-apk-badging.txt
+          grep -F "versionCode='$EXPECTED_CODE'" /tmp/polaris-apk-badging.txt
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          EXPECTED_CERT=$(keytool -exportcert -keystore "$RUNNER_TEMP/hush/polaris-debug.keystore" -storepass android -alias polarisdebug | sha256sum | awk '{print $1}')
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/polaris-apk-signer.txt
+          echo "Expected pinned cert SHA256: $EXPECTED_CERT"
+          grep -Fi "$EXPECTED_CERT" /tmp/polaris-apk-signer.txt
+      - name: Rename verified APK to end with build number
+        run: |
+          set -euo pipefail
+          APK_DIR="$RUNNER_TEMP/hush/app/build/outputs/apk/gmsMobileArm64/debug"
+          ORIGINAL_APK=$(find "$APK_DIR" -maxdepth 1 -type f -name '*.apk' -print -quit)
+          test -n "$ORIGINAL_APK"
+          TARGET_APK="$APK_DIR/Polaris_50.15_100577_15.apk"
+          mv "$ORIGINAL_APK" "$TARGET_APK"
+          test -s "$TARGET_APK"
+          echo "Final APK name: $(basename "$TARGET_APK")"
+      - name: Upload APK only if compile succeeds
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-50.15-100577
+          path: ${{ runner.temp }}/hush/app/build/outputs/apk/gmsMobileArm64/debug/Polaris_50.15_100577_15.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload regression test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-50.15-regression-results
+          path: |
+            ${{ runner.temp }}/hush/app/build/test-results/testGmsMobileArm64DebugUnitTest/*.xml
+            ${{ runner.temp }}/hush/polaris-simulation-summary.json
+            ${{ runner.temp }}/hush/polaris-cross-validation14.json
+            ${{ runner.temp }}/hush/polaris-cross-validation15.json
+            ${{ runner.temp }}/polaris-newpipe/extractor/build/test-results/test/TEST-*PolarisSignatureTest.xml
+          if-no-files-found: warn
+          retention-days: 7
