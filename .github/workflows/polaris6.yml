@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: polaris6-${{ github.ref }}
+  group: polaris6-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   apk:
