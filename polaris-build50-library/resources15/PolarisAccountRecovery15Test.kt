@@ -18,7 +18,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class, manifest = Config.NONE)
 class PolarisAccountRecovery15Test {
     @Test fun failedClientCannotDeleteStoredOrActiveAccount() = runBlocking {
-        val context = RuntimeEnvironment.getApplication<Application>()
+        val context = RuntimeEnvironment.getApplication()
         context.dataStore.edit { it[InnerTubeCookieKey] = "SAPISID=test-cookie"; it[DataSyncIdKey] = "selected-channel" }
         val initial = PlaybackAuthState(cookie = "SAPISID=test-cookie", dataSyncId = "selected-channel", visitorData = "visitor")
         YouTube.authState = initial
@@ -30,14 +30,14 @@ class PolarisAccountRecovery15Test {
         assertEquals("selected-channel", context.dataStore.data.first()[DataSyncIdKey])
     }
     @Test fun successfulPlaybackDoesNotOverwriteSelectedChannel() = runBlocking {
-        val context = RuntimeEnvironment.getApplication<Application>()
+        val context = RuntimeEnvironment.getApplication()
         val initial = PlaybackAuthState(cookie = "SAPISID=existing", dataSyncId = "brand-channel")
         YouTube.authState = initial
         assertEquals(7, context.retryWithoutPlaybackLoginContext { Result.success(7) }.getOrThrow())
         assertEquals(initial, YouTube.authState)
     }
     @Test fun cancellationStillPropagatesToCaller() = runBlocking {
-        val context = RuntimeEnvironment.getApplication<Application>()
+        val context = RuntimeEnvironment.getApplication()
         val cancel = CancellationException("superseded")
         try { context.retryWithoutPlaybackLoginContext<Int> { throw cancel }; fail("cancel swallowed") }
         catch (e: CancellationException) { assertSame(cancel, e) }
