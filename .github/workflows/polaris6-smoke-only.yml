@@ -1,0 +1,42 @@
+name: Polaris 6.0 bounded final APK smoke
+on:
+  push:
+    branches: [experiment/polaris-6-intertune]
+    paths: ['polaris6-smoke/**', '.github/workflows/polaris6-smoke-only.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Polaris-6.0-100600
+          run-id: 43512235994
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: delivery
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 300
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
+          script: python3 polaris6-smoke/check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.0-bounded-smoke
+          path: smoke/
+          retention-days: 14
