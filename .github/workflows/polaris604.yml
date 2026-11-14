@@ -48,9 +48,18 @@ jobs:
           EOF
       - name: Android toolchain
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.13113456' 'cmake;3.31.6' > /dev/null
-      - name: Tests and minified core release
+      - name: Release unit tests
         working-directory: ${{ runner.temp }}/intertune
-        run: ./gradlew :app:testCoreReleaseUnitTest --tests "com.dd3boh.outertune.polaris.*" --tests "com.dd3boh.outertune.playback.BadCachedCopyTest" --tests "com.dd3boh.outertune.playback.RecoveryTest" --tests "com.dd3boh.outertune.playback.ResumePointTest" --tests "com.dd3boh.outertune.playback.BluetoothResumeTest" --tests "com.dd3boh.outertune.utils.StreamCheckTest" --tests "com.dd3boh.outertune.utils.WebStream*Test" --tests "com.dd3boh.outertune.utils.ChainWalkTest" :app:assembleCoreRelease :app:assembleCoreReleaseAndroidTest --stacktrace --max-workers=2
+        run: ./gradlew --build-cache :app:testCoreReleaseUnitTest --tests "com.dd3boh.outertune.polaris.*" --tests "com.dd3boh.outertune.playback.BadCachedCopyTest" --tests "com.dd3boh.outertune.playback.RecoveryTest" --tests "com.dd3boh.outertune.playback.ResumePointTest" --tests "com.dd3boh.outertune.playback.BluetoothResumeTest" --tests "com.dd3boh.outertune.utils.StreamCheckTest" --tests "com.dd3boh.outertune.utils.WebStream*Test" --tests "com.dd3boh.outertune.utils.ChainWalkTest" --stacktrace --max-workers=2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.04-unit-results
+          path: ${{ runner.temp }}/intertune/app/build/test-results/testCoreReleaseUnitTest/
+          retention-days: 30
+      - name: Minified release and release instrumentation APK
+        working-directory: ${{ runner.temp }}/intertune
+        run: ./gradlew --build-cache :app:assembleCoreRelease :app:assembleCoreReleaseAndroidTest --stacktrace --max-workers=2
       - name: Verify install identity and signature
         run: |
           mkdir -p delivery
@@ -98,4 +107,3 @@ jobs:
           name: Polaris-6.04-smoke
           path: smoke/
           retention-days: 14
-

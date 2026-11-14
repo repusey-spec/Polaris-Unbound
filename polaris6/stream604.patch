@@ -639,7 +639,7 @@ index 89ecbb0..056485c 100644
                  // the way of the others calling it gone. IOS answers OK for songs every other client
                  // calls unavailable, then has its address refused (issue #29, 19 Oct 2026), and the
 diff --git a/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
-index b43b31a..b4b3147 100644
+index b43b31a..d9f9e6a 100644
 --- a/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
 +++ b/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
 @@ -276,12 +276,14 @@ class ChainWalkTest {
@@ -667,7 +667,15 @@ index b43b31a..b4b3147 100644
              val client = url.substringAfter("://").substringBefore('.')
              return if (client in heads) heads[client] else 200
          }
-@@ -1413,14 +1415,14 @@ class ChainWalkTest {
+@@ -1328,6 +1330,7 @@ class ChainWalkTest {
+ 
+     /** As on any phone in October 2026, with the experiment's switch on: VISIONOS served last and would be asked first. */
+     private fun experimentOn(): Memory {
++        org.junit.Assume.assumeTrue("Web-first is a debug-only experiment", Unreleased.WEB_CLIENT_FIRST)
+         remembering("VISIONOS", "ANDROID_VR")
+         YTPlayerUtils.askWebClientFirst = true
+         return YTPlayerUtils.streamMemory
+@@ -1413,14 +1416,14 @@ class ChainWalkTest {
              playerScript = playerScript,
              solver = solving,
          )
@@ -684,7 +692,7 @@ index b43b31a..b4b3147 100644
      }
  
      @Test
-@@ -1437,7 +1439,7 @@ class ChainWalkTest {
+@@ -1437,7 +1440,7 @@ class ChainWalkTest {
              playerScript = playerScript,
              solver = solving,
          )
@@ -693,7 +701,7 @@ index b43b31a..b4b3147 100644
          val data = walk(script).getOrThrow()
  
          assertEquals(List(3) { asked(Script.VIDEO_TOKEN) }, script.checked)
-@@ -1493,7 +1495,7 @@ class ChainWalkTest {
+@@ -1493,7 +1496,7 @@ class ChainWalkTest {
              script.checked,
          )
          assertEquals("the other tokens are not waited for again", listOf(StartAds.SETTLE_MS), script.paused)
@@ -702,7 +710,7 @@ index b43b31a..b4b3147 100644
          // No token on an address that is not a web client's.
          assertEquals("https://VISIONOS.example/videoplayback?itag=251", data.streamUrl)
          assertEquals("VISIONOS", YTPlayerUtils.lastStreamClient)
-@@ -1513,8 +1515,8 @@ class ChainWalkTest {
+@@ -1513,8 +1516,8 @@ class ChainWalkTest {
          val data = walk(script).getOrThrow()
  
          assertEquals(asked(Script.SESSION_TOKEN), data.streamUrl)
@@ -713,7 +721,7 @@ index b43b31a..b4b3147 100644
      }
  
      @Test
-@@ -1781,7 +1783,7 @@ class ChainWalkTest {
+@@ -1781,7 +1784,7 @@ class ChainWalkTest {
          val failure = walk(script).exceptionOrNull()
  
          assertEquals(
@@ -722,17 +730,19 @@ index b43b31a..b4b3147 100644
              YTPlayerUtils.lastStreamTrail,
          )
          assertEquals("YouTube refused the stream (HTTP 403)", failure?.message)
-@@ -2813,4 +2815,22 @@ class ChainWalkTest {
+@@ -2813,4 +2816,24 @@ class ChainWalkTest {
          assertEquals("Missing stream expire time", failure?.message)
          assertFalse(YTPlayerUtils.isSignInWanted(failure))
      }
 +    @Test
 +    fun actualPlayer403ExcludesTheProbedTokenForThatSong() {
-+        experimentOn()
++        signedIn()
++        YTPlayerUtils.authMode = PlaybackAuthMode.ALWAYS
 +        val script = Script(
-+            says = mapOf("WEB_REMIX" to listOf(ciphered())),
++            says = mapOf("ANDROID_VR" to listOf(refused(bot)), "WEB_REMIX" to listOf(ciphered())),
 +            playerScript = playerScript,
 +            solver = solving,
++            canSolve = true,
 +        )
 +        val first = walk(script).getOrThrow()
 +        assertEquals(asked(Script.VIDEO_TOKEN), first.streamUrl)
