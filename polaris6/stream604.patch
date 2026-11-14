@@ -1,0 +1,824 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index da1455c..b74144d 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -53,8 +53,8 @@ android {
+         applicationId = "app.hush.music.polarisradio.debug"
+         minSdk = 24
+         targetSdk = 36
+-        versionCode = 100603
+-        versionName = "6.03"
++        versionCode = 100604
++        versionName = "6.04"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+ 
+         // Obfuscated, not encrypted, and the difference matters. Anything the app can read, so
+@@ -351,6 +351,8 @@ dependencies {
+ 
+     implementation(libs.media3)
+     implementation(libs.media3.hls)
++    // Keep the tracing API used by AndroidJUnitRunner present in the minified test target.
++    implementation("androidx.tracing:tracing:1.2.0")
+     implementation(libs.media3.okhttp)
+     implementation(libs.media3.session)
+     implementation(libs.media3.workmanager)
+diff --git a/app/proguard-rules.pro b/app/proguard-rules.pro
+index cfe270e..76c2430 100755
+--- a/app/proguard-rules.pro
++++ b/app/proguard-rules.pro
+@@ -95,3 +95,9 @@
+ -keep class com.dd3boh.outertune.polaris.RadioCatalog$Station { *; }
+ -keep class com.dd3boh.outertune.polaris.PolarisRadioRequests { *; }
+ -keep class com.dd3boh.outertune.polaris.PolarisErrorReport { *; }
++
++# The release instrumentation runner calls this API from its separate APK.
++-keep class androidx.tracing.** { *; }
++
++# Public integration factory is exercised by the separate release test APK.
++-keep class com.dd3boh.outertune.polaris.PolarisMediaSources { public *; }
+diff --git a/app/src/androidTest/assets/hls604/audio.m3u8 b/app/src/androidTest/assets/hls604/audio.m3u8
+new file mode 100644
+index 0000000..aef13fb
+--- /dev/null
++++ b/app/src/androidTest/assets/hls604/audio.m3u8
+@@ -0,0 +1,12 @@
++#EXTM3U
++#EXT-X-VERSION:3
++#EXT-X-TARGETDURATION:1
++#EXT-X-MEDIA-SEQUENCE:0
++#EXT-X-PLAYLIST-TYPE:VOD
++#EXTINF:1.021678,
++audio0.ts
++#EXTINF:0.998456,
++audio1.ts
++#EXTINF:0.023222,
++audio2.ts
++#EXT-X-ENDLIST
+diff --git a/app/src/androidTest/assets/hls604/audio0.ts b/app/src/androidTest/assets/hls604/audio0.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6cfdd427991c4e11975397c800ca1dc5071e48e
+GIT binary patch
+literal 5452
+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
+KDbSv%-1t9%W&8X9
+
+literal 0
+HcmV?d00001
+
+diff --git a/app/src/androidTest/assets/hls604/audio1.ts b/app/src/androidTest/assets/hls604/audio1.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4789bb3bc5699f1143a440c30e96517bbae15367
+GIT binary patch
+literal 5264
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/app/src/androidTest/assets/hls604/audio2.ts b/app/src/androidTest/assets/hls604/audio2.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1699655dca4a39677a2125011447bfd93746f507
+GIT binary patch
+literal 752
+zcmZ>F5ENo?`k>0dc#whNKjVJ}#y<@r9zu+4Zf>~+sp*`-sYPX($*Bg0<u%Ty{tqtT
+z?!X|#z_5WA>~;pm4-8rxSvCzWC*pLCdjQbwOdEv2Zhy$|fq@@HY@2=HCQdDbM#9~Z
+u!FX-}1LHllI)*{xC=`b<Ffblq5NT*&Rb&uOIr;x%fCJ<FKa3KMTM7U^&y#ro
+
+literal 0
+HcmV?d00001
+
+diff --git a/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisHlsReleaseTest.kt b/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisHlsReleaseTest.kt
+new file mode 100644
+index 0000000..8aee496
+--- /dev/null
++++ b/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisHlsReleaseTest.kt
+@@ -0,0 +1,74 @@
++package com.dd3boh.outertune.polaris
++
++import androidx.media3.common.MediaItem
++import androidx.media3.common.MimeTypes
++import androidx.media3.common.PlaybackException
++import androidx.media3.common.Player
++import androidx.media3.exoplayer.ExoPlayer
++import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
++import androidx.test.ext.junit.runners.AndroidJUnit4
++import androidx.test.platform.app.InstrumentationRegistry
++import org.junit.Assert.*
++import org.junit.Test
++import org.junit.runner.RunWith
++import java.net.InetAddress
++import java.net.ServerSocket
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicReference
++import kotlin.concurrent.thread
++
++/** Prepare real HLS bytes through the final radio factory in the minified APK. */
++@RunWith(AndroidJUnit4::class)
++class PolarisHlsReleaseTest {
++    @Test fun radioHlsReachesReadyInTheReleaseApk() {
++        val instrumentation = InstrumentationRegistry.getInstrumentation()
++        val server = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
++        val assets = instrumentation.context.assets
++        val worker = thread(name = "PolarisHlsFixture", isDaemon = true) {
++            while (!server.isClosed) {
++                runCatching {
++                    server.accept().use { socket ->
++                        socket.soTimeout = 3000
++                        val input = socket.getInputStream().bufferedReader()
++                        val request = input.readLine() ?: return@use
++                        while (!input.readLine().isNullOrEmpty()) { }
++                        val name = request.split(' ')[1].substringBefore('?').substringAfterLast('/')
++                        require(name.matches(Regex("audio(?:[0-9]+\\.ts|\\.m3u8)")))
++                        val bytes = assets.open("hls604/$name").use { it.readBytes() }
++                        val mime = if (name.endsWith("m3u8")) "application/vnd.apple.mpegurl" else "video/mp2t"
++                        socket.getOutputStream().apply {
++                            write("HTTP/1.1 200 OK\r\nContent-Type: $mime\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
++                            write(bytes); flush()
++                        }
++                    }
++                }
++            }
++        }
++        val ready = CountDownLatch(1)
++        val failure = AtomicReference<PlaybackException?>()
++        var player: ExoPlayer? = null
++        try {
++            instrumentation.runOnMainSync {
++                val context = instrumentation.targetContext
++                val factory = PolarisMediaSources(context, DefaultMediaSourceFactory(context))
++                player = ExoPlayer.Builder(context).setMediaSourceFactory(factory).build().apply {
++                    addListener(object : Player.Listener {
++                        override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_READY) ready.countDown() }
++                        override fun onPlayerError(error: PlaybackException) { failure.set(error); ready.countDown() }
++                    })
++                    setMediaItem(MediaItem.Builder().setMediaId("polaris:station:kr1")
++                        .setUri("http://127.0.0.1:${server.localPort}/audio.m3u8")
++                        .setMimeType(MimeTypes.APPLICATION_M3U8).build())
++                    prepare()
++                }
++            }
++            assertTrue("HLS did not reach READY", ready.await(20, TimeUnit.SECONDS))
++            assertNull("HLS preparation failed: ${failure.get()}", failure.get())
++            instrumentation.runOnMainSync { assertEquals(Player.STATE_READY, player!!.playbackState) }
++        } finally {
++            instrumentation.runOnMainSync { player?.release() }
++            server.close(); worker.join(3000)
++        }
++    }
++}
+diff --git a/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt b/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt
+index ff4daaa..1ed9c07 100644
+--- a/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt
++++ b/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt
+@@ -55,7 +55,7 @@ class PolarisSessionTest {
+             assertEquals(13,main{browser.mediaItemCount})
+             assertFalse(main{browser.playWhenReady})
+             val report=PolarisErrorReport.dump(context)
+-            assertTrue(report.startsWith("Polaris 6.0 (versionCode 100600)"))
++            assertTrue(report.startsWith("Polaris 6.04 (versionCode 100604)"))
+             assertTrue(report.contains("=== PROCESS EXIT HISTORY ==="))
+             assertTrue(report.contains("AA-radio-request station=kr5"))
+         } finally {main{browser.release()}}
+diff --git a/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt b/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt
+index f2bb034..774ef28 100644
+--- a/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt
++++ b/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt
+@@ -4526,6 +4526,7 @@ class MusicService : MediaLibraryService(),
+         val failedId = PlayBook.itemOf(error, player.currentTimeline) ?: player.currentMediaItem?.mediaId
+         // The route the song failed on, read before its address is forgotten: see SongRoutes.
+         val failedRoute = streamAddresses.clientOf(failedId)
++        if (Recovery.status(error) == 403) YTPlayerUtils.noteWebStreamRejected(streamAddresses.addressOf(failedId))
+         val goOn = badCachedCopy.playerFailed(failedId, error)
+         if (streamAddresses.playerFailedOn(failedId)) {
+             Log.d(TAG, "PLAYING: the player failed on $failedId, its stream address will be asked for again")
+@@ -4649,6 +4650,7 @@ class MusicService : MediaLibraryService(),
+      */
+     private fun changeRoute(id: String, why: String, refused: Boolean = false, strike: Boolean = true) {
+         val route = streamAddresses.clientOf(id)
++        if (refused) YTPlayerUtils.noteWebStreamRejected(streamAddresses.addressOf(id))
+         val now = SystemClock.elapsedRealtime()
+         if (route == null) {
+             if (streamAddresses.playerFailedOn(id)) Log.w(TAG, StepLog.loadFailed(id, why, null))
+diff --git a/app/src/main/java/com/dd3boh/outertune/playback/StreamAddresses.kt b/app/src/main/java/com/dd3boh/outertune/playback/StreamAddresses.kt
+index 4268ac4..50aea13 100644
+--- a/app/src/main/java/com/dd3boh/outertune/playback/StreamAddresses.kt
++++ b/app/src/main/java/com/dd3boh/outertune/playback/StreamAddresses.kt
+@@ -63,6 +63,10 @@ class StreamAddresses {
+     @Synchronized
+     fun clientOf(mediaId: String?): String? = mediaId?.let { kept[it]?.client }
+ 
++    /** Address for exact failure feedback, including an address close to expiry. */
++    @Synchronized
++    fun addressOf(mediaId: String?): String? = mediaId?.let { kept[it]?.address }
++
+     /** Whether [mediaId]'s address passed its check: a refusal of it later is then the route's. */
+     @Synchronized
+     fun wasChecked(mediaId: String?): Boolean = mediaId?.let { kept[it]?.checked } == true
+diff --git a/app/src/main/java/com/dd3boh/outertune/utils/WebStreamProbe.kt b/app/src/main/java/com/dd3boh/outertune/utils/WebStreamProbe.kt
+new file mode 100644
+index 0000000..b0824a0
+--- /dev/null
++++ b/app/src/main/java/com/dd3boh/outertune/utils/WebStreamProbe.kt
+@@ -0,0 +1,40 @@
++package com.dd3boh.outertune.utils
++
++import okhttp3.Call
++import okhttp3.Request
++import java.io.IOException
++
++/** A partial status alone is not proof that the requested audio bytes were served. */
++internal object WebStreamProbe {
++    data class Result(val status: Int?, val verified: Boolean)
++    private val range = Regex("bytes (\\d+)-(\\d+)/(\\d+|\\*)", RegexOption.IGNORE_CASE)
++
++    fun read(calls: Call.Factory, url: String, from: Long): Result {
++        val request = Request.Builder().url(url).header("Range", "bytes=$from-${from + 15}")
++            .header("Accept-Encoding", "identity").build()
++        return try {
++            calls.newCall(request).execute().use { response ->
++                val status = response.code
++                val parts = response.header("Content-Range")?.trim()?.let(range::matchEntire)
++                val correctRange = parts != null && parts.groupValues[1].toLongOrNull() == from &&
++                    parts.groupValues[2].toLongOrNull() == from + 15 &&
++                    (parts.groupValues[3] == "*" || (parts.groupValues[3].toLongOrNull() ?: 0) > from + 15)
++                if (status != 206 || !correctRange) return@use Result(status, false)
++                val body = response.body ?: return@use Result(status, false)
++                val bytes = ByteArray(16)
++                var count = 0
++                try {
++                    val stream = body.byteStream()
++                    while (count < bytes.size) {
++                        val got = stream.read(bytes, count, bytes.size - count)
++                        if (got <= 0) break
++                        count += got
++                    }
++                    Result(status, count == bytes.size)
++                } catch (_: IOException) {
++                    Result(status, false)
++                }
++            }
++        } catch (_: IOException) { Result(null, false) }
++    }
++}
+diff --git a/app/src/main/java/com/dd3boh/outertune/utils/WebStreamRejections.kt b/app/src/main/java/com/dd3boh/outertune/utils/WebStreamRejections.kt
+new file mode 100644
+index 0000000..db64c09
+--- /dev/null
++++ b/app/src/main/java/com/dd3boh/outertune/utils/WebStreamRejections.kt
+@@ -0,0 +1,43 @@
++package com.dd3boh.outertune.utils
++
++/** Bounded, process-only feedback from actual playback, separate from successful probes. */
++internal class WebStreamRejections(
++    private val ttlMs: Long = 10 * 60_000L,
++    private val capacity: Int = 128,
++) {
++    private data class Key(val song: String, val scope: String, val variant: String)
++    private data class Choice(val key: Key, val at: Long)
++    private val choices = linkedMapOf<String, Choice>()
++    private val rejected = linkedMapOf<Key, Long>()
++
++    @Synchronized fun selected(url: String, song: String, scope: String, variant: String, now: Long) {
++        prune(now)
++        choices[url] = Choice(Key(song, scope, variant), now)
++        trim(choices)
++    }
++
++    /** The address, not the current/last prefetched song, identifies the failed choice. */
++    @Synchronized fun reject(url: String?, now: Long): Boolean {
++        prune(now)
++        val choice = choices[url] ?: return false
++        if (choice.key in rejected) return false
++        rejected[choice.key] = now
++        trim(rejected)
++        return true
++    }
++
++    @Synchronized fun isRejected(song: String, scope: String, variant: String, now: Long): Boolean {
++        prune(now)
++        return Key(song, scope, variant) in rejected
++    }
++
++    @Synchronized fun clear() { choices.clear(); rejected.clear() }
++
++    private fun prune(now: Long) {
++        choices.entries.removeAll { now - it.value.at >= ttlMs || now < it.value.at }
++        rejected.entries.removeAll { now - it.value >= ttlMs || now < it.value }
++    }
++    private fun <K, V> trim(map: MutableMap<K, V>) {
++        while (map.size > capacity) map.remove(map.keys.first())
++    }
++}
+diff --git a/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt b/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt
+index 89ecbb0..056485c 100644
+--- a/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt
++++ b/app/src/main/java/com/dd3boh/outertune/utils/YTPlayerUtils.kt
+@@ -289,6 +289,10 @@ object YTPlayerUtils {
+          */
+         fun readPast(url: String, from: Long): Int?
+ 
++        /** Tests may supply a range result; the live wire always validates headers and body. */
++        fun probeRange(url: String, from: Long): WebStreamProbe.Result =
++            readPast(url, from).let { WebStreamProbe.Result(it, it != null && StreamCheck.accept(it)) }
++
+         /** Waits, for the experiment's client: an address refused at once is tried again later. See [StartAds]. */
+         suspend fun pause(ms: Long)
+ 
+@@ -365,12 +369,10 @@ object YTPlayerUtils {
+ 
+         override suspend fun playerScript(): PlayerScript? = playerScripts.current()
+ 
+-        override fun readPast(url: String, from: Long): Int? = try {
+-            val request = okhttp3.Request.Builder().url(url).header("Range", "bytes=$from-${from + 15}").build()
+-            streamCalls.newCall(request).execute().use { it.code }
+-        } catch (e: Exception) {
+-            null
+-        }
++        override fun readPast(url: String, from: Long): Int? = probeRange(url, from).status
++
++        override fun probeRange(url: String, from: Long): WebStreamProbe.Result =
++            WebStreamProbe.read(streamCalls, url, from)
+ 
+         override suspend fun pause(ms: Long) {
+             // A wait for the ads YouTube put before the song is the song's, not the network's:
+@@ -659,10 +661,20 @@ object YTPlayerUtils {
+     /** The token the experiment's client was last served with, tried first for the next song. In memory only. */
+     @Volatile
+     private var potThatServed: Pot? = null
++    private val webStreamRejections = WebStreamRejections()
++
++    /** Call before forgetting the failed address. No URL or token is written to a log. */
++    fun noteWebStreamRejected(url: String?) {
++        if (webStreamRejections.reject(url, SystemClock.elapsedRealtime())) {
++            potThatServed = null
++            Log.i(TAG, "WEB stream: actual player 403 remembered; next resolve excludes that song's token choice")
++        }
++    }
+ 
+     /** For the tests, each of which starts as a new process does. */
+     internal fun forgetWhatTheTrialLearned() {
+         potThatServed = null
++        webStreamRejections.clear()
+         trialLimitMs = TRIAL_LIMIT_MS
+         visionosTakenForRefused = false
+         ownVisionosTakenForRefused = false
+@@ -705,7 +717,10 @@ object YTPlayerUtils {
+     }
+ 
+     /** What checking the experiment's address came to: the address as it was last asked for, what it got, with which token and how. */
+-    private class TrialCheck(val url: String, val status: Int?, val pot: Pot, val how: String)
++    private class TrialCheck(
++        val url: String, val status: Int?, val pot: Pot?, val how: String,
++        val verified: Boolean, val scope: String,
++    )
+ 
+     /**
+      * The experiment's address, asked for the way a page that plays it would ask.
+@@ -738,9 +753,13 @@ object YTPlayerUtils {
+         videoPot: String?,
+         sessionPot: String?,
+         wire: Wire,
++        scope: String,
+         patient: Boolean = false,
+     ): TrialCheck {
+-        val pots = potsToTry(videoPot, sessionPot)
++        val pots = potsToTry(videoPot, sessionPot).filterNot {
++            webStreamRejections.isRejected(videoId, scope, it.first.name, SystemClock.elapsedRealtime())
++        }
++        if (pots.isEmpty()) return TrialCheck(address, 403, null, "all token choices already refused by player", false, scope)
+         val cpn = wire.cpn()
+         val adMs = StartAds.waitMs(answer.adPlacements, answer.adSlots)
+         val from = if (length != null && length > 16) minOf(PAST, length - 16) else PAST
+@@ -754,21 +773,21 @@ object YTPlayerUtils {
+         suspend fun tried(kind: Pot, pot: String?, afterMs: Long): TrialCheck {
+             val url = StreamCipher.withCpn(StreamCipher.withPot(address, pot), cpn)
+             val at = if (afterMs > 0) "after ${afterMs / 1000} s" else "at once"
+-            var status = wire.head(url, patient)
+-            Log.i(TAG, "[$videoId] [${client.clientName}] HEAD ${status ?: "failed"} with ${kind.words}, $at")
+-            var byReading = false
+-            if (status != null && !StreamCheck.accept(status)) {
+-                val past = wire.readPast(url, from)
+-                Log.i(TAG, "[$videoId] [${client.clientName}] a read past 512 KB got ${past ?: "no answer"} with ${kind.words}, $at")
+-                if (past != null && StreamCheck.accept(past)) {
+-                    status = past
+-                    byReading = true
+-                }
+-            }
+-            val how = listOfNotNull(kind.words, at.takeIf { afterMs > 0 }, "by a read past 512 KB".takeIf { byReading })
+-            return TrialCheck(url, status, kind, how.joinToString(", "))
++            val head = wire.head(url, patient)
++            Log.i(TAG, "[$videoId] [${client.clientName}] HEAD ${head ?: "failed"} with ${kind.words}, $at")
++            if (head == null) return TrialCheck(url, null, kind, kind.words, false, scope)
++            // Check both the first bytes and bytes past YouTube's small initial allowance.
++            val past = wire.probeRange(url, from)
++            val first = if (past.verified) wire.probeRange(url, 0) else null
++            val verified = past.verified && first?.verified == true
++            val status = if (!past.verified) past.status else if (first?.verified != true) first?.status else if (StreamCheck.accept(head)) head else past.status
++            Log.i(TAG, "[$videoId] [${client.clientName}] range bytes ${if (verified) "verified" else "not verified"} ($status) with ${kind.words}, $at")
++            val how = listOfNotNull(kind.words, at.takeIf { afterMs > 0 },
++                "by verified range bytes".takeIf { verified && !StreamCheck.accept(head) },
++                "range bytes not verified".takeIf { status != null && !verified })
++            return TrialCheck(url, status, kind, how.joinToString(", "), verified, scope)
+         }
+-        fun settles(check: TrialCheck) = check.status == null || StreamCheck.accept(check.status)
++        fun settles(check: TrialCheck) = check.status == null || check.verified
+ 
+         val (firstKind, firstPot) = pots.first()
+         var waitedMs = 0L
+@@ -2015,6 +2034,7 @@ object YTPlayerUtils {
+                     else checkTrialAddress(
+                         videoId, client, address, format.contentLength, streamPlayerResponse,
+                         tokensFor(client)?.playerRequestPoToken, tokensFor(client)?.streamingDataPoToken, wire,
++                        scope = "${if (asAccount) "account" else "visitor"}:${if (asAccount) YouTube.dataSyncId else YouTube.visitorData}",
+                         // Its check given the longer try on a network taken for slow: it never plays unchecked.
+                         patient = slowNetwork || NetworkPace.isSlow(),
+                     )
+@@ -2042,7 +2062,8 @@ object YTPlayerUtils {
+                             .also { if (!check.isCompleted) stillChecking = check }
+                     }
+                 }
+-                val verdict = StreamCheck.verdict(status)
++                val verdict = if (trialCheck != null && status != null && !trialCheck.verified)
++                    StreamCheck.Verdict.REFUSED else StreamCheck.verdict(status)
+                 steps += StepLog.checked(status, msSince(checkedAt))
+                 val carried = trialCheck?.pot
+                 streamUrl = checked
+@@ -2066,7 +2087,12 @@ object YTPlayerUtils {
+                     // The client's own name between the brackets, one word: tools/release-check/smoke.py reads this line.
+                     Log.i(TAG, "[$videoId] [${clientLabel.substringBefore(' ')}] found working stream ($status), address issued to $issuedTo")
+                     validated = true
+-                    if (isWeb) potThatServed = carried
++                    if (isWeb) {
++                        potThatServed = carried
++                        if (carried != null && trialCheck != null) webStreamRejections.selected(
++                            checked, videoId, trialCheck.scope, carried.name, SystemClock.elapsedRealtime(),
++                        )
++                    }
+                     break
+                 }
+                 // The player was refused an address of VISIONOS for this song a moment ago, under
+@@ -2107,7 +2133,11 @@ object YTPlayerUtils {
+                     streamUrl = null
+                     continue
+                 }
+-                Log.w(TAG, "[$videoId] [${clientLabel.substringBefore(' ')}] got bad http status code $status, address issued to $issuedTo")
++                if (trialCheck != null && status != null && StreamCheck.accept(status)) {
++                    Log.w(TAG, "[$videoId] [${clientLabel.substringBefore(' ')}] HTTP $status did not verify requested range bytes, address issued to $issuedTo")
++                } else {
++                    Log.w(TAG, "[$videoId] [${clientLabel.substringBefore(' ')}] got bad http status code $status, address issued to $issuedTo")
++                }
+                 // An OK whose address is refused says nothing of the song: it no longer stands in
+                 // the way of the others calling it gone. IOS answers OK for songs every other client
+                 // calls unavailable, then has its address refused (issue #29, 19 Oct 2026), and the
+diff --git a/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
+index b43b31a..9fb96cf 100644
+--- a/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
++++ b/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
+@@ -276,12 +276,14 @@ class ChainWalkTest {
+         /** Every address checked with the longer try a network taken for slow gets, in order. */
+         val patientChecks = java.util.Collections.synchronizedList(mutableListOf<String>())
+ 
++        private val lastHeads = mutableMapOf<String, Int?>()
++
+         override suspend fun head(url: String, patient: Boolean): Int? {
+             checked += url
+             if (patient) patientChecks += url
+             val client = url.substringAfter("://").substringBefore('.')
+             headTakes[client]?.let { delay(it) }
+-            headOf?.let { return it(url) }
++            headOf?.let { check -> return check(url).also { lastHeads[url] = it } }
+             return if (client in heads) heads[client] else 200
+         }
+ 
+@@ -300,7 +302,7 @@ class ChainWalkTest {
+             readPastOf += url
+             readFrom += from
+             readsPast?.let { return it(url) }
+-            headOf?.let { return it(url) }
++            if (url in lastHeads) return lastHeads[url]
+             val client = url.substringAfter("://").substringBefore('.')
+             return if (client in heads) heads[client] else 200
+         }
+@@ -1413,14 +1415,14 @@ class ChainWalkTest {
+             playerScript = playerScript,
+             solver = solving,
+         )
+-        script.readsPast = { 403 }
++        script.readsPast = { if (tries <= 1) 403 else 206 }
+         val data = walk(script).getOrThrow()
+ 
+         assertEquals(listOf(asked(Script.VIDEO_TOKEN), asked(Script.VIDEO_TOKEN)), script.checked)
+         assertEquals(listOf(StartAds.SETTLE_MS), script.paused)
+         assertEquals(asked(Script.VIDEO_TOKEN), data.streamUrl)
+         assertEquals("WEB_REMIX OK, HEAD 200 with the video's token, after 6 s", YTPlayerUtils.lastStreamTrail)
+-        assertEquals("the refused try was also read from, two megabytes in", listOf(2L * 1024 * 1024), script.readFrom)
++        assertEquals("the refused try was also read from, two megabytes in", listOf(2L * 1024 * 1024, 2L * 1024 * 1024, 0L), script.readFrom)
+     }
+ 
+     @Test
+@@ -1493,7 +1495,7 @@ class ChainWalkTest {
+             script.checked,
+         )
+         assertEquals("the other tokens are not waited for again", listOf(StartAds.SETTLE_MS), script.paused)
+-        assertEquals("WEB_REMIX OK, HEAD 403 with no token, after 6 s, VISIONOS OK, HEAD 200", YTPlayerUtils.lastStreamTrail)
++        assertEquals("WEB_REMIX OK, HEAD 403 with no token, after 6 s, range bytes not verified, VISIONOS OK, HEAD 200", YTPlayerUtils.lastStreamTrail)
+         // No token on an address that is not a web client's.
+         assertEquals("https://VISIONOS.example/videoplayback?itag=251", data.streamUrl)
+         assertEquals("VISIONOS", YTPlayerUtils.lastStreamClient)
+@@ -1513,8 +1515,8 @@ class ChainWalkTest {
+         val data = walk(script).getOrThrow()
+ 
+         assertEquals(asked(Script.SESSION_TOKEN), data.streamUrl)
+-        assertEquals("WEB_REMIX OK, HEAD 206 with the session's token, after 6 s, by a read past 512 KB", YTPlayerUtils.lastStreamTrail)
+-        assertEquals("the video's token twice, then the session's", 3, script.readPastOf.size)
++        assertEquals("WEB_REMIX OK, HEAD 206 with the session's token, after 6 s, by verified range bytes", YTPlayerUtils.lastStreamTrail)
++        assertEquals("the video's token twice, then the session's far and first bytes", 4, script.readPastOf.size)
+     }
+ 
+     @Test
+@@ -1781,7 +1783,7 @@ class ChainWalkTest {
+         val failure = walk(script).exceptionOrNull()
+ 
+         assertEquals(
+-            "VISIONOS OK, HEAD 403, ANDROID_VR LOGIN_REQUIRED, WEB_REMIX OK, HEAD 403 with no token, after 6 s, IOS OK, HEAD 403",
++            "VISIONOS OK, HEAD 403, ANDROID_VR LOGIN_REQUIRED, WEB_REMIX OK, HEAD 403 with no token, after 6 s, range bytes not verified, IOS OK, HEAD 403",
+             YTPlayerUtils.lastStreamTrail,
+         )
+         assertEquals("YouTube refused the stream (HTTP 403)", failure?.message)
+@@ -2813,4 +2815,22 @@ class ChainWalkTest {
+         assertEquals("Missing stream expire time", failure?.message)
+         assertFalse(YTPlayerUtils.isSignInWanted(failure))
+     }
++    @Test
++    fun actualPlayer403ExcludesTheProbedTokenForThatSong() {
++        experimentOn()
++        val script = Script(
++            says = mapOf("WEB_REMIX" to listOf(ciphered())),
++            playerScript = playerScript,
++            solver = solving,
++        )
++        val first = walk(script).getOrThrow()
++        assertEquals(asked(Script.VIDEO_TOKEN), first.streamUrl)
++        YTPlayerUtils.noteWebStreamRejected(first.streamUrl)
++        val second = walk(script).getOrThrow()
++        assertEquals(asked(Script.SESSION_TOKEN), second.streamUrl)
++        YTPlayerUtils.noteWebStreamRejected(second.streamUrl)
++        val third = walk(script).getOrThrow()
++        assertEquals(asked(null), third.streamUrl)
++    }
++
+ }
+diff --git a/app/src/test/java/com/dd3boh/outertune/utils/WebStreamProbeTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/WebStreamProbeTest.kt
+new file mode 100644
+index 0000000..5b10df5
+--- /dev/null
++++ b/app/src/test/java/com/dd3boh/outertune/utils/WebStreamProbeTest.kt
+@@ -0,0 +1,33 @@
++package com.dd3boh.outertune.utils
++
++import com.sun.net.httpserver.HttpServer
++import okhttp3.OkHttpClient
++import org.junit.Assert.*
++import org.junit.Test
++import java.net.InetSocketAddress
++
++/** Real HTTP response bodies, including a misleading 206 and a short body. */
++class WebStreamProbeTest {
++    private fun probe(status: Int, range: String?, bytes: Int = 16, declared: Long = bytes.toLong()): WebStreamProbe.Result {
++        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
++        server.createContext("/audio") { exchange ->
++            assertEquals("bytes=2097152-2097167", exchange.requestHeaders.getFirst("Range"))
++            range?.let { exchange.responseHeaders.set("Content-Range", it) }
++            exchange.sendResponseHeaders(status, declared)
++            runCatching { exchange.responseBody.use { it.write(ByteArray(bytes) { 7 }) } }
++            exchange.close()
++        }
++        server.start()
++        val client = OkHttpClient.Builder().readTimeout(2, java.util.concurrent.TimeUnit.SECONDS).build()
++        return try { WebStreamProbe.read(client, "http://127.0.0.1:${server.address.port}/audio", 2097152) }
++        finally { server.stop(0); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
++    }
++    @Test fun validPartialRangeWithAllBytesIsAccepted() {
++        assertEquals(WebStreamProbe.Result(206, true), probe(206, "bytes 2097152-2097167/4000000"))
++    }
++    @Test fun partialStatusWithoutRangeIsRejected() { assertEquals(WebStreamProbe.Result(206, false), probe(206, null)) }
++    @Test fun partialStatusForTheWrongRangeIsRejected() { assertFalse(probe(206, "bytes 0-15/4000000").verified) }
++    @Test fun truncatedBodyIsRejectedDespitePartialStatus() { assertFalse(probe(206, "bytes 2097152-2097167/4000000", 3, 16).verified) }
++    @Test fun forbiddenGetIsRejected() { assertEquals(WebStreamProbe.Result(403, false), probe(403, null)) }
++    @Test fun ignoredRangeReturningTheWholeResourceIsRejected() { assertFalse(probe(200, null).verified) }
++}
+diff --git a/app/src/test/java/com/dd3boh/outertune/utils/WebStreamRejectionsTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/WebStreamRejectionsTest.kt
+new file mode 100644
+index 0000000..d7b09c5
+--- /dev/null
++++ b/app/src/test/java/com/dd3boh/outertune/utils/WebStreamRejectionsTest.kt
+@@ -0,0 +1,41 @@
++package com.dd3boh.outertune.utils
++
++import org.junit.Assert.*
++import org.junit.Test
++
++class WebStreamRejectionsTest {
++    @Test fun playerRefusalExcludesOnlyTheExactSongScopeAndVariant() {
++        val memory = WebStreamRejections()
++        memory.selected("url-a", "song-a", "account-a", "VIDEO", 0)
++        memory.selected("prefetched", "song-b", "account-a", "VIDEO", 1)
++        assertTrue(memory.reject("url-a", 2))
++        assertTrue(memory.isRejected("song-a", "account-a", "VIDEO", 3))
++        assertFalse(memory.isRejected("song-a", "account-a", "SESSION", 3))
++        assertFalse(memory.isRejected("song-b", "account-a", "VIDEO", 3))
++        assertFalse(memory.isRejected("song-a", "account-b", "VIDEO", 3))
++    }
++    @Test fun duplicateCallbacksDoNotExtendTheRefusal() {
++        val memory = WebStreamRejections(ttlMs = 100)
++        memory.selected("url", "song", "scope", "VIDEO", 0)
++        assertTrue(memory.reject("url", 1))
++        assertFalse(memory.reject("url", 90))
++        assertFalse(memory.isRejected("song", "scope", "VIDEO", 101))
++    }
++    @Test fun unknownCachedOrUnselectedAddressesDoNotRejectAnything() {
++        val memory = WebStreamRejections()
++        assertFalse(memory.reject(null, 0))
++        assertFalse(memory.reject("unknown", 0))
++    }
++    @Test fun selectionsAndRefusalsAreBounded() {
++        val memory = WebStreamRejections(capacity = 2)
++        for (i in 0..2) { memory.selected("u$i", "s$i", "scope", "VIDEO", 0); memory.reject("u$i", 1) }
++        assertFalse(memory.reject("u0", 2))
++        assertFalse(memory.isRejected("s0", "scope", "VIDEO", 2))
++        assertTrue(memory.isRejected("s2", "scope", "VIDEO", 2))
++    }
++    @Test fun expiredSelectionsCannotPoisonNewPlayback() {
++        val memory = WebStreamRejections(ttlMs = 100)
++        memory.selected("url", "song", "scope", "VIDEO", 0)
++        assertFalse(memory.reject("url", 100))
++    }
++}
