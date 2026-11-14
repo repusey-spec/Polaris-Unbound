@@ -1,0 +1,165 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -350,6 +350,7 @@
+     implementation(libs.viewmodel.compose)
+ 
+     implementation(libs.media3)
++    implementation(libs.media3.hls)
+     implementation(libs.media3.okhttp)
+     implementation(libs.media3.session)
+     implementation(libs.media3.workmanager)
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -58,6 +58,7 @@
+ viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+ 
+ media3 = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
++media3-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
+ media3-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
+ media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+ work = { group = "androidx.work", name = "work-runtime-ktx", version = "2.8.1" }
+diff --git a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisMediaSources.kt b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisMediaSources.kt
+--- a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisMediaSources.kt
++++ b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisMediaSources.kt
+@@ -2,22 +2,33 @@
+ 
+ import android.content.Context
+ import androidx.media3.common.MediaItem
++import androidx.media3.common.MimeTypes
+ import androidx.media3.datasource.DefaultDataSource
+ import androidx.media3.datasource.DefaultHttpDataSource
+ import androidx.media3.datasource.ResolvingDataSource
+ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+ import androidx.media3.exoplayer.source.MediaSource
++import androidx.media3.exoplayer.hls.HlsMediaSource
+ 
+ /** Choose at MediaItem construction, never from a global flag on loader threads. */
+ class PolarisMediaSources(context: Context, private val songs: MediaSource.Factory) : MediaSource.Factory by songs {
+     private val direct = DefaultDataSource.Factory(context,
+         DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 Polaris/6.0")
+             .setConnectTimeoutMs(10_000).setReadTimeoutMs(15_000).setAllowCrossProtocolRedirects(true))
+-    private val radio = DefaultMediaSourceFactory(ResolvingDataSource.Factory(direct) { spec ->
++    private val radioDataSources = ResolvingDataSource.Factory(direct) { spec ->
+         PolarisRadioRequests.resolve(spec)
+-    })
++    }
++    private val radio = DefaultMediaSourceFactory(radioDataSources)
++    // A direct reference makes HLS support a compile-time dependency as well as
++    // keeping it reachable in the minified release used in the car.
++    private val radioHls = HlsMediaSource.Factory(radioDataSources)
+     override fun createMediaSource(mediaItem: MediaItem): MediaSource =
+         if (PolarisRadioRequests.stationId(mediaItem) != null) {
+-            radio.createMediaSource(PolarisRadioRequests.normalize(mediaItem))
++            val normalized = PolarisRadioRequests.normalize(mediaItem)
++            if (normalized.localConfiguration?.mimeType == MimeTypes.APPLICATION_M3U8) {
++                radioHls.createMediaSource(normalized)
++            } else {
++                radio.createMediaSource(normalized)
++            }
+         } else songs.createMediaSource(mediaItem)
+ }
+diff --git a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadata.kt b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadata.kt
+--- a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadata.kt
++++ b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadata.kt
+@@ -20,9 +20,10 @@
+ 
+     fun mediaMetadata(id: String): MediaMetadata {
+         val station = RadioCatalog.find(id)?.title ?: CurrentProgramResolver.stationName(id)
++        val labels = PolarisRadioLabels.of(station, title(id))
+         val builder = MediaMetadata.Builder()
+-            .setTitle(title(id))
+-            .setArtist(station)
++            .setTitle(labels.title)
++            .setArtist(labels.artist)
+             .setIsPlayable(true)
+             .setIsBrowsable(false)
+             .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+diff --git a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadataRefresh.kt b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadataRefresh.kt
+--- a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadataRefresh.kt
++++ b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioMetadataRefresh.kt
+@@ -52,9 +52,11 @@
+                         }
+                     }
+                     val liveItem = player.currentMediaItem
+-                    val title = PolarisRadioMetadata.title(station)
++                    val metadata = PolarisRadioMetadata.mediaMetadata(station)
+                     if (liveItem?.mediaId == "polaris:station:$station" &&
+-                        liveItem.mediaMetadata.title?.toString() != title &&
++                        (liveItem.mediaMetadata.title?.toString() != metadata.title?.toString() ||
++                            liveItem.mediaMetadata.artist?.toString() != metadata.artist?.toString() ||
++                            liveItem.mediaMetadata.artworkUri != metadata.artworkUri) &&
+                         player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+                         val index = player.currentMediaItemIndex
+                         if (index in 0 until player.mediaItemCount) {
+@@ -62,7 +64,7 @@
+                                 player.replaceMediaItem(
+                                     index,
+                                     liveItem.buildUpon()
+-                                        .setMediaMetadata(PolarisRadioMetadata.mediaMetadata(station))
++                                        .setMediaMetadata(metadata)
+                                         .build(),
+                                 )
+                             }.onFailure {
+diff --git a/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioLabels.kt b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioLabels.kt
+--- /dev/null
++++ b/app/src/main/java/com/dd3boh/outertune/polaris/PolarisRadioLabels.kt
+@@ -0,0 +1,14 @@
++// SPDX-License-Identifier: GPL-3.0
++package com.dd3boh.outertune.polaris
++
++/** The car renders title and artist as two lines, even when both are identical. */
++internal object PolarisRadioLabels {
++    data class Labels(val title: String, val artist: String?)
++
++    fun of(station: String, programmeTitle: String?): Labels {
++        val stationName = station.trim()
++        val title = programmeTitle?.trim()?.takeIf { it.isNotEmpty() } ?: stationName
++        val artist = stationName.takeIf { it.isNotEmpty() && !it.equals(title, ignoreCase = true) }
++        return Labels(title, artist)
++    }
++}
+diff --git a/app/src/test/java/com/dd3boh/outertune/polaris/PolarisRadioLabelsTest.kt b/app/src/test/java/com/dd3boh/outertune/polaris/PolarisRadioLabelsTest.kt
+--- /dev/null
++++ b/app/src/test/java/com/dd3boh/outertune/polaris/PolarisRadioLabelsTest.kt
+@@ -0,0 +1,39 @@
++package com.dd3boh.outertune.polaris
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Test
++
++class PolarisRadioLabelsTest {
++    @Test fun noProgrammeDoesNotRepeatTheStation() {
++        val labels = PolarisRadioLabels.of("91.9 MBC FM4U", "91.9 MBC FM4U")
++        assertEquals("91.9 MBC FM4U", labels.title)
++        assertNull(labels.artist)
++    }
++
++    @Test fun programmeKeepsTheStationOnTheSecondLine() {
++        val labels = PolarisRadioLabels.of("91.9 MBC FM4U", "배철수의 음악캠프")
++        assertEquals("배철수의 음악캠프", labels.title)
++        assertEquals("91.9 MBC FM4U", labels.artist)
++    }
++
++    @Test fun whitespaceAndCaseDoNotProduceAnotherStationLine() {
++        val labels = PolarisRadioLabels.of("Gallery 41", "  GALLERY 41  ")
++        assertEquals("GALLERY 41", labels.title)
++        assertNull(labels.artist)
++    }
++
++    @Test fun missingProgrammeFallsBackToTheStation() {
++        for (programme in listOf(null, "", "  ")) {
++            val labels = PolarisRadioLabels.of("89.1 KBS CoolFM", programme)
++            assertEquals("89.1 KBS CoolFM", labels.title)
++            assertNull(labels.artist)
++        }
++    }
++
++    @Test fun overseasClockRemainsInTheTitle() {
++        val labels = PolarisRadioLabels.of("Gallery 41", "Gallery 41 | SF 08:05")
++        assertEquals("Gallery 41 | SF 08:05", labels.title)
++        assertEquals("Gallery 41", labels.artist)
++    }
++}
