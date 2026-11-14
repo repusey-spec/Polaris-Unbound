@@ -23,10 +23,10 @@ index da1455c..b74144d 100644
      implementation(libs.media3.session)
      implementation(libs.media3.workmanager)
 diff --git a/app/proguard-rules.pro b/app/proguard-rules.pro
-index cfe270e..76c2430 100755
+index cfe270e..b9cb1f9 100755
 --- a/app/proguard-rules.pro
 +++ b/app/proguard-rules.pro
-@@ -95,3 +95,9 @@
+@@ -95,3 +95,35 @@
  -keep class com.dd3boh.outertune.polaris.RadioCatalog$Station { *; }
  -keep class com.dd3boh.outertune.polaris.PolarisRadioRequests { *; }
  -keep class com.dd3boh.outertune.polaris.PolarisErrorReport { *; }
@@ -36,6 +36,32 @@ index cfe270e..76c2430 100755
 +
 +# Public integration factory is exercised by the separate release test APK.
 +-keep class com.dd3boh.outertune.polaris.PolarisMediaSources { public *; }
++
++# Unmapped Kotlin entry points referenced by the separate Android test runner.
++# Derived from test DEX type references absent from the minified target.
++-keep class kotlin.LazyKt** { *; }
++-keep class kotlin.Result { *; }
++-keep class kotlin.Result$Companion { *; }
++-keep class kotlin.ResultKt** { *; }
++-keep class kotlin.concurrent.ThreadsKt** { *; }
++-keep class kotlin.coroutines.ContinuationKt** { *; }
++-keep class kotlin.coroutines.intrinsics.IntrinsicsKt** { *; }
++-keep class kotlin.coroutines.jvm.internal.DebugProbesKt** { *; }
++-keep class kotlin.coroutines.jvm.internal.SuspendFunction { *; }
++-keep class kotlin.io.ByteStreamsKt** { *; }
++-keep class kotlin.io.CloseableKt** { *; }
++-keep class kotlin.jvm.JvmName { *; }
++-keep class kotlin.jvm.JvmStatic { *; }
++-keep class kotlin.jvm.internal.SourceDebugExtension { *; }
++-keep class kotlin.jvm.internal.StringCompanionObject { *; }
++-keep class kotlin.time.Duration { *; }
++-keep class kotlin.time.Duration$Companion { *; }
++-keep class kotlin.time.DurationKt** { *; }
++-keep class kotlinx.coroutines.BuildersKt** { *; }
++-keep class kotlinx.coroutines.ExecutorsKt** { *; }
++-keep class kotlinx.coroutines.Job$DefaultImpls { *; }
++-keep class kotlinx.coroutines.MainCoroutineDispatcher { *; }
++-keep class kotlinx.coroutines.TimeoutKt** { *; }
 diff --git a/app/src/androidTest/assets/hls604/audio.m3u8 b/app/src/androidTest/assets/hls604/audio.m3u8
 new file mode 100644
 index 0000000..aef13fb
