@@ -1,0 +1,52 @@
+name: Polaris 6.04 same-APK release verification
+on:
+  push:
+    branches: [experiment/polaris-6-04-fixes]
+    paths: ['.github/workflows/polaris604-smoke-only.yml', 'polaris604-ci/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Polaris-6.04-100604
+          path: delivery
+          run-id: 43579359254
+          github-token: ${{ github.token }}
+      - name: Complete test-only desugared runtime
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
+          mkdir -p "$RUNNER_TEMP/polaris604-test-runtime"
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/polaris604-test-runtime/polaris.jks"
+          python3 polaris604-ci/fix_test_desugar604.py
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: python3 polaris6/smoke604.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.04-same-APK-smoke
+          path: |
+            smoke/
+            delivery/Polaris_6.04_tests.apk
+          retention-days: 30
