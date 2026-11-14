@@ -639,7 +639,7 @@ index 89ecbb0..056485c 100644
                  // the way of the others calling it gone. IOS answers OK for songs every other client
                  // calls unavailable, then has its address refused (issue #29, 19 Oct 2026), and the
 diff --git a/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
-index b43b31a..9fb96cf 100644
+index b43b31a..b4b3147 100644
 --- a/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
 +++ b/app/src/test/java/com/dd3boh/outertune/utils/ChainWalkTest.kt
 @@ -276,12 +276,14 @@ class ChainWalkTest {
@@ -684,6 +684,15 @@ index b43b31a..9fb96cf 100644
      }
  
      @Test
+@@ -1437,7 +1439,7 @@ class ChainWalkTest {
+             playerScript = playerScript,
+             solver = solving,
+         )
+-        script.readsPast = { 403 }
++        script.readsPast = { if (tries <= 2) 403 else 206 }
+         val data = walk(script).getOrThrow()
+ 
+         assertEquals(List(3) { asked(Script.VIDEO_TOKEN) }, script.checked)
 @@ -1493,7 +1495,7 @@ class ChainWalkTest {
              script.checked,
          )
@@ -738,33 +747,58 @@ index b43b31a..9fb96cf 100644
  }
 diff --git a/app/src/test/java/com/dd3boh/outertune/utils/WebStreamProbeTest.kt b/app/src/test/java/com/dd3boh/outertune/utils/WebStreamProbeTest.kt
 new file mode 100644
-index 0000000..5b10df5
+index 0000000..8d08bde
 --- /dev/null
 +++ b/app/src/test/java/com/dd3boh/outertune/utils/WebStreamProbeTest.kt
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,58 @@
 +package com.dd3boh.outertune.utils
 +
-+import com.sun.net.httpserver.HttpServer
 +import okhttp3.OkHttpClient
 +import org.junit.Assert.*
 +import org.junit.Test
-+import java.net.InetSocketAddress
++import java.net.InetAddress
++import java.net.ServerSocket
++import java.util.concurrent.atomic.AtomicReference
++import kotlin.concurrent.thread
 +
 +/** Real HTTP response bodies, including a misleading 206 and a short body. */
 +class WebStreamProbeTest {
 +    private fun probe(status: Int, range: String?, bytes: Int = 16, declared: Long = bytes.toLong()): WebStreamProbe.Result {
-+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-+        server.createContext("/audio") { exchange ->
-+            assertEquals("bytes=2097152-2097167", exchange.requestHeaders.getFirst("Range"))
-+            range?.let { exchange.responseHeaders.set("Content-Range", it) }
-+            exchange.sendResponseHeaders(status, declared)
-+            runCatching { exchange.responseBody.use { it.write(ByteArray(bytes) { 7 }) } }
-+            exchange.close()
++        val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
++        val serverFailure = AtomicReference<Throwable?>()
++        val worker = thread(isDaemon = true, name = "WebStreamProbeFixture") {
++            try {
++                server.accept().use { socket ->
++                    socket.soTimeout = 2000
++                    val input = socket.getInputStream().bufferedReader()
++                    val headers = mutableListOf<String>()
++                    while (true) {
++                        val line = input.readLine() ?: break
++                        if (line.isEmpty()) break
++                        headers += line
++                    }
++                    assertTrue(headers.any { it.equals("Range: bytes=2097152-2097167", ignoreCase = true) })
++                    val response = buildString {
++                        append("HTTP/1.1 $status Fixture\r\nContent-Length: $declared\r\nConnection: close\r\n")
++                        if (range != null) append("Content-Range: $range\r\n")
++                        append("\r\n")
++                    }
++                    socket.getOutputStream().apply {
++                        write(response.toByteArray()); write(ByteArray(bytes) { 7 }); flush()
++                    }
++                }
++            } catch (failure: Throwable) { serverFailure.set(failure) }
 +        }
-+        server.start()
 +        val client = OkHttpClient.Builder().readTimeout(2, java.util.concurrent.TimeUnit.SECONDS).build()
-+        return try { WebStreamProbe.read(client, "http://127.0.0.1:${server.address.port}/audio", 2097152) }
-+        finally { server.stop(0); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
++        return try {
++            val result = WebStreamProbe.read(client, "http://127.0.0.1:${server.localPort}/audio", 2097152)
++            worker.join(3000)
++            assertNull("Fixture failed: ${serverFailure.get()}", serverFailure.get())
++            result
++        } finally {
++            server.close(); worker.join(3000)
++            client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
++        }
 +    }
 +    @Test fun validPartialRangeWithAllBytesIsAccepted() {
 +        assertEquals(WebStreamProbe.Result(206, true), probe(206, "bytes 2097152-2097167/4000000"))
