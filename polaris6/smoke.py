@@ -10,7 +10,7 @@ def snap(label):
  return ET.fromstring((OUT/(label+'.xml')).read_text())
 def tap(node):
  x1,y1,x2,y2=map(int,re.findall(r'\d+',node.attrib['bounds']));adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2));time.sleep(1)
-adb('install','-r','delivery/Polaris_6.0_100600.apk')
+adb('install','-r','delivery/Polaris_6.03_100603.apk')
 adb('shell','pm','grant',PKG,'android.permission.POST_NOTIFICATIONS')
 adb('logcat','-c')
 adb('shell','am','start','-n',PKG+'/com.dd3boh.outertune.MainActivity')
@@ -25,9 +25,11 @@ for i in range(20):
  tap(candidates[-1])
 tree=snap('home')
 texts=[n.attrib.get('text','') for n in tree.iter('node')]
+assert 'Radio' in texts and 'Streaming' in texts, 'Both top-level Polaris tabs must be visible after onboarding'
 if 'Streaming' in texts:
  tap(next(n for n in tree.iter('node') if n.attrib.get('text')=='Streaming'))
  tree=snap('streaming')
+ assert any(n.attrib.get('text')=='Radio' for n in tree.iter('node')), 'Native streaming destination must retain the Radio tab'
  if any(n.attrib.get('text')=='Radio' for n in tree.iter('node')):
   tap(next(n for n in tree.iter('node') if n.attrib.get('text')=='Radio'))
   tree=snap('radio')
@@ -36,5 +38,5 @@ if 'Streaming' in texts:
 log=adb('logcat','-d');(OUT/'logcat.txt').write_text(log)
 (OUT/'package.txt').write_text(adb('shell','dumpsys','package',PKG))
 assert not re.search(r'FATAL EXCEPTION|ANR in '+re.escape(PKG),log), 'App crashed or ANR during smoke test'
-assert 'versionCode=100600' in (OUT/'package.txt').read_text()
+assert 'versionCode=100603' in (OUT/'package.txt').read_text()
 print('PASS: install identity, startup, observed setup controls and no fatal exception')
