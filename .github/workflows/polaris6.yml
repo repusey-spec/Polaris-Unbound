@@ -3,6 +3,9 @@ on:
   push:
     branches: [experiment/polaris-6-03-intertune-native]
     paths: ['polaris6/**', '.github/workflows/polaris6.yml']
+  pull_request:
+    branches: [experiment/polaris-6-intertune]
+    paths: ['polaris6/**', '.github/workflows/polaris6.yml']
   workflow_dispatch:
 permissions:
   contents: read
