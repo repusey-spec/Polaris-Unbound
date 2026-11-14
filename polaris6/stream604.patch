@@ -23,10 +23,10 @@ index da1455c..b74144d 100644
      implementation(libs.media3.session)
      implementation(libs.media3.workmanager)
 diff --git a/app/proguard-rules.pro b/app/proguard-rules.pro
-index cfe270e..b9cb1f9 100755
+index cfe270e..6d987d4 100755
 --- a/app/proguard-rules.pro
 +++ b/app/proguard-rules.pro
-@@ -95,3 +95,35 @@
+@@ -95,3 +95,128 @@
  -keep class com.dd3boh.outertune.polaris.RadioCatalog$Station { *; }
  -keep class com.dd3boh.outertune.polaris.PolarisRadioRequests { *; }
  -keep class com.dd3boh.outertune.polaris.PolarisErrorReport { *; }
@@ -59,6 +59,99 @@ index cfe270e..b9cb1f9 100755
 +-keep class kotlin.time.DurationKt** { *; }
 +-keep class kotlinx.coroutines.BuildersKt** { *; }
 +-keep class kotlinx.coroutines.ExecutorsKt** { *; }
++-keep class kotlinx.coroutines.Job$DefaultImpls { *; }
++-keep class kotlinx.coroutines.MainCoroutineDispatcher { *; }
++-keep class kotlinx.coroutines.TimeoutKt** { *; }
++
++# Preserve the public ABI used by the separate release test APK.
++# Roots were derived from its DEX references, reversing the target mapping.
++-keep class androidx.annotation.ChecksSdkIntAtLeast { *; }
++-keep class androidx.annotation.GuardedBy { *; }
++-keep class androidx.annotation.NonNull { *; }
++-keep class androidx.annotation.Nullable { *; }
++-keep class androidx.annotation.RequiresApi { *; }
++-keep class androidx.annotation.RestrictTo { *; }
++-keep class androidx.annotation.RestrictTo$Scope { *; }
++-keep class androidx.annotation.VisibleForTesting { *; }
++-keep class androidx.compose.runtime.internal.StabilityInferred { *; }
++-keep class androidx.concurrent.futures.CallbackToFutureAdapter { *; }
++-keep class androidx.concurrent.futures.CallbackToFutureAdapter$Completer { *; }
++-keep class androidx.concurrent.futures.CallbackToFutureAdapter$Resolver { *; }
++-keep class androidx.concurrent.futures.ResolvableFuture { *; }
++-keep class androidx.lifecycle.Lifecycle$State { *; }
++-keep class androidx.media3.common.MediaItem { *; }
++-keep class androidx.media3.common.MediaItem$Builder { *; }
++-keep class androidx.media3.common.MediaItem$LiveConfiguration { *; }
++-keep class androidx.media3.common.MediaItem$RequestMetadata { *; }
++-keep class androidx.media3.common.MediaItem$RequestMetadata$Builder { *; }
++-keep class androidx.media3.common.MediaMetadata { *; }
++-keep class androidx.media3.common.PlaybackException { *; }
++-keep class androidx.media3.common.Player$Listener { *; }
++-keep class androidx.media3.exoplayer.ExoPlayer { *; }
++-keep class androidx.media3.exoplayer.ExoPlayer$Builder { *; }
++-keep class androidx.media3.exoplayer.source.DefaultMediaSourceFactory { *; }
++-keep class androidx.media3.exoplayer.source.MediaSource$Factory { *; }
++-keep class androidx.media3.session.LibraryResult { *; }
++-keep class androidx.media3.session.MediaBrowser { *; }
++-keep class androidx.media3.session.MediaBrowser$Builder { *; }
++-keep class androidx.media3.session.MediaLibraryService$LibraryParams { *; }
++-keep class androidx.media3.session.SessionToken { *; }
++-keep class androidx.tracing.Trace { *; }
++-keep class com.dd3boh.outertune.polaris.PolarisErrorReport { *; }
++-keep class com.dd3boh.outertune.polaris.PolarisMediaSources { *; }
++-keep class com.dd3boh.outertune.polaris.PolarisRadioRequests { *; }
++-keep class com.google.common.collect.ImmutableList { *; }
++-keep class com.google.common.util.concurrent.ListenableFuture { *; }
++-keep class kotlin.Deprecated { *; }
++-keep class kotlin.Lazy { *; }
++-keep class kotlin.LazyKt** { *; }
++-keep class kotlin.ReplaceWith { *; }
++-keep class kotlin.Result { *; }
++-keep class kotlin.Result$Companion { *; }
++-keep class kotlin.ResultKt** { *; }
++-keep class kotlin.Unit { *; }
++-keep class kotlin.collections.CollectionsKt** { *; }
++-keep class kotlin.concurrent.ThreadsKt** { *; }
++-keep class kotlin.coroutines.Continuation { *; }
++-keep class kotlin.coroutines.ContinuationKt** { *; }
++-keep class kotlin.coroutines.CoroutineContext { *; }
++-keep class kotlin.coroutines.EmptyCoroutineContext { *; }
++-keep class kotlin.coroutines.intrinsics.IntrinsicsKt** { *; }
++-keep class kotlin.coroutines.jvm.internal.ContinuationImpl { *; }
++-keep class kotlin.coroutines.jvm.internal.DebugMetadata { *; }
++-keep class kotlin.coroutines.jvm.internal.DebugProbesKt** { *; }
++-keep class kotlin.coroutines.jvm.internal.SuspendFunction { *; }
++-keep class kotlin.coroutines.jvm.internal.SuspendLambda { *; }
++-keep class kotlin.io.ByteStreamsKt** { *; }
++-keep class kotlin.io.CloseableKt** { *; }
++-keep class kotlin.jvm.JvmName { *; }
++-keep class kotlin.jvm.JvmStatic { *; }
++-keep class kotlin.jvm.functions.Function0 { *; }
++-keep class kotlin.jvm.functions.Function1 { *; }
++-keep class kotlin.jvm.functions.Function2 { *; }
++-keep class kotlin.jvm.internal.FunctionReferenceImpl { *; }
++-keep class kotlin.jvm.internal.Intrinsics { *; }
++-keep class kotlin.jvm.internal.Lambda { *; }
++-keep class kotlin.jvm.internal.Ref$ObjectRef { *; }
++-keep class kotlin.jvm.internal.SourceDebugExtension { *; }
++-keep class kotlin.jvm.internal.StringCompanionObject { *; }
++-keep class kotlin.text.Charsets { *; }
++-keep class kotlin.text.Regex { *; }
++-keep class kotlin.text.StringsKt** { *; }
++-keep class kotlin.time.Duration { *; }
++-keep class kotlin.time.Duration$Companion { *; }
++-keep class kotlin.time.DurationKt** { *; }
++-keep class kotlin.time.DurationUnit { *; }
++-keep class kotlinx.coroutines.BuildersKt** { *; }
++-keep class kotlinx.coroutines.CancellableContinuation { *; }
++-keep class kotlinx.coroutines.CancellableContinuationImpl { *; }
++-keep class kotlinx.coroutines.CoroutineDispatcher { *; }
++-keep class kotlinx.coroutines.CoroutineScope { *; }
++-keep class kotlinx.coroutines.CoroutineStart { *; }
++-keep class kotlinx.coroutines.Deferred { *; }
++-keep class kotlinx.coroutines.Dispatchers { *; }
++-keep class kotlinx.coroutines.ExecutorsKt** { *; }
++-keep class kotlinx.coroutines.Job { *; }
 +-keep class kotlinx.coroutines.Job$DefaultImpls { *; }
 +-keep class kotlinx.coroutines.MainCoroutineDispatcher { *; }
 +-keep class kotlinx.coroutines.TimeoutKt** { *; }
