@@ -194,7 +194,7 @@ s=replace_one(s,"Polaris 6.05 (versionCode 100605)","Polaris 6.06 (versionCode 1
 test.write_text(s,encoding="utf-8")
 
 # New isolated policy + integration regression tests; no account needed.
-spec=src.parent.parent/"test/java/com/dd3boh/outertune/polaris/PolarisAA606Test.kt"
+spec=root/"app/src/test/java/com/dd3boh/outertune/polaris/PolarisAA606Test.kt"
 spec.parent.mkdir(parents=True,exist_ok=True)
 spec.write_text("""package com.dd3boh.outertune.polaris
 
