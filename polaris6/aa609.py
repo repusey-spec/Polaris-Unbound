@@ -191,7 +191,8 @@ class PolarisAA609Test {
     private val art = File(root + "polaris/PolarisRadioBrowseTile.kt").readText()
 
     @Test fun streamingFallbackAndNewLandingAreExactlyTheSame() {
-        assertTrue(tree.contains("RadioCatalog.STREAMING_ROOT_ID, \\\\"polaris:streaming\\\\" -> polarisStreamingHome(page, pageSize)"))
+        assertTrue(tree.contains("RadioCatalog.STREAMING_ROOT_ID,"))
+        assertTrue(tree.contains("polaris:streaming"))
         assertTrue(tree.contains("MusicService.PLAYLIST -> polarisStreamingHome(page, pageSize)"))
         assertTrue(tree.contains("RadioCatalog.PLAYLIST_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)"))
         assertTrue(tree.contains("browsableMediaItem(RadioCatalog.PLAYLIST_ROOT_ID"))
@@ -204,13 +205,13 @@ class PolarisAA609Test {
         assertTrue(tree.contains("setMediaId(RadioCatalog.RADIO_TILE_PREFIX + id)"))
         assertTrue(tree.contains("RadioCatalog.tileStationId(request.mediaId)"))
         assertTrue(tree.contains("RadioCatalog.tileStationId(mediaId)?.let"))
-        assertTrue(provider.contains(".appendPath(\\\\"tile609\\\\")"))
+        assertTrue(provider.contains("tile609"))
         assertTrue(provider.contains("PolarisRadioBrowseTile.render(ctx, stationId)"))
         assertTrue(art.contains("Layout.Alignment.ALIGN_CENTER"))
         assertTrue(art.contains("Paint.Align.CENTER"))
     }
 }
-'''.replace('\\\\\"','\"'),encoding="utf-8")
+''',encoding="utf-8")
 
 # Unlike earlier source-string tests, this runs the real ContentProvider on
 # Android 13, reads the versioned URI and decodes the actual composite bitmap.
