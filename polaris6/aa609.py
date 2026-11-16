@@ -75,7 +75,7 @@ edit("playback/MediaLibrarySessionCallback.kt",[
             mediaId == MusicService.PLAYLIST) {'''),
     ("onGetItem radio alias",
     '''        if (stationId != null) return@future LibraryResult.ofItem(polarisRadioTile(stationId), null)''',
-    '''        if (stationId != null) return@future LibraryResult.ofItem(polarisRadioTile(stationId), null)
+    '''        if (stationId != null) return@future LibraryResult.ofItem(PolarisRadioRequests.queueItem(stationId), null)
         RadioCatalog.tileStationId(mediaId)?.let {
             PolarisErrorReport.record("aa609-item tile=" + it)
             return@future LibraryResult.ofItem(polarisRadioTile(it), null)
