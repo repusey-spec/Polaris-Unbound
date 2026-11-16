@@ -232,4 +232,89 @@ class PolarisAA606Test {
     }
 }
 """,encoding="utf-8")
+
+# Reconnect the 0.58 background schedule and city clock to the whole AA radio grid.
+# Before this, metadata refreshed only for the *playing* station and the browse
+# rows stayed on static station labels when no station was playing.
+browse=src/"polaris/PolarisRadioBrowsePrograms.kt"
+assert not browse.exists()
+browse.write_text("""package com.dd3boh.outertune.polaris
+
+import android.content.Context
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * Bring back 0.58's background schedule refresh for each browse tile.
+ * Korean current programmes, iHeart programme schedules, Live365 Now Playing
+ * and the SF/LA/NY clocks all use the unchanged CurrentProgramResolver.
+ *
+ * The UI does not block on network. A successful change invalidates the AA
+ * station grid, while the existing active-player metadata loop remains intact.
+ */
+class PolarisRadioBrowsePrograms(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val onBrowseChanged: () -> Unit,
+) {
+    fun start() {
+        RadioCatalog.stations.filterNot { it.id == "kr5" }.forEachIndexed { index, station ->
+            scope.launch {
+                delay(750L * index)
+                while (isActive) {
+                    val id = station.id
+                    val result = try {
+                        withContext(Dispatchers.IO) { CurrentProgramResolver.resolve(id) }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        PolarisErrorReport.record("AA radio programme refresh failed id=" +
+                            id + " cause=" + error.javaClass.simpleName)
+                        null
+                    }
+                    if (result != null) {
+                        val previous = CurrentProgramResolver.cached(context, id)
+                        CurrentProgramResolver.save(context, id, result)
+                        if (previous == null || previous.program != result.program ||
+                            previous.startMinutes != result.startMinutes) {
+                            onBrowseChanged()
+                        }
+                    }
+                    val interval = if (result == null) 90_000L else
+                        CurrentProgramResolver.nextRefreshDelay(id, result).coerceIn(15_000L, 300_000L)
+                    delay(interval)
+                }
+            }
+        }
+        // The AA city captions must continue advancing when the station is not
+        // selected; no stream restart and no artwork invalidation are needed.
+        scope.launch {
+            while (isActive) {
+                delay(60_000L)
+                onBrowseChanged()
+            }
+        }
+    }
+}
+""",encoding="utf-8")
+svc=src/"playback/MusicService.kt"
+updated=svc.read_text(encoding="utf-8")
+updated=replace_one(updated,
+    "        polarisRadioSession = PolarisRadioSession(this, exoPlayer, scope)\n",
+    """        polarisRadioSession = PolarisRadioSession(this, exoPlayer, scope)
+        PolarisRadioBrowsePrograms(this, scope) {
+            if (::mediaSession.isInitialized) {
+                mediaSession.notifyChildrenChanged(RadioCatalog.RADIO_ROOT_ID, Int.MAX_VALUE, null)
+            }
+        }.start()
+""",
+    "0.58 radio browse schedule service loop")
+svc.write_text(updated,encoding="utf-8")
+print("PASS: 0.58 programme and clocks refreshed across all AA radio tiles")
+
 print("PASS: 606 streaming opens lists, last audible source persists, radio resumes without touching core engine")
