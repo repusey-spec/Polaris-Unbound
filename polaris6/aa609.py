@@ -212,4 +212,43 @@ class PolarisAA609Test {
 }
 '''.replace('\\\\\"','\"'),encoding="utf-8")
 
+# Unlike earlier source-string tests, this runs the real ContentProvider on
+# Android 13, reads the versioned URI and decodes the actual composite bitmap.
+instrumented=root/"app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA609ArtworkTest.kt"
+instrumented.write_text("""package com.dd3boh.outertune.polaris
+
+import android.graphics.BitmapFactory
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class PolarisAA609ArtworkTest {
+    @Test fun actualProviderReturnsNewCenteredTileImage() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        PolarisRadioMetadata.install(context)
+        val uri = PolarisRadioArtwork.browseTileUri(
+            "kr1", "89.1 KBS CoolFM", "현재 프로그램"
+        )
+        assertEquals("tile609", uri.pathSegments.firstOrNull())
+        val bitmap = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it)
+        }
+        assertNotNull("Radio tile content provider must return a real image", bitmap)
+        assertEquals(512, bitmap!!.width)
+        assertEquals(512, bitmap.height)
+        val old = PolarisRadioArtwork.uri("kr1")
+        assertTrue(uri != old)
+        val station = context.contentResolver.openInputStream(old)?.use {
+            BitmapFactory.decodeStream(it)
+        }
+        assertNotNull(station)
+    }
+}
+""",encoding="utf-8")
+
 print("PASS: 6.09 AA old+new streaming routes, category playlist, radio browse cache/version, image and playback alias")
