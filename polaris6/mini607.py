@@ -93,22 +93,22 @@ class PolarisRadioMini607Test {
         .readText().substringAfter("fun PolarisRadioMini(")
 
     @Test fun threeEquallySizedRealControlsWithMirroredSkips() {
-        assertEquals(3, Regex("""IconButton\\\\(""").findAll(code).count())
-        assertEquals(3, Regex("""Modifier.size\\\\(40.dp\\\\)""").findAll(code).count())
-        assertEquals(3, Regex("""Modifier.size\\\\(24.dp\\\\)""").findAll(code).count())
+        assertEquals(3, code.split("IconButton(").size - 1)
+        assertEquals(3, code.split("Modifier.size(40.dp)").size - 1)
+        assertEquals(3, code.split("Modifier.size(24.dp)").size - 1)
         assertTrue(code.contains("painterResource(R.drawable.skip_previous)"))
         assertTrue(code.contains("painterResource(R.drawable.skip_next)"))
         assertTrue(code.contains("painterResource(if (playing) R.drawable.pause else R.drawable.play)"))
     }
     @Test fun noTypographicControlsAndSamePlaybackCommands() {
-        assertFalse(code.contains("Text(\\\\"◀\\\\")"))
-        assertFalse(code.contains("Text(\\\\"▶▶\\\\")"))
-        assertFalse(code.contains("\\\\"Ⅱ\\\\""))
+        assertFalse(code.contains("◀"))
+        assertFalse(code.contains("▶▶"))
+        assertFalse(code.contains("Ⅱ"))
         assertTrue(code.contains("seekToPreviousMediaItem()"))
         assertTrue(code.contains("seekToNextMediaItem()"))
         assertTrue(code.contains("connection.player.pause()"))
         assertTrue(code.contains("connection.player.prepare(); connection.player.play()"))
     }
 }
-'''.replace('\\\\\"','\"'),encoding="utf-8")
+''',encoding="utf-8")
 print("PASS: Polaris 6.07 symmetric, icon-based mini controls; 6.06 streaming/radio untouched")
