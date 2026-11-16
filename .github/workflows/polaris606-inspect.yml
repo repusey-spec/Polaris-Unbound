@@ -1,0 +1,34 @@
+name: Polaris 6.06 inspect media/session source
+on:
+  push:
+    branches: [experiment/polaris-6-06-aa-entry-resume]
+    paths: ['.github/workflows/polaris606-inspect.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct 6.05 source
+        run: |
+          git clone --depth 1 --branch v0.12.10 --recurse-submodules https://github.com/ItzSkyeYT/InterTune.git "$RUNNER_TEMP/intertune"
+          base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
+          python3 polaris6/native_603.py "$RUNNER_TEMP/intertune"
+          git -C "$RUNNER_TEMP/intertune" apply polaris6/radio604.patch
+          git -C "$RUNNER_TEMP/intertune" apply polaris6/stream604.patch
+          python3 polaris6/playlist605.py "$RUNNER_TEMP/intertune"
+          mkdir -p inspect
+          cp "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MediaLibrarySessionCallback.kt" inspect/MediaLibrarySessionCallback.kt
+          cp "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt" inspect/MusicService.kt
+          cp "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/MainActivity.kt" inspect/MainActivity.kt
+          find "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/polaris" -type f -name '*.kt' -maxdepth 1 -exec cp {} inspect/ \;
+          grep -RniE 'onPlaybackResumption|STREAMING_ROOT_ID|Radio.*Play|PLAYLIST|onGetChildren|last.*[Rr]adio|last.*[Ss]ource|pauseOn|lastPlayed|mediaButton|onDestroy|onCreate' inspect/ > inspect/index.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-6.05-source-inspection
+          path: inspect/
+          retention-days: 3
