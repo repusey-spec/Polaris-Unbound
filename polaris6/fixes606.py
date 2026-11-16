@@ -23,6 +23,7 @@ prefix = "                MusicService.PLAYLIST -> {\n"
 suffix = "\n                }"
 assert old.startswith(prefix) and old.endswith(suffix)
 content = old[len(prefix):-len(suffix)]
+content = replace_one(content, "                    lists.filter { (songs, _) -> !Unreleased.AUTO_REWORK || songs > 0 }.map { it.second }", "                    return lists.filter { (songs, _) -> !Unreleased.AUTO_REWORK || songs > 0 }.map { it.second }", "playlist rows return")
 method = "\n    /** AA Streaming opens the actual lists directly; no 4-folder intermediary. */\n" \
          "    private suspend fun polarisPlaylistRows(): List<MediaItem> {\n" \
          + content + "\n    }\n"
@@ -38,18 +39,12 @@ text=replace_one(text,
 # Put helpers into the class, before the onSubscribe callback.
 marker="    /**\n     * A browser asking to be told when a list changes."
 assert text.count(marker)==1
-helpers=StringNotUsed = """    /**
-     * The car centers a grid title itself. The large station tile already contains
-     * its frequency: a compact caption aligns more closely than the long repeated
-     * frequency+station title. The actual player keeps full metadata unchanged.
-     */
+helpers=StringNotUsed = """    /** Original Polaris 0.58 live programme and local clock under each radio tile. */
     private fun polarisRadioTile(id: String): MediaItem {
         val item = PolarisRadioRequests.queueItem(id)
-        val full = RadioCatalog.find(id)?.title ?: return item
-        val compact = full.replace(Regex("^\\\\d+(?:\\\\.\\\\d+)?\\\\s+"), "")
-            .removePrefix("Jazz from ").trim()
+        val title = PolarisRadioMetadata.title(id)
         return item.buildUpon().setMediaMetadata(
-            item.mediaMetadata.buildUpon().setTitle(compact).build()
+            item.mediaMetadata.buildUpon().setTitle(title).build()
         ).build()
     }
 """
@@ -159,6 +154,10 @@ session.write_text(s,encoding="utf-8")
 
 service=src/"playback/MusicService.kt"
 s=service.read_text(encoding="utf-8")
+s=replace_one(s,
+    "        if (!dataStore.get(ResumePlaybackOnLaunchKey, false)) return",
+    "        if (!dataStore.get(ResumePlaybackOnLaunchKey, false) && PolarisLastSource.radioToResume(this) == null) return",
+    "launch resume last audible radio")
 s=replace_one(s,
     """        withContext(Dispatchers.Main) {
             // initQueue restores QueueBoard and stops there. Nothing pushes the songs into the
