@@ -159,6 +159,14 @@ for name, pairs in [
   ('MusicService.PLAYLIST, context.getString(R.string.playlists)',
    'RadioCatalog.PLAYLIST_ROOT_ID, context.getString(R.string.playlists)'),
  ]),
+    ("PolarisAA606Test.kt",[
+  ('RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
+   'RadioCatalog.STREAMING_ROOT_ID, "polaris:streaming" -> polarisStreamingHome(page, pageSize)'),
+ ]),
+ ("PolarisAA608Test.kt",[
+  ('RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
+   'RadioCatalog.STREAMING_ROOT_ID, "polaris:streaming" -> polarisStreamingHome(page, pageSize)'),
+ ]),
 ]:
     path=root/"app/src/test/java/com/dd3boh/outertune/polaris"/name
     s=path.read_text(encoding="utf-8")
