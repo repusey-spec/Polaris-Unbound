@@ -18,8 +18,8 @@ jobs:
           base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
           git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
           python3 polaris6/native_603.py "$RUNNER_TEMP/intertune"
-          git -C "$RUNNER_TEMP/intertune" apply polaris6/radio604.patch
-          git -C "$RUNNER_TEMP/intertune" apply polaris6/stream604.patch
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/stream604.patch"
           python3 polaris6/playlist605.py "$RUNNER_TEMP/intertune"
           mkdir -p inspect
           cp "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MediaLibrarySessionCallback.kt" inspect/MediaLibrarySessionCallback.kt
