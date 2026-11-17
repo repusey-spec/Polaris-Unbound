@@ -40,7 +40,7 @@ block='''    val playing = session.player?.currentMediaItem?.mediaId
     // Polaris Streaming is a top-level TabTemplate tab whose contents mix
     // exactly four browsing shortcuts and a playable list. This is NOT
     // achievable by rearranging MediaBrowser content-style hints alone.
-    val isStreaming = list?.mediaId in setOf(
+    val isStreaming = list != null && list.mediaId in setOf(
         com.dd3boh.outertune.polaris.RadioCatalog.STREAMING_BROWSE_ROOT_ID,
         com.dd3boh.outertune.polaris.RadioCatalog.STREAMING_BROWSE_PREVIOUS_ROOT_ID,
         com.dd3boh.outertune.polaris.RadioCatalog.STREAMING_ROOT_ID,
@@ -84,7 +84,7 @@ path.write_text(s,encoding="utf-8")
 manifest=src/"AndroidManifest.xml"
 m=manifest.read_text(encoding="utf-8")
 old='''android:name=".playback.AutoCarService"
-            android:enabled="\${carScreens}"'''
+            android:enabled="${carScreens}"'''
 new='''android:name=".playback.AutoCarService"
             android:enabled="true"'''
 assert m.count(old)==1,"CAL service manifest entry changed"
@@ -135,11 +135,11 @@ class PolarisCALPrototypeTest {
     }
 
     @Test fun supportedHostGetsTemplateButOlderHostsKeepMediaBrowser() {
-        assertTrue(xml.contains("android:name=\\".playback.AutoCarService\\""))
-        assertTrue(xml.contains("android:name=\\"androidx.car.app.minCarApiLevel\\""))
-        assertTrue(xml.contains("android:value=\\"8\\""))
+        assertTrue(xml.contains(".playback.AutoCarService"))
+        assertTrue(xml.contains("androidx.car.app.minCarApiLevel"))
+        assertTrue(xml.contains("android:value=\\\"8\\\""))
         assertTrue(xml.contains("android.software.car.templates_host.media"))
-        assertTrue(xml.contains("android:required=\\"false\\""))
+        assertTrue(xml.contains("android:required=\\\"false\\\""))
         assertTrue(xml.contains("android.media.browse.MediaBrowserService"))
         assertTrue(car.contains("service is AutoCarService"))
         assertFalse(car.contains("HostValidator.ALLOW_ALL_HOSTS_VALIDATOR"))
