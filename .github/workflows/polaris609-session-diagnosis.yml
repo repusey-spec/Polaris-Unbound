@@ -1,0 +1,46 @@
+name: Polaris 6.09 session diagnosis
+on:
+  push:
+    branches: [experiment/polaris-6-09-session-fix]
+    paths: ['.github/workflows/polaris609-session-diagnosis.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin InterTune engine
+        run: |
+          git clone --depth 1 --branch v0.12.10 --recurse-submodules https://github.com/ItzSkyeYT/InterTune.git "$RUNNER_TEMP/intertune"
+          test "$(git -C "$RUNNER_TEMP/intertune" rev-parse HEAD)" = 4ff39e9e12a20f93d5dfd24c52fe925cbbb50020
+      - name: Apply Polaris integration and original signer
+        run: |
+          base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
+          python3 polaris6/native_603.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify.py "$RUNNER_TEMP/intertune"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$GITHUB_WORKSPACE/polaris6/stream604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/stream604.patch"
+          python3 polaris6/verify604.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/playlist605.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify605.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/fixes606.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify606.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/mini607.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify607.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa608.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify608.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa609.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify609.py "$RUNNER_TEMP/intertune"
+      - name: Inspect rebuilt session test and API
+        run: |
+          echo '=== Session instrumentation test ==='
+          nl -ba "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt" | sed -n '1,200p'
+          echo '=== Session and controller declarations ==='
+          rg -n 'polarisRadioSession|PolarisRadioSession|onConnect|onGetSession|onGetChildren|MediaLibrarySession' "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt" "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MediaLibrarySessionCallback.kt" | head -n 100
