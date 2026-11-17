@@ -56,37 +56,55 @@ t.write_text(s.replace(before,"Polaris 6.12 (versionCode 100612)",1),encoding="u
 
 # Dynamic check of the *installed* release APK, not the source tree.
 # Five existing runtime tests + one package-manager manifest regression.
-test=app/"src/androidTest/java/com/dd3boh/outertune/polaris/PolarisCAL612ManifestTest.kt"
+test=app/"src/androidTest/java/com/dd3boh/outertune/polaris/PolarisCAL612ManifestTest.java"
 assert not test.exists()
-test.write_text('''package com.dd3boh.outertune.polaris
+test.write_text('''package com.dd3boh.outertune.polaris;
 
-import android.content.pm.PackageManager
-import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.Assert.assertTrue
-import org.junit.Test
-import org.junit.runner.RunWith
+import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import static org.junit.Assert.assertTrue;
 
-@RunWith(AndroidJUnit4::class)
-class PolarisCAL612ManifestTest {
-    @Test fun installedReleaseHasCarAppTemplateAndMediaBrowserFallback() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        @Suppress("DEPRECATION")
-        val info = context.packageManager.getPackageInfo(
-            context.packageName, PackageManager.GET_SERVICES or PackageManager.GET_PERMISSIONS
-        )
-        val services = info.services.orEmpty().map { it.name }
-        assertTrue("Release must declare its CAL media service",
-            services.any { it == "com.dd3boh.outertune.playback.AutoCarService" })
-        assertTrue("The normal MediaLibraryService must remain available",
-            services.any { it == "com.dd3boh.outertune.playback.MusicService" })
-        assertTrue("Release must request CAL media template permission",
-            info.requestedPermissions.orEmpty().contains("androidx.car.app.MEDIA_TEMPLATES"))
-        val cal = info.services.orEmpty().first { it.name.endsWith(".AutoCarService") }
-        assertTrue("CAL media service must be enabled", cal.enabled)
-        assertTrue("CAL media service must be exported to the host", cal.exported)
+@RunWith(AndroidJUnit4.class)
+public class PolarisCAL612ManifestTest {
+    @Test
+    @SuppressWarnings("deprecation")
+    public void installedReleaseHasCarAppTemplateAndMediaBrowserFallback() throws Exception {
+        Context ctx = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        PackageInfo info = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(),
+                PackageManager.GET_SERVICES | PackageManager.GET_PERMISSIONS);
+        boolean cal = false;
+        boolean browser = false;
+        if (info.services != null) {
+            for (int i = 0; i < info.services.length; i++) {
+                ServiceInfo service = info.services[i];
+                if ("com.dd3boh.outertune.playback.AutoCarService".equals(service.name)) {
+                    cal = service.enabled && service.exported;
+                }
+                if ("com.dd3boh.outertune.playback.MusicService".equals(service.name)) {
+                    browser = service.enabled;
+                }
+            }
+        }
+        boolean permission = false;
+        if (info.requestedPermissions != null) {
+            for (int i = 0; i < info.requestedPermissions.length; i++) {
+                if ("androidx.car.app.MEDIA_TEMPLATES".equals(info.requestedPermissions[i])) {
+                    permission = true;
+                }
+            }
+        }
+        assertTrue("The final APK must enable and export AutoCarService", cal);
+        assertTrue("Original MediaLibraryService must remain enabled", browser);
+        assertTrue("The final APK must request MEDIA_TEMPLATES", permission);
     }
 }
 ''',encoding="utf-8")
+
 print("PASS 6.12: neutral release overlay, active CAL and media/template descriptor")
 print("PASS 6.12: versionCode=100612, MediaLibrary fallback, installed-APK manifest regression test added")
