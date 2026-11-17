@@ -1,0 +1,88 @@
+name: Polaris Car App Library two-tab prototype source verification
+on:
+  push:
+    branches: [experiment/polaris-cal-tabs-probe]
+    paths:
+      - 'polaris6/cal_prototype.py'
+      - 'polaris6/verify_cal_prototype.py'
+      - '.github/workflows/polaris-cal-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  compile-and-unit-test-no-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record test run identifier
+        run: |
+          mkdir -p polaris6/diagnostics
+          printf 'RUN_ID=%s\nCOMMIT=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > polaris6/diagnostics/cal-probe-run.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/cal-probe-run.txt
+          git commit -m 'Record CAL prototype compile test run' || true
+          git push origin HEAD:experiment/polaris-cal-tabs-probe
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Pin InterTune v0.12.10
+        run: |
+          git clone --depth 1 --branch v0.12.10 --recurse-submodules https://github.com/ItzSkyeYT/InterTune.git "$RUNNER_TEMP/intertune"
+          test "$(git -C "$RUNNER_TEMP/intertune" rev-parse HEAD)" = 4ff39e9e12a20f93d5dfd24c52fe925cbbb50020
+      - name: Recreate unchanged Polaris 6.10 base
+        run: |
+          base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
+          python3 polaris6/native_603.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify.py "$RUNNER_TEMP/intertune"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/stream604.patch"
+          python3 polaris6/playlist605.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/fixes606.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/mini607.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa608.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa609.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa610.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify610.py "$RUNNER_TEMP/intertune"
+      - name: Inject two-tabs-and-small-grid Car App Library prototype
+        run: |
+          python3 polaris6/cal_prototype.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify_cal_prototype.py "$RUNNER_TEMP/intertune"
+      - name: Install Android compile toolchain
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.13113456' 'cmake;3.31.6' > /dev/null
+      - name: Compile sources and run selected tests only (NO APK packaging)
+        working-directory: ${{ runner.temp }}/intertune
+        run: |
+          ./gradlew --build-cache :app:compileCoreReleaseKotlin :app:testCoreReleaseUnitTest \
+            --tests "com.dd3boh.outertune.polaris.PolarisCALPrototypeTest" \
+            --tests "com.dd3boh.outertune.polaris.PolarisVoiceRouterTest" \
+            --stacktrace --max-workers=2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-CAL-prototype-compile-and-unit-tests
+          path: ${{ runner.temp }}/intertune/app/build/test-results/testCoreReleaseUnitTest/
+          retention-days: 14
+      - name: Record compile and selected unit-test result
+        if: always()
+        run: |
+          git fetch origin experiment/polaris-cal-tabs-probe
+          git reset --hard origin/experiment/polaris-cal-tabs-probe
+          mkdir -p polaris6/diagnostics
+          if ls "$RUNNER_TEMP/intertune/app/build/test-results/testCoreReleaseUnitTest"/TEST-*.xml >/dev/null 2>&1; then
+            VERDICT='UNIT_TEST_RESULTS_PRESENT'
+          else
+            VERDICT='NO_UNIT_RESULTS'
+          fi
+          printf 'RUN_ID=%s\nUNIT_XML=%s\nNOTE=Use job conclusion for actual pass/fail; NO APK was produced.\n' "$GITHUB_RUN_ID" "$VERDICT" > polaris6/diagnostics/cal-probe-result.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/cal-probe-result.txt
+          git commit -m 'Record CAL prototype compile and unit test outcome' || true
+          git push origin HEAD:experiment/polaris-cal-tabs-probe
