@@ -1,0 +1,3 @@
+RUN_ID=44078848371
+UNIT_XML=UNIT_TEST_RESULTS_PRESENT
+NOTE=Use job conclusion for actual pass/fail; NO APK was produced.
