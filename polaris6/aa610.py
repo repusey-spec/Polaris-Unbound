@@ -140,6 +140,15 @@ assert 'val caption =' in removed and 'canvas.drawText(caption,' in removed
 s=s[:start]+s[end:]
 tile.write_text(s,encoding="utf-8")
 
+# The 6.08 regression asserted that large category tiles were requested.
+# That earlier expectation is explicitly superseded by the 6.10 fix.
+oldtest=root/"app/src/test/java/com/dd3boh/outertune/polaris/PolarisAA608Test.kt"
+oldcode=oldtest.read_text(encoding="utf-8")
+needle='assertTrue(callback.contains("style(single = category)"))'
+assert oldcode.count(needle)==1
+oldtest.write_text(oldcode.replace(needle,
+    'assertTrue(!callback.contains("style(single = category)"))',1),encoding="utf-8")
+
 # Update prior source-only assertions so 6.10's intentionally removed
 # duplicated station caption is not called a regression.
 for filename in ["PolarisAA608Test.kt","PolarisAA609Test.kt"]:
@@ -175,3 +184,61 @@ assert x.count("versionCode = 100609")==1 and x.count('versionName = "6.09"')==1
 build.write_text(x.replace("versionCode = 100609","versionCode = 100610",1)
                    .replace('versionName = "6.09"','versionName = "6.10"',1),encoding="utf-8")
 print("PASS 6.10: standard browse categories + list, enlarged centered-logo programme-only tile, cache v610, old IDs and playback intact")
+
+
+# A real MediaBrowser runtime check confirms that the four category shortcuts
+# are present but no longer carry the explicit large CATEGORY_GRID_ITEM hint.
+compact=testroot/"PolarisAA610CompactTest.kt"
+compact.write_text("""package com.dd3boh.outertune.polaris
+
+import android.content.ComponentName
+import androidx.media3.session.MediaBrowser
+import androidx.media3.session.MediaController
+import androidx.media3.session.MediaConstants
+import androidx.media3.session.SessionToken
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.dd3boh.outertune.playback.MusicService
+import com.google.common.util.concurrent.ListenableFuture
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.util.concurrent.TimeUnit
+
+@RunWith(AndroidJUnit4::class)
+class PolarisAA610CompactTest {
+    @Test fun realStreamingCategoriesAreUnforcedBrowsableShortcuts() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        lateinit var connected: ListenableFuture<MediaBrowser>
+        instrumentation.runOnMainSync {
+            connected = MediaBrowser.Builder(context,
+                SessionToken(context, ComponentName(context, MusicService::class.java))
+            ).buildAsync()
+        }
+        try {
+            val browser = connected.get(25, TimeUnit.SECONDS)
+            val pending = instrumentation.run {
+                lateinit var list: com.google.common.util.concurrent.ListenableFuture<
+                    androidx.media3.session.LibraryResult<
+                        com.google.common.collect.ImmutableList<androidx.media3.common.MediaItem>>>
+                runOnMainSync { list = browser.getChildren("polaris:streaming:v610", 0, 25, null) }
+                list
+            }
+            val items = pending.get(35, TimeUnit.SECONDS).value.orEmpty()
+            assertTrue("Expected four InterTune browse shortcuts", items.size >= 4)
+            assertEquals(listOf(MusicService.SONG, MusicService.ARTIST,
+                MusicService.ALBUM, "polaris:playlists:v610"), items.take(4).map { it.mediaId })
+            items.take(4).forEach {
+                assertTrue(it.mediaMetadata.isBrowsable)
+                assertFalse("No forced large-tile style", it.mediaMetadata.extras?.containsKey(
+                    MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM) == true)
+            }
+        } finally {
+            instrumentation.runOnMainSync { MediaController.releaseFuture(connected) }
+        }
+    }
+}
+""",encoding="utf-8")
+
+print("PASS 6.10 native category shortcut test injected")
