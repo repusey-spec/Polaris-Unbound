@@ -11,13 +11,15 @@ art=(pkg/"polaris/PolarisRadioBrowseTile.kt").read_text()
 build=(root/"app/build.gradle.kts").read_text()
 assert 'versionCode = 100609' in build and 'versionName = "6.09"' in build
 assert 'applicationId = "app.hush.music.polarisradio.debug"' in build
-assert 'const val RADIO_ROOT_ID = "polaris:radio:v609"' in catalog
-assert 'const val STREAMING_ROOT_ID = "polaris:streaming:v609"' in catalog
+assert 'const val RADIO_ROOT_ID = "polaris:radio"' in catalog
+assert 'const val RADIO_BROWSE_ROOT_ID = "polaris:radio:v609"' in catalog
+assert 'const val STREAMING_ROOT_ID = "polaris:streaming"' in catalog
+assert 'const val STREAMING_BROWSE_ROOT_ID = "polaris:streaming:v609"' in catalog
 assert 'const val PLAYLIST_ROOT_ID = "polaris:playlists:v609"' in catalog
 assert 'const val RADIO_TILE_PREFIX = "polaris:radio-tile:v609:"' in catalog
 for phrase in [
-    'RadioCatalog.RADIO_ROOT_ID, "polaris:radio"',
-    'RadioCatalog.STREAMING_ROOT_ID, "polaris:streaming" -> polarisStreamingHome(page, pageSize)',
+    'RadioCatalog.RADIO_BROWSE_ROOT_ID, RadioCatalog.RADIO_ROOT_ID',
+    'RadioCatalog.STREAMING_BROWSE_ROOT_ID, RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
     'MusicService.PLAYLIST -> polarisStreamingHome(page, pageSize)',
     'RadioCatalog.PLAYLIST_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)',
     'browsableMediaItem(RadioCatalog.PLAYLIST_ROOT_ID',
@@ -29,6 +31,8 @@ for phrase in [
 ]:
     assert phrase in tree, f"Missing AA route: {phrase}"
 assert 'MusicService.PLAYLIST -> polarisPlaylistRows()' not in tree
+assert 'polarisFolder(RadioCatalog.RADIO_BROWSE_ROOT_ID, "Radio")' in tree
+assert 'polarisFolder(RadioCatalog.STREAMING_BROWSE_ROOT_ID, "Streaming")' in tree
 assert '.appendPath("tile609")' in provider
 assert 'uri.pathSegments[0] !in listOf("tile", "tile609")' in provider
 assert 'PolarisRadioBrowseTile.render(ctx, stationId)' in provider
@@ -36,6 +40,7 @@ assert 'aa609-artwork path=' in provider
 assert 'Layout.Alignment.ALIGN_CENTER' in art
 assert 'Paint.Align.CENTER' in art
 assert 'PolarisRadioBrowsePrograms(this, scope)' in (pkg/"playback/MusicService.kt").read_text()
+assert 'notifyChildrenChanged(RadioCatalog.RADIO_BROWSE_ROOT_ID' in (pkg/"playback/MusicService.kt").read_text()
 assert 'PolarisLastSource.radioToResume(this@MusicService)' in (pkg/"playback/MusicService.kt").read_text()
 assert 'intertune603-song.db' in (pkg/"db/MusicDatabase.kt").read_text()
 assert 'intertune603-settings' in (pkg/"utils/DataStore.kt").read_text()
