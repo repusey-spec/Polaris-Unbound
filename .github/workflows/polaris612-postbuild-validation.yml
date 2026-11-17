@@ -1,0 +1,113 @@
+name: Polaris 6.12 post-build RELEASE manifest and Android 13 six-test check
+on:
+  push:
+    branches: [experiment/polaris-6-12-release-cal-fix]
+    paths: ['.github/workflows/polaris612-postbuild-validation.yml', 'polaris612-ci/fix_test_desugar612.py', 'polaris6/smoke612.py']
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Polaris-6.12-100612-validated
+          path: delivery
+          run-id: 44117719150
+          github-token: \${{ github.token }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Verify ORIGINAL signed 6.12 APK and discover obfuscated automotive descriptor
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
+          APK=delivery/Polaris_6.12_100612.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          sha256sum -c <(sed 's|delivery/||' delivery/SHA256.txt)
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" > delivery/signature-recheck.txt
+          grep -F '477721bae3a205d4e6369e76482868978b74931a0b2c4dfe85f3b07a7b40bea8' delivery/signature-recheck.txt
+          "$AAPT" dump badging "$APK" > delivery/apk-badging-recheck.txt
+          grep -F "versionCode='100612' versionName='6.12'" delivery/apk-badging-recheck.txt
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/merged-apk-manifest-recheck.txt
+          "$AAPT" dump permissions "$APK" > delivery/apk-permissions-recheck.txt
+          grep -F 'com.dd3boh.outertune.playback.AutoCarService' delivery/merged-apk-manifest-recheck.txt
+          grep -F 'androidx.car.app.category.MEDIA' delivery/merged-apk-manifest-recheck.txt
+          grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/merged-apk-manifest-recheck.txt
+          grep -F 'androidx.car.app.minCarApiLevel' delivery/merged-apk-manifest-recheck.txt
+          grep -F 'com.google.android.gms.car.application' delivery/merged-apk-manifest-recheck.txt
+          grep -F 'androidx.car.app.MEDIA_TEMPLATES' delivery/apk-permissions-recheck.txt
+          python3 - <<'PY'
+          import os, subprocess, zipfile
+          from pathlib import Path
+          apk='delivery/Polaris_6.12_100612.apk'
+          aapt=os.environ['ANDROID_HOME']+'/build-tools/36.0.0/aapt'
+          found=[]
+          with zipfile.ZipFile(apk) as z:
+              for name in z.namelist():
+                  if not (name.startswith('res/') and name.endswith('.xml')):continue
+                  data=z.read(name)
+                  def has(term):return term.encode() in data or term.encode('utf-16le') in data
+                  if has('template') and has('media'):
+                      output=subprocess.check_output([aapt,'dump','xmltree',apk,name],text=True)
+                      if 'automotiveApp' in output and 'template' in output and 'media' in output:
+                          found.append((name,output))
+          assert len(found)==1, f'Expected one compiled automotiveApp media+template descriptor: {len(found)}'
+          Path('delivery/automotive-template-descriptor-recheck.txt').write_text(found[0][1])
+          Path('delivery/CAL-MANIFEST-VERIFIED.txt').write_text(
+              'PASS: signed 6.12 CAL CarAppService enabled, MediaLibrary fallback, '
+              'MEDIA_TEMPLATES permission, compiled media+template descriptor: '+found[0][0]+'\n')
+          print('PASS: FINAL signed APK has compiled CAL media/template descriptor at',found[0][0])
+          PY
+      - name: Reconstruct test-only desugar runtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/polaris612-test-runtime"
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/polaris612-test-runtime/polaris.jks"
+          python3 polaris612-ci/fix_test_desugar612.py
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            python3 polaris6/smoke612.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.12-CAL-manifest-verified-and-Android13-smoke
+          path: |
+            delivery/CAL-MANIFEST-VERIFIED.txt
+            delivery/automotive-template-descriptor-recheck.txt
+            delivery/merged-apk-manifest-recheck.txt
+            delivery/signature-recheck.txt
+            smoke/
+          retention-days: 30
+      - name: Record six-test and compiled-template verdict
+        if: always()
+        run: |
+          git fetch origin experiment/polaris-6-12-release-cal-fix
+          git reset --hard origin/experiment/polaris-6-12-release-cal-fix
+          mkdir -p polaris6/diagnostics
+          if test -s delivery/CAL-MANIFEST-VERIFIED.txt && grep -q 'OK (6 tests)' smoke/session-test.txt 2>/dev/null; then
+            RESULT='PASS: 6/6 Android 13 tests; signed APK contains CAL media service and compiled template'
+          else
+            RESULT='FAIL or incomplete, inspect workflow'
+          fi
+          printf 'RUN_ID=%s\nBUILD_RUN_ID=44117719150\nRESULT=%s\n' "$GITHUB_RUN_ID" "$RESULT" > polaris6/diagnostics/612-postbuild.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/612-postbuild.txt
+          git commit -m 'Record signed 6.12 APK and Android 13 six-test postbuild validation' || exit 0
+          git push origin HEAD:experiment/polaris-6-12-release-cal-fix
