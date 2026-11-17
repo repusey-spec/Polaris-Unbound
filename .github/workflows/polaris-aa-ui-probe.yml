@@ -1,0 +1,104 @@
+name: Polaris AA UI-only 4-tab probe
+on:
+  push:
+    branches: [experiment/polaris-aa-ui-probe-01]
+    paths: ['aa-ui-probe/app/**','aa-ui-probe/settings.gradle','aa-ui-probe/build.gradle','.github/workflows/polaris-aa-ui-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record run ID
+        run: |
+          mkdir -p aa-ui-probe/ci
+          printf 'RUN_ID=%s\nCOMMIT=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > aa-ui-probe/ci/current-build.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add aa-ui-probe/ci/current-build.txt
+          git commit -m 'Record AA UI probe build run' || true
+          git push origin HEAD:experiment/polaris-aa-ui-probe-01
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Android SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
+      - name: Compile independent UI-only Android media probe
+        run: gradle -p aa-ui-probe --no-daemon :app:assembleDebug --stacktrace --max-workers=2
+      - name: Validate APK package and Android Auto media service
+        run: |
+          set -euo pipefail
+          mkdir -p delivery
+          cp aa-ui-probe/app/build/outputs/apk/debug/app-debug.apk delivery/Polaris_AA_UI_Probe_v01.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_AA_UI_Probe_v01.apk > delivery/apk-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree delivery/Polaris_AA_UI_Probe_v01.apk AndroidManifest.xml > delivery/manifest.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree delivery/Polaris_AA_UI_Probe_v01.apk res/xml/automotive_app_desc.xml > delivery/automotive-desc.txt
+          grep -F "package: name='dev.polaris.aauiprobe'" delivery/apk-badging.txt
+          grep -F 'dev.polaris.aauiprobe.DemoMediaService' delivery/manifest.txt
+          grep -F 'android.media.browse.MediaBrowserService' delivery/manifest.txt
+          grep -F 'dev.polaris.aauiprobe.MainActivity' delivery/manifest.txt
+          grep -F 'com.google.android.gms.car.application' delivery/manifest.txt
+          grep -F 'media' delivery/automotive-desc.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_AA_UI_Probe_v01.apk > delivery/signature.txt
+          sha256sum delivery/Polaris_AA_UI_Probe_v01.apk > delivery/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-AA-UI-Probe-v01-APK
+          path: delivery/
+          retention-days: 30
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Polaris-AA-UI-Probe-v01-APK
+          path: delivery
+      - uses: android-actions/setup-android@v4
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            python3 aa-ui-probe/smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-AA-UI-Probe-v01-phone-and-media-selftest
+          path: smoke/
+          retention-days: 30
+      - name: Record result of emulator validation
+        if: always()
+        run: |
+          git fetch origin experiment/polaris-aa-ui-probe-01
+          git reset --hard origin/experiment/polaris-aa-ui-probe-01
+          mkdir -p aa-ui-probe/ci
+          if grep -q 'SELFTEST PASS' smoke/media-browser-selftest-log.txt 2>/dev/null; then
+            RESULT='PASS phone launch, AA root 4 tab tree, CAN/Radio/Streaming menu counts'
+          else
+            RESULT='FAIL / incomplete, inspect workflow artifacts'
+          fi
+          printf 'RUN_ID=%s\nRESULT=%s\n' "$GITHUB_RUN_ID" "$RESULT" > aa-ui-probe/ci/emulator-result.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add aa-ui-probe/ci/emulator-result.txt
+          git commit -m 'Record AA UI Probe phone and browser smoke result' || true
+          git push origin HEAD:experiment/polaris-aa-ui-probe-01
