@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/polaris609-session-diagnosis.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   diagnosis:
     runs-on: ubuntu-latest
@@ -44,3 +44,12 @@ jobs:
           nl -ba "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt" | sed -n '1,200p'
           echo '=== Session and controller declarations ==='
           rg -n 'polarisRadioSession|PolarisRadioSession|onConnect|onGetSession|onGetChildren|MediaLibrarySession' "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MusicService.kt" "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/playback/MediaLibrarySessionCallback.kt" | head -n 100
+      - name: Save reconstructed regression test to diagnostic branch
+        run: |
+          mkdir -p polaris6/diagnostics
+          cp "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt" polaris6/diagnostics/PolarisSessionTest.kt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add polaris6/diagnostics/PolarisSessionTest.kt
+          git commit -m "Save 6.09 reconstructed failing session test" || exit 0
+          git push origin HEAD:experiment/polaris-6-09-session-fix
