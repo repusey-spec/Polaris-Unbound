@@ -1,7 +1,7 @@
-name: Polaris 6.09 AA route and centered radio cache fix
+name: Polaris 6.09 stable radio IDs and AA route fix
 on:
   push:
-    branches: [experiment/polaris-6-09-aa-routes]
+    branches: [experiment/polaris-6-09-stable-root]
     paths: ['polaris6/**', '.github/workflows/polaris609.yml']
   workflow_dispatch:
 permissions:
