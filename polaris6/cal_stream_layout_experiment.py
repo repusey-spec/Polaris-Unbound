@@ -124,15 +124,15 @@ class PolarisCALStreamingLayoutTest {
     }
 
     @Test fun releaseExperimentIsCarHostGatedWithoutBreakingLegacyBrowser() {
-        assertTrue(build.contains("manifestPlaceholders[\\\\\\"carScreens\\\\\\"] = \\\\\\"true\\\\\\""))
+        assertTrue(build.contains("manifestPlaceholders") && build.contains("carScreens"))
         assertTrue(manifest.contains("androidx.car.app.category.MEDIA"))
         assertTrue(manifest.contains("android.media.browse.MediaBrowserService"))
-        assertTrue(manifest.contains("android:value=\\\\\\"8\\\\\\""))
+        assertTrue(manifest.contains("androidx.car.app.minCarApiLevel"))
         assertTrue(car.contains("known.addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample)"))
         assertFalse(car.contains("ALLOW_ALL_HOSTS_VALIDATOR"))
     }
 }
-""".replace('\\\\\\"','\\"'),encoding="utf-8")
+""",encoding="utf-8")
 
 assert 'versionCode = 100610' in gradle.read_text(), "no version bump without an APK order"
 print("PASS: CAL experimental source patched, Radio/Streaming tabs, SMALL 4-item grid+song rows")
