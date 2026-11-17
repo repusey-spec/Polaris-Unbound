@@ -1,0 +1,39 @@
+name: Polaris 6.09 test-only preflight
+on:
+  push:
+    branches: [experiment/polaris-6-09-runtime-verified]
+    paths: ['.github/workflows/polaris609-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check 6.09 test-only repair on exact frozen source
+        run: |
+          python3 -m py_compile polaris6/aa609.py
+          git clone --depth 1 --branch v0.12.10 --recurse-submodules https://github.com/ItzSkyeYT/InterTune.git "$RUNNER_TEMP/intertune"
+          test "$(git -C "$RUNNER_TEMP/intertune" rev-parse HEAD)" = 4ff39e9e12a20f93d5dfd24c52fe925cbbb50020
+          base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
+          python3 polaris6/native_603.py "$RUNNER_TEMP/intertune"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/stream604.patch"
+          python3 polaris6/playlist605.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/fixes606.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/mini607.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa608.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa609.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify609.py "$RUNNER_TEMP/intertune"
+          mkdir inspect
+          cp "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisSessionTest.kt" inspect/
+          cp "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA609BrowserTest.kt" inspect/
+          cp "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA609ArtworkTest.kt" inspect/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-6.09-validation-source
+          path: inspect/
+          retention-days: 3
