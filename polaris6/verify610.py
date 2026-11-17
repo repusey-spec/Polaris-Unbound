@@ -21,7 +21,7 @@ for key in ('MusicService.SONG','MusicService.ARTIST','MusicService.ALBUM',
             'RadioCatalog.PLAYLIST_ROOT_ID','val library = librarySongs()',
             'carLikedSongs()'):
     assert key in home, key
-assert 'CATEGORY_GRID_ITEM' not in home
+assert 'MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_CATEGORY_GRID_ITEM' not in home
 assert 'style(single = category)' not in home
 assert 'putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE, LIST)' in cb
 assert 'polarisStreamingHome(page, pageSize)' in cb
