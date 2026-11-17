@@ -252,4 +252,57 @@ class PolarisAA609ArtworkTest {
 }
 """,encoding="utf-8")
 
+# Test the *executed* MediaLibraryService browse results, not merely the
+# presence of "polarisStreamingHome" in the Kotlin source.
+browser_test=root/"app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA609BrowserTest.kt"
+browser_test.write_text("""package com.dd3boh.outertune.polaris
+
+import android.content.ComponentName
+import androidx.media3.session.MediaBrowser
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.dd3boh.outertune.playback.MusicService
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.util.concurrent.TimeUnit
+
+@RunWith(AndroidJUnit4::class)
+class PolarisAA609BrowserTest {
+    @Test fun actualMediaBrowserGetsCategoriesAndStationTile609() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val future = MediaBrowser.Builder(context,
+            SessionToken(context, ComponentName(context, MusicService::class.java))
+        ).buildAsync()
+        try {
+            val browser = future.get(25, TimeUnit.SECONDS)
+            val root = browser.getChildren(MusicService.ROOT, 0, 10, null)
+                .get(25, TimeUnit.SECONDS).value?.toList().orEmpty()
+            assertEquals(listOf(RadioCatalog.RADIO_ROOT_ID, RadioCatalog.STREAMING_ROOT_ID),
+                root.map { it.mediaId })
+
+            val categories = listOf(MusicService.SONG, MusicService.ARTIST,
+                MusicService.ALBUM, RadioCatalog.PLAYLIST_ROOT_ID)
+            for (parent in listOf(RadioCatalog.STREAMING_ROOT_ID, MusicService.PLAYLIST)) {
+                val actual = browser.getChildren(parent, 0, 20, null)
+                    .get(35, TimeUnit.SECONDS).value?.toList().orEmpty()
+                assertTrue("Streaming root empty for " + parent, actual.size >= 4)
+                assertEquals(categories, actual.take(4).map { it.mediaId })
+            }
+            val radio = browser.getChildren(RadioCatalog.RADIO_ROOT_ID, 0, 8, null)
+                .get(25, TimeUnit.SECONDS).value?.toList().orEmpty()
+            assertTrue(radio.isNotEmpty())
+            assertTrue(radio[0].mediaId.startsWith(RadioCatalog.RADIO_TILE_PREFIX))
+            assertEquals("tile609",
+                radio[0].mediaMetadata.artworkUri?.pathSegments?.firstOrNull())
+        } finally {
+            MediaController.releaseFuture(future)
+        }
+    }
+}
+""",encoding="utf-8")
+
 print("PASS: 6.09 AA old+new streaming routes, category playlist, radio browse cache/version, image and playback alias")
