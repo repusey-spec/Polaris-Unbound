@@ -364,6 +364,19 @@ for pattern in patterns:
         original)
     changed+=n
 assert changed==1, f"Expected original 6.0 root assertion once; got {changed}"
+
+# Original 6.0 instrumentation assumed every browsed radio tile had the
+# canonical playable media ID. 6.09 deliberately uses versioned, non-cached
+# browse IDs, which are resolved by the real AA onSetMediaItems route.  Test
+# that resolution instead of incorrectly passing the tile to the canonical
+# station-only parser. Keep all voice and queue assertions intact.
+old_station_assertion='assertNotNull(PolarisRadioRequests.stationId(it))'
+assert original.count(old_station_assertion)==1, "Session test radio-ID assertion changed upstream"
+original=original.replace(old_station_assertion, '''assertNotNull(
+                    "AA station tile must resolve to a real playable station",
+                    RadioCatalog.tileStationId(it.mediaId)
+                        ?: PolarisRadioRequests.stationId(it)
+                )''', 1)
 report.write_text(original,encoding="utf-8")
 
 print("PASS: 6.09 AA old+new streaming routes, category playlist, radio browse cache/version, image and playback alias")
