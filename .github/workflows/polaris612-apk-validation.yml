@@ -104,7 +104,24 @@ jobs:
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/merged-apk-manifest.txt
           "$AAPT" dump permissions "$APK" > delivery/apk-permissions.txt
-          "$AAPT" dump xmltree "$APK" res/xml/automotive_app_desc.xml > delivery/automotive-template-descriptor.txt
+          python3 - <<'PY'
+          import os, subprocess, zipfile
+          from pathlib import Path
+          apk='delivery/Polaris_6.12_100612.apk'
+          aapt=os.environ['ANDROID_HOME']+'/build-tools/36.0.0/aapt'
+          found=[]
+          with zipfile.ZipFile(apk) as z:
+              for name in z.namelist():
+                  if not(name.startswith('res/') and name.endswith('.xml')): continue
+                  data=z.read(name)
+                  if (b'template' in data or 'template'.encode('utf-16le') in data) and (b'media' in data or 'media'.encode('utf-16le') in data):
+                      output=subprocess.check_output([aapt,'dump','xmltree',apk,name], text=True)
+                      if 'automotiveApp' in output and 'template' in output and 'media' in output:
+                          found.append((name,output))
+          assert len(found)==1, 'Expected exactly one compiled media+template car descriptor'
+          Path('delivery/automotive-template-descriptor.txt').write_text(found[0][1])
+          print('PASS automotive XML compiled at',found[0][0])
+          PY
           grep -F 'com.dd3boh.outertune.playback.AutoCarService' delivery/merged-apk-manifest.txt
           grep -F 'androidx.car.app.category.MEDIA' delivery/merged-apk-manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/merged-apk-manifest.txt
