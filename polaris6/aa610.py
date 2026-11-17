@@ -149,6 +149,15 @@ assert oldcode.count(needle)==1
 oldtest.write_text(oldcode.replace(needle,
     'assertTrue(!callback.contains("style(single = category)"))',1),encoding="utf-8")
 
+# The 6.09 assertion hard-coded a single playlist route, while 6.10
+# explicitly supports both v609 and v610 IDs. Adapt the source-level test.
+oldtest609=root/"app/src/test/java/com/dd3boh/outertune/polaris/PolarisAA609Test.kt"
+oldcode609=oldtest609.read_text(encoding="utf-8")
+assert oldcode609.count("RadioCatalog.PLAYLIST_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)")==1
+oldtest609.write_text(oldcode609.replace(
+    "RadioCatalog.PLAYLIST_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)",
+    "RadioCatalog.PLAYLIST_ROOT_ID, RadioCatalog.PLAYLIST_PREVIOUS_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)",1),encoding="utf-8")
+
 # Update prior source-only assertions so 6.10's intentionally removed
 # duplicated station caption is not called a regression.
 for filename in ["PolarisAA608Test.kt","PolarisAA609Test.kt"]:
