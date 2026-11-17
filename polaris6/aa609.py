@@ -222,7 +222,7 @@ class PolarisAA609Test {
 
     @Test fun streamingFallbackAndNewLandingAreExactlyTheSame() {
         assertTrue(tree.contains("RadioCatalog.STREAMING_BROWSE_ROOT_ID,"))
-        assertTrue(tree.contains("polaris:streaming"))
+        assertTrue(tree.contains("RadioCatalog.STREAMING_ROOT_ID"))
         assertTrue(tree.contains("MusicService.PLAYLIST -> polarisStreamingHome(page, pageSize)"))
         assertTrue(tree.contains("RadioCatalog.PLAYLIST_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)"))
         assertTrue(tree.contains("browsableMediaItem(RadioCatalog.PLAYLIST_ROOT_ID"))
