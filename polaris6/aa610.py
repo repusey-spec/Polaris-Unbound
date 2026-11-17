@@ -239,7 +239,7 @@ class PolarisAA610CompactTest {
             assertEquals(listOf(MusicService.SONG, MusicService.ARTIST,
                 MusicService.ALBUM, "polaris:playlists:v610"), items.take(4).map { it.mediaId })
             items.take(4).forEach {
-                assertTrue(it.mediaMetadata.isBrowsable)
+                assertTrue(it.mediaMetadata.isBrowsable == true)
                 assertFalse("No forced large-tile style", it.mediaMetadata.extras?.containsKey(
                     MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM) == true)
             }
