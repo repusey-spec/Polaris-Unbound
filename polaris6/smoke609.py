@@ -39,8 +39,8 @@ try:
    except Exception as e:(OUT/'thread-dump-error.txt').write_text(str(e))
   finally:collect()
  result=(OUT/'session-test.txt').read_text();print(result,flush=True)
- assert 'OK (3 tests)' in result,result
- print('PASS: final release installed and launched, no startup fatal, browse/voice/report test passed',flush=True)
+ assert 'OK (4 tests)' in result,result
+ print('PASS: final release installed and launched, no startup fatal, browse+real artwork+media browser tests passed',flush=True)
 except BaseException:
  collect()
  raise
