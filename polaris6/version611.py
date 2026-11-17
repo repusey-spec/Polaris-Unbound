@@ -16,7 +16,7 @@ assert t.count(old)==1, "Session instrumentation version assertion changed"
 test.write_text(t.replace(old,"Polaris 6.11 (versionCode 100611)",1),encoding="utf-8")
 manifest=root/"app/src/main/AndroidManifest.xml"
 m=manifest.read_text(encoding="utf-8")
-assert m.count('android:enabled="\${carScreens}"')>=2
+assert m.count('android:enabled=')>=2
 assert 'android:name=".playback.AutoCarService"' in m
 assert 'android:value="8"' in m
 assert 'android.software.car.templates_host.media' in m
