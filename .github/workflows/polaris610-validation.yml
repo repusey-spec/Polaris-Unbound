@@ -15,6 +15,15 @@ jobs:
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
+      - name: Record build run ID for verified artifact retrieval
+        run: |
+          mkdir -p polaris6/diagnostics
+          printf 'RUN_ID=%s\nCOMMIT=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > polaris6/diagnostics/610-build-run.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/610-build-run.txt
+          git commit -m 'Record Polaris 6.10 build run ID' || true
+          git push origin HEAD:experiment/polaris-6-10-compact-stream-radio
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -130,3 +139,20 @@ jobs:
           name: Polaris-6.10-validated-smoke
           path: smoke/
           retention-days: 14
+      - name: Record Android 13 smoke-test verdict
+        if: always()
+        run: |
+          git fetch origin experiment/polaris-6-10-compact-stream-radio
+          git reset --hard origin/experiment/polaris-6-10-compact-stream-radio
+          mkdir -p polaris6/diagnostics
+          if grep -q 'OK (5 tests)' smoke/session-test.txt 2>/dev/null; then
+            VERDICT='PASS 5/5 Android 13 instrumentation tests'
+          else
+            VERDICT='FAIL or incomplete Android 13 instrumentation tests'
+          fi
+          printf 'RUN_ID=%s\nRESULT=%s\n' "$GITHUB_RUN_ID" "$VERDICT" > polaris6/diagnostics/610-android13-result.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/610-android13-result.txt
+          git commit -m 'Record Polaris 6.10 Android 13 validation' || true
+          git push origin HEAD:experiment/polaris-6-10-compact-stream-radio
