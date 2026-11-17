@@ -20,8 +20,12 @@ edit("polaris/RadioCatalog.kt",[
     ("new root IDs",
     '    const val RADIO_ROOT_ID = "polaris:radio"\n    const val STREAMING_ROOT_ID = "polaris:streaming"\n',
     '''    // Versioned browser IDs intentionally break stale Android Auto cached nodes.
-    const val RADIO_ROOT_ID = "polaris:radio:v609"
-    const val STREAMING_ROOT_ID = "polaris:streaming:v609"
+    // Old public IDs must be stable (voice integration and saved bookmarks).
+    const val RADIO_ROOT_ID = "polaris:radio"
+    const val STREAMING_ROOT_ID = "polaris:streaming"
+    // Only the fresh AA tabs use versioned IDs to avoid stale cached browse nodes.
+    const val RADIO_BROWSE_ROOT_ID = "polaris:radio:v609"
+    const val STREAMING_BROWSE_ROOT_ID = "polaris:streaming:v609"
     const val PLAYLIST_ROOT_ID = "polaris:playlists:v609"
     const val RADIO_TILE_PREFIX = "polaris:radio-tile:v609:"
     fun tileStationId(mediaId: String): String? = mediaId
@@ -32,6 +36,11 @@ edit("polaris/RadioCatalog.kt",[
 ])
 
 edit("playback/MediaLibrarySessionCallback.kt",[
+    ("new AA top-level browse IDs without changing stable radio IDs",
+    '''                    polarisFolder(RadioCatalog.RADIO_ROOT_ID, "Radio"),
+                    polarisFolder(RadioCatalog.STREAMING_ROOT_ID, "Streaming"),''',
+    '''                    polarisFolder(RadioCatalog.RADIO_BROWSE_ROOT_ID, "Radio"),
+                    polarisFolder(RadioCatalog.STREAMING_BROWSE_ROOT_ID, "Streaming"),'''),
     ("log actual parent IDs",
     '''        val own = browser.packageName == context.packageName
         val bar =''',
@@ -44,11 +53,11 @@ edit("playback/MediaLibrarySessionCallback.kt",[
         val bar ='''),
     ("radio old root compatibility",
     '''                RadioCatalog.RADIO_ROOT_ID -> CarSearch.page(PolarisRadioLayout(context).slots().filterNotNull().map { polarisRadioTile(it) }, page, pageSize)''',
-    '''                RadioCatalog.RADIO_ROOT_ID, "polaris:radio" ->
+    '''                RadioCatalog.RADIO_BROWSE_ROOT_ID, RadioCatalog.RADIO_ROOT_ID ->
                     CarSearch.page(PolarisRadioLayout(context).slots().filterNotNull().map { polarisRadioTile(it) }, page, pageSize)'''),
     ("streaming old root compatibility",
     '''                RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)''',
-    '''                RadioCatalog.STREAMING_ROOT_ID, "polaris:streaming" -> polarisStreamingHome(page, pageSize)'''),
+    '''                RadioCatalog.STREAMING_BROWSE_ROOT_ID, RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)'''),
     ("library fallback to exact new home; category opens real playlists",
     '''                MusicService.PLAYLIST -> polarisPlaylistRows()''',
     '''                // Some AA hosts retain the original InterTune 'playlist' node
@@ -71,7 +80,8 @@ edit("playback/MediaLibrarySessionCallback.kt",[
     '''        if (mediaId == MusicService.ROOT || mediaId == RadioCatalog.RADIO_ROOT_ID || mediaId == RadioCatalog.STREAMING_ROOT_ID) {''',
     '''        if (mediaId == MusicService.ROOT || mediaId == RadioCatalog.RADIO_ROOT_ID ||
             mediaId == RadioCatalog.STREAMING_ROOT_ID || mediaId == RadioCatalog.PLAYLIST_ROOT_ID ||
-            mediaId == "polaris:radio" || mediaId == "polaris:streaming" ||
+            mediaId == RadioCatalog.RADIO_BROWSE_ROOT_ID ||
+            mediaId == RadioCatalog.STREAMING_BROWSE_ROOT_ID ||
             mediaId == MusicService.PLAYLIST) {'''),
     ("onGetItem radio alias",
     '''        if (stationId != null) return@future LibraryResult.ofItem(polarisRadioTile(stationId), null)''',
@@ -80,11 +90,24 @@ edit("playback/MediaLibrarySessionCallback.kt",[
             PolarisErrorReport.record("aa609-item tile=" + it)
             return@future LibraryResult.ofItem(polarisRadioTile(it), null)
         }'''),
+    ("radio browse root style remains a grid",
+    '''                if (id == RadioCatalog.RADIO_ROOT_ID) {''',
+    '''                if (id == RadioCatalog.RADIO_ROOT_ID ||
+                    id == RadioCatalog.RADIO_BROWSE_ROOT_ID) {'''),
+    ("onGetItem returns the right root labels",
+    '''if(mediaId == RadioCatalog.RADIO_ROOT_ID) "Radio" else if(mediaId == RadioCatalog.STREAMING_ROOT_ID) "Streaming" else "Polaris"''',
+    '''if (mediaId == RadioCatalog.RADIO_ROOT_ID ||
+                mediaId == RadioCatalog.RADIO_BROWSE_ROOT_ID) "Radio"
+                else if (mediaId == RadioCatalog.STREAMING_ROOT_ID ||
+                    mediaId == RadioCatalog.STREAMING_BROWSE_ROOT_ID) "Streaming"
+                else if (mediaId == RadioCatalog.PLAYLIST_ROOT_ID ||
+                    mediaId == MusicService.PLAYLIST) context.getString(R.string.playlists)
+                else "Polaris"'''),
     ("root style playlist browser new id",
     '''                } else if (id == RadioCatalog.STREAMING_ROOT_ID) {''',
     '''                } else if (id == RadioCatalog.STREAMING_ROOT_ID ||
                     id == RadioCatalog.PLAYLIST_ROOT_ID ||
-                    id == "polaris:streaming" || id == MusicService.PLAYLIST) {'''),
+                    id == RadioCatalog.STREAMING_BROWSE_ROOT_ID || id == MusicService.PLAYLIST) {'''),
     ("play tile by routing to canonical live radio queue",
     '''        val radioId = PolarisRadioRequests.stationId(request)
             ?: request.requestMetadata.searchQuery?.let(PolarisVoiceRouter::radioIdForQuery)''',
@@ -92,6 +115,13 @@ edit("playback/MediaLibrarySessionCallback.kt",[
             ?: RadioCatalog.tileStationId(request.mediaId)
             ?: request.requestMetadata.searchQuery?.let(PolarisVoiceRouter::radioIdForQuery)'''),
 ])
+edit("playback/MusicService.kt",[
+    ("notify both stable and fresh AA radio roots when current programme changes",
+    '''mediaSession.notifyChildrenChanged(RadioCatalog.RADIO_ROOT_ID, Int.MAX_VALUE, null)''',
+    '''mediaSession.notifyChildrenChanged(RadioCatalog.RADIO_ROOT_ID, Int.MAX_VALUE, null)
+                mediaSession.notifyChildrenChanged(RadioCatalog.RADIO_BROWSE_ROOT_ID, Int.MAX_VALUE, null)'''),
+])
+
 # Radio item callback in 6.08's onGetItem only checks canonical 'polaris:station:';
 # to distinguish old/stale leaf calls, onGetItem alias is explicitly supported.
 
@@ -161,11 +191,11 @@ for name, pairs in [
  ]),
     ("PolarisAA606Test.kt",[
   ('RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
-   'RadioCatalog.STREAMING_ROOT_ID,'),
+   'RadioCatalog.STREAMING_BROWSE_ROOT_ID,'),
  ]),
  ("PolarisAA608Test.kt",[
   ('RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
-   'RadioCatalog.STREAMING_ROOT_ID,'),
+   'RadioCatalog.STREAMING_BROWSE_ROOT_ID,'),
  ]),
 ]:
     path=root/"app/src/test/java/com/dd3boh/outertune/polaris"/name
@@ -191,7 +221,7 @@ class PolarisAA609Test {
     private val art = File(root + "polaris/PolarisRadioBrowseTile.kt").readText()
 
     @Test fun streamingFallbackAndNewLandingAreExactlyTheSame() {
-        assertTrue(tree.contains("RadioCatalog.STREAMING_ROOT_ID,"))
+        assertTrue(tree.contains("RadioCatalog.STREAMING_BROWSE_ROOT_ID,"))
         assertTrue(tree.contains("polaris:streaming"))
         assertTrue(tree.contains("MusicService.PLAYLIST -> polarisStreamingHome(page, pageSize)"))
         assertTrue(tree.contains("RadioCatalog.PLAYLIST_ROOT_ID -> CarSearch.page(polarisPlaylistRows(), page, pageSize)"))
@@ -281,18 +311,18 @@ class PolarisAA609BrowserTest {
             val browser = future.get(25, TimeUnit.SECONDS)
             val root = browser.getChildren(MusicService.ROOT, 0, 10, null)
                 .get(25, TimeUnit.SECONDS).value?.toList().orEmpty()
-            assertEquals(listOf(RadioCatalog.RADIO_ROOT_ID, RadioCatalog.STREAMING_ROOT_ID),
+            assertEquals(listOf(RadioCatalog.RADIO_BROWSE_ROOT_ID, RadioCatalog.STREAMING_BROWSE_ROOT_ID),
                 root.map { it.mediaId })
 
             val categories = listOf(MusicService.SONG, MusicService.ARTIST,
                 MusicService.ALBUM, RadioCatalog.PLAYLIST_ROOT_ID)
-            for (parent in listOf(RadioCatalog.STREAMING_ROOT_ID, MusicService.PLAYLIST)) {
+            for (parent in listOf(RadioCatalog.STREAMING_BROWSE_ROOT_ID, MusicService.PLAYLIST)) {
                 val actual = browser.getChildren(parent, 0, 20, null)
                     .get(35, TimeUnit.SECONDS).value?.toList().orEmpty()
                 assertTrue("Streaming root empty for " + parent, actual.size >= 4)
                 assertEquals(categories, actual.take(4).map { it.mediaId })
             }
-            val radio = browser.getChildren(RadioCatalog.RADIO_ROOT_ID, 0, 8, null)
+            val radio = browser.getChildren(RadioCatalog.RADIO_BROWSE_ROOT_ID, 0, 8, null)
                 .get(25, TimeUnit.SECONDS).value?.toList().orEmpty()
             assertTrue(radio.isNotEmpty())
             assertTrue(radio[0].mediaId.startsWith(RadioCatalog.RADIO_TILE_PREFIX))
