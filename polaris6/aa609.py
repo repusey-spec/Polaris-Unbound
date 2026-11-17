@@ -243,12 +243,14 @@ class PolarisAA609Test {
 }
 ''',encoding="utf-8")
 
-# Unlike earlier source-string tests, this runs the real ContentProvider on
-# Android 13, reads the versioned URI and decodes the actual composite bitmap.
+# Run real host-path tests against the production APK, not code-string checks.
+# The production app is R8-minified, so instrumented test sources must not call
+# Kotlin object INSTANCE fields from their unminified test APK.
 instrumented=root/"app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA609ArtworkTest.kt"
 instrumented.write_text("""package com.dd3boh.outertune.polaris
 
 import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -261,10 +263,10 @@ import org.junit.runner.RunWith
 class PolarisAA609ArtworkTest {
     @Test fun actualProviderReturnsNewCenteredTileImage() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        PolarisRadioMetadata.install(context)
-        val uri = PolarisRadioArtwork.browseTileUri(
-            "kr1", "89.1 KBS CoolFM", "현재 프로그램"
-        )
+        val base = "content://" + context.packageName + ".polaris.radioart"
+        // Never refer to R8-minified production Kotlin 'object' singletons
+        // directly from the differently-obfuscated instrumentation APK.
+        val uri = Uri.parse(base + "/tile609/kr1/abcdef12")
         assertEquals("tile609", uri.pathSegments.firstOrNull())
         val bitmap = context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it)
@@ -272,28 +274,30 @@ class PolarisAA609ArtworkTest {
         assertNotNull("Radio tile content provider must return a real image", bitmap)
         assertEquals(512, bitmap!!.width)
         assertEquals(512, bitmap.height)
-        val old = PolarisRadioArtwork.uri("kr1")
-        assertTrue(uri != old)
-        val station = context.contentResolver.openInputStream(old)?.use {
+        val stationUri = Uri.parse(base + "/station/kr1")
+        val station = context.contentResolver.openInputStream(stationUri)?.use {
             BitmapFactory.decodeStream(it)
         }
-        assertNotNull(station)
+        assertNotNull("Original radio logo provider must also keep working", station)
+        assertTrue(uri != stationUri)
     }
 }
 """,encoding="utf-8")
 
-# Test the *executed* MediaLibraryService browse results, not merely the
-# presence of "polarisStreamingHome" in the Kotlin source.
 browser_test=root/"app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA609BrowserTest.kt"
 browser_test.write_text("""package com.dd3boh.outertune.polaris
 
 import android.content.ComponentName
+import androidx.media3.common.MediaItem
+import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaBrowser
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.dd3boh.outertune.playback.MusicService
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.ListenableFuture
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -303,36 +307,63 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PolarisAA609BrowserTest {
     @Test fun actualMediaBrowserGetsCategoriesAndStationTile609() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val future = MediaBrowser.Builder(context,
-            SessionToken(context, ComponentName(context, MusicService::class.java))
-        ).buildAsync()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        lateinit var connected: ListenableFuture<MediaBrowser>
+        instrumentation.runOnMainSync {
+            connected = MediaBrowser.Builder(context,
+                SessionToken(context, ComponentName(context, MusicService::class.java))
+            ).buildAsync()
+        }
         try {
-            val browser = future.get(25, TimeUnit.SECONDS)
-            val root = browser.getChildren(MusicService.ROOT, 0, 10, null)
-                .get(25, TimeUnit.SECONDS).value?.toList().orEmpty()
-            assertEquals(listOf(RadioCatalog.RADIO_BROWSE_ROOT_ID, RadioCatalog.STREAMING_BROWSE_ROOT_ID),
+            val browser = connected.get(25, TimeUnit.SECONDS)
+            fun children(parentId: String): List<MediaItem> {
+                lateinit var pending: ListenableFuture<LibraryResult<ImmutableList<MediaItem>>>
+                instrumentation.runOnMainSync {
+                    pending = browser.getChildren(parentId, 0, 20, null)
+                }
+                return pending.get(35, TimeUnit.SECONDS).value?.toList().orEmpty()
+            }
+            val root = children(MusicService.ROOT)
+            assertEquals(listOf("polaris:radio:v609", "polaris:streaming:v609"),
                 root.map { it.mediaId })
 
             val categories = listOf(MusicService.SONG, MusicService.ARTIST,
-                MusicService.ALBUM, RadioCatalog.PLAYLIST_ROOT_ID)
-            for (parent in listOf(RadioCatalog.STREAMING_BROWSE_ROOT_ID, MusicService.PLAYLIST)) {
-                val actual = browser.getChildren(parent, 0, 20, null)
-                    .get(35, TimeUnit.SECONDS).value?.toList().orEmpty()
+                MusicService.ALBUM, "polaris:playlists:v609")
+            for (parent in listOf("polaris:streaming:v609", MusicService.PLAYLIST)) {
+                val actual = children(parent)
                 assertTrue("Streaming root empty for " + parent, actual.size >= 4)
                 assertEquals(categories, actual.take(4).map { it.mediaId })
             }
-            val radio = browser.getChildren(RadioCatalog.RADIO_BROWSE_ROOT_ID, 0, 8, null)
-                .get(25, TimeUnit.SECONDS).value?.toList().orEmpty()
+            val radio = children("polaris:radio:v609")
             assertTrue(radio.isNotEmpty())
-            assertTrue(radio[0].mediaId.startsWith(RadioCatalog.RADIO_TILE_PREFIX))
+            assertTrue(radio[0].mediaId.startsWith("polaris:radio-tile:v609:"))
             assertEquals("tile609",
                 radio[0].mediaMetadata.artworkUri?.pathSegments?.firstOrNull())
         } finally {
-            MediaController.releaseFuture(future)
+            // Media3 controllers are tied to the application Looper, not JUnit's worker.
+            instrumentation.runOnMainSync { MediaController.releaseFuture(connected) }
         }
     }
 }
 """,encoding="utf-8")
+
+# The original full media-session test asserted the 6.0 browse IDs. Those
+# remain valid aliases, but top-level browser entries now use versioned IDs.
+# Update only this test's expected browse root list (not the public constants).
+import re
+original=report.read_text(encoding="utf-8")
+patterns=[
+    r'listOf\(RadioCatalog\.RADIO_ROOT_ID,\s*RadioCatalog\.STREAMING_ROOT_ID\)',
+    r'listOf\("polaris:radio",\s*"polaris:streaming"\)',
+]
+changed=0
+for pattern in patterns:
+    original,n=re.subn(pattern,
+        'listOf(RadioCatalog.RADIO_BROWSE_ROOT_ID, RadioCatalog.STREAMING_BROWSE_ROOT_ID)',
+        original)
+    changed+=n
+assert changed==1, f"Expected original 6.0 root assertion once; got {changed}"
+report.write_text(original,encoding="utf-8")
 
 print("PASS: 6.09 AA old+new streaming routes, category playlist, radio browse cache/version, image and playback alias")
