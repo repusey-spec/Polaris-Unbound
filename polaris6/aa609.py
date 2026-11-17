@@ -161,11 +161,11 @@ for name, pairs in [
  ]),
     ("PolarisAA606Test.kt",[
   ('RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
-   'RadioCatalog.STREAMING_ROOT_ID, "polaris:streaming" -> polarisStreamingHome(page, pageSize)'),
+   'RadioCatalog.STREAMING_ROOT_ID,'),
  ]),
  ("PolarisAA608Test.kt",[
   ('RadioCatalog.STREAMING_ROOT_ID -> polarisStreamingHome(page, pageSize)',
-   'RadioCatalog.STREAMING_ROOT_ID, "polaris:streaming" -> polarisStreamingHome(page, pageSize)'),
+   'RadioCatalog.STREAMING_ROOT_ID,'),
  ]),
 ]:
     path=root/"app/src/test/java/com/dd3boh/outertune/polaris"/name
