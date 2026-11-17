@@ -30,7 +30,7 @@ jobs:
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
           APK=delivery/Polaris_6.12_100612.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          sha256sum -c <(sed 's|delivery/||' delivery/SHA256.txt)
+          sha256sum -c delivery/SHA256.txt
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" > delivery/signature-recheck.txt
           grep -F '477721bae3a205d4e6369e76482868978b74931a0b2c4dfe85f3b07a7b40bea8' delivery/signature-recheck.txt
           "$AAPT" dump badging "$APK" > delivery/apk-badging-recheck.txt
