@@ -286,7 +286,7 @@ manifest=root/"app/src/main/AndroidManifest.xml"
 m=manifest.read_text(encoding="utf-8")
 m=one(m,'</application>','''    <provider
         android:name=".polaris.Polaris613ArtProvider"
-        android:authorities="\${applicationId}.polaris.menuart"
+        android:authorities="${applicationId}.polaris.menuart"
         android:exported="true"
         android:grantUriPermissions="true" />
     </application>''',"icon provider registration")
