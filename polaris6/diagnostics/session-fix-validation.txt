@@ -1,3 +1,0 @@
-PASS: all four Android 13 instrumentation tests
-GitHub run: 43996968790
-Commit: 405f0028e1606592bf0f17ec4a6c9bcd5fa54a61

@@ -1,2 +1,0 @@
-RUN_ID=44053181689
-RESULT=FAIL or incomplete Android 13 instrumentation tests

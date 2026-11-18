@@ -1,2 +1,0 @@
-RUN_ID=44097911665
-RESULT=PASS 5/5 Android 13 instrumentation tests

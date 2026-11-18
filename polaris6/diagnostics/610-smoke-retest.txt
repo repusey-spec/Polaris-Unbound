@@ -1,3 +1,0 @@
-RUN_ID=44070250770
-RESULT=PASS 5/5 Android 13 instrumentation tests
-APK_RUN_ID=44053181689

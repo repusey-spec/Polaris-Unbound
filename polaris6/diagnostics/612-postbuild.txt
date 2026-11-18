@@ -1,3 +1,0 @@
-RUN_ID=44121482910
-BUILD_RUN_ID=44117719150
-RESULT=FAIL or incomplete, inspect workflow
