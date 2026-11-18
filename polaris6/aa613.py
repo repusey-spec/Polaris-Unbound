@@ -8,13 +8,15 @@ root=Path(sys.argv[1]).resolve()
 pkg=root/"app/src/main/java/com/dd3boh/outertune"
 cb=pkg/"playback/MediaLibrarySessionCallback.kt"
 s=cb.read_text(encoding="utf-8")
-# Required imports of newly added nav providers.
-imp='import com.dd3boh.outertune.polaris.RadioCatalog'
-assert s.count(imp)==1, "Missing existing Polaris RadioCatalog import"
-s=s.replace(imp,imp+"""
+# New namespace imports are added after the package line, regardless of
+# legacy Polaris imports injected by earlier build scripts.
+package_line="package com.dd3boh.outertune.playback\n"
+assert s.count(package_line)==1,"MediaLibrary package declaration missing"
+s=s.replace(package_line,package_line+"""
 import com.dd3boh.outertune.polaris.Polaris613Nav
 import com.dd3boh.outertune.polaris.Polaris613Art
-import com.dd3boh.outertune.polaris.CurrentProgramResolver""",1)
+import com.dd3boh.outertune.polaris.CurrentProgramResolver
+""",1)
 
 def one(src,old,new,why):
     n=src.count(old)
