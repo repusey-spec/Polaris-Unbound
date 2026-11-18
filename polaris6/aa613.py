@@ -8,6 +8,13 @@ root=Path(sys.argv[1]).resolve()
 pkg=root/"app/src/main/java/com/dd3boh/outertune"
 cb=pkg/"playback/MediaLibrarySessionCallback.kt"
 s=cb.read_text(encoding="utf-8")
+# Required imports of newly added nav providers.
+imp='import com.dd3boh.outertune.polaris.RadioCatalog'
+assert s.count(imp)==1, "Missing existing Polaris RadioCatalog import"
+s=s.replace(imp,imp+"""
+import com.dd3boh.outertune.polaris.Polaris613Nav
+import com.dd3boh.outertune.polaris.Polaris613Art
+import com.dd3boh.outertune.polaris.CurrentProgramResolver""",1)
 
 def one(src,old,new,why):
     n=src.count(old)
@@ -42,7 +49,7 @@ s=s.replace(anchor,'''    private fun polarisRadio613(id: String): MediaItem {
         val programme=if (cached != null && CurrentProgramResolver.isCurrentNow(id,cached))
             cached.program?.trim().orEmpty() else ""
         val label=programme.takeIf { it.isNotBlank() && it != station.title }
-            ?.replace('\n',' ')?.trim()?.take(65) ?: "\u200B"
+            ?.replace(10.toChar(),' ')?.trim()?.take(65) ?: "\u200B"
         return item.buildUpon()
             .setMediaId(RadioCatalog.RADIO_TILE_PREFIX + id)
             .setMediaMetadata(item.mediaMetadata.buildUpon()
@@ -226,7 +233,7 @@ class Polaris613ArtProvider:ContentProvider() {
     private val names=mapOf(
         "home" to "⌂", "radio" to "♫", "streaming" to "▶",
         "can" to "CAN", "kr" to "국내", "world" to "해외",
-        "playlists" to "목록", "downloads" to "저장"
+        "playlists" to "플레이리스트", "downloads" to "다운로드"
     )
     override fun onCreate():Boolean=true
     override fun getType(uri:Uri):String? =
@@ -259,7 +266,7 @@ class Polaris613ArtProvider:ContentProvider() {
             p.typeface=Typeface.create("sans-serif",Typeface.BOLD)
             p.textAlign=Paint.Align.CENTER
             val title=names[id]!!
-            p.textSize=if(title.length>2)62f else 96f
+            p.textSize=when {title.length>4->35f;title.length>2->59f;else->96f}
             canvas.drawText(title,128f,128f-(p.ascent()+p.descent())/2f,p)
             file.outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
             bitmap.recycle()
