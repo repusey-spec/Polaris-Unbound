@@ -1,4 +1,4 @@
-name: Polaris AA UI-only 4-tab probe
+name: Polaris AA UI-only revised 4-tab probe v02
 on:
   push:
     branches: [experiment/polaris-aa-ui-probe-01]
@@ -37,22 +37,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp aa-ui-probe/app/build/outputs/apk/debug/app-debug.apk delivery/Polaris_AA_UI_Probe_v01.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_AA_UI_Probe_v01.apk > delivery/apk-badging.txt
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree delivery/Polaris_AA_UI_Probe_v01.apk AndroidManifest.xml > delivery/manifest.txt
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree delivery/Polaris_AA_UI_Probe_v01.apk res/xml/automotive_app_desc.xml > delivery/automotive-desc.txt
+          cp aa-ui-probe/app/build/outputs/apk/debug/app-debug.apk delivery/Polaris_AA_UI_Probe_v02.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_AA_UI_Probe_v02.apk > delivery/apk-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree delivery/Polaris_AA_UI_Probe_v02.apk AndroidManifest.xml > delivery/manifest.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree delivery/Polaris_AA_UI_Probe_v02.apk res/xml/automotive_app_desc.xml > delivery/automotive-desc.txt
           grep -F "package: name='dev.polaris.aauiprobe'" delivery/apk-badging.txt
           grep -F 'dev.polaris.aauiprobe.DemoMediaService' delivery/manifest.txt
           grep -F 'android.media.browse.MediaBrowserService' delivery/manifest.txt
           grep -F 'dev.polaris.aauiprobe.MainActivity' delivery/manifest.txt
           grep -F 'com.google.android.gms.car.application' delivery/manifest.txt
           grep -F 'media' delivery/automotive-desc.txt
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_AA_UI_Probe_v01.apk > delivery/signature.txt
-          sha256sum delivery/Polaris_AA_UI_Probe_v01.apk > delivery/SHA256.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_AA_UI_Probe_v02.apk > delivery/signature.txt
+          sha256sum delivery/Polaris_AA_UI_Probe_v02.apk > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Polaris-AA-UI-Probe-v01-APK
+          name: Polaris-AA-UI-Probe-v02-APK
           path: delivery/
           retention-days: 30
   smoke:
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Polaris-AA-UI-Probe-v01-APK
+          name: Polaris-AA-UI-Probe-v02-APK
           path: delivery
       - uses: android-actions/setup-android@v4
       - name: Enable emulator KVM
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Polaris-AA-UI-Probe-v01-phone-and-media-selftest
+          name: Polaris-AA-UI-Probe-v02-phone-and-media-selftest
           path: smoke/
           retention-days: 30
       - name: Record result of emulator validation
@@ -92,7 +92,7 @@ jobs:
           git reset --hard origin/experiment/polaris-aa-ui-probe-01
           mkdir -p aa-ui-probe/ci
           if grep -q 'SELFTEST PASS' smoke/media-browser-selftest-log.txt 2>/dev/null; then
-            RESULT='PASS phone launch, AA root 4 tab tree, CAN/Radio/Streaming menu counts'
+            RESULT='PASS phone launch, Home Radio Streaming CAN order, Radio 2 groups, Streaming 2 groups and liked 10, CAN empty'
           else
             RESULT='FAIL / incomplete, inspect workflow artifacts'
           fi

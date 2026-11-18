@@ -6,6 +6,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.MediaDescription;
 import android.media.MediaMetadata;
 import android.media.browse.MediaBrowser;
@@ -44,7 +46,28 @@ public final class DemoMediaService extends MediaBrowserService {
         session.setCallback(new MediaSession.Callback() {
             @Override public void onPlay() { pausedDemo("UI TEST · 재생 기능 없음", "모의 화면 전용"); }
             @Override public void onPlayFromMediaId(String mediaId, Bundle extras) {
-                pausedDemo("UI TEST · "+mediaId, "실제 음원 및 방송 연결 없음");
+                if(mediaId!=null && mediaId.startsWith("radio/station/")) {
+                    String id=mediaId.substring("radio/station/".length());
+                    String title=stationName(id);
+                    if(title!=null){
+                        rememberRadio(id,title);
+                        pausedDemo(title,"라디오 UI 테스트 · 실제 재생 없음");
+                        notifyChildrenChanged(ROOT);
+                        notifyChildrenChanged("radio");
+                        notifyChildrenChanged("home");
+                        return;
+                    }
+                }
+                if(mediaId!=null && mediaId.startsWith("streaming/liked/")) {
+                    String index=mediaId.substring("streaming/liked/".length());
+                    String title="좋아요 항목 "+index+" (샘플)";
+                    getSharedPreferences("ui_probe",Context.MODE_PRIVATE).edit()
+                        .putString("current_label",title).apply();
+                    pausedDemo(title,"스트리밍 UI 테스트 · 실제 재생 없음");
+                    notifyChildrenChanged("home");
+                    return;
+                }
+                pausedDemo("UI TEST · "+mediaId,"실제 음원 및 방송 연결 없음");
             }
         });
         session.setPlaybackState(new PlaybackState.Builder()
@@ -78,63 +101,93 @@ public final class DemoMediaService extends MediaBrowserService {
         List<MediaBrowser.MediaItem> list = new ArrayList<>();
         switch(parentId) {
         case ROOT:
-            list.add(folder("home","Home","CAN·라디오 / CAN·스트리밍 요약","H","#2FAFA8",LIST,null));
-            list.add(folder("can","CAN","서플라이 / 전비기록 / 상태 / 로깅","C","#6389EB",LIST,null));
-            list.add(folder("radio","Radio","국내 / 해외","R","#E4A156",LIST,null));
-            list.add(folder("streaming","Streaming","좋아요 / 저장 / 추천 / 최근재생","S","#A58AEB",LIST,null));
+            list.add(folder("home","Home","현재 선택한 콘텐츠","H","#2FAFA8",LIST,null));
+            list.add(folder("radio","Radio","국내 / 해외 및 최근 재생","R","#E4A156",LIST,null));
+            list.add(folder("streaming","Streaming","플레이리스트 / 다운로드 및 좋아요","S","#A58AEB",LIST,null));
+            list.add(folder("can","CAN","향후 CAN 기능","C","#6389EB",LIST,null));
             break;
-        case "home":
-            list.add(folder("home/radio","CAN + Radio","SOC 62% · 전비 18.5 · 국내 FM (가상)","C+R","#2FAFA8",LIST,"요약"));
-            list.add(folder("home/streaming","CAN + Streaming","SOC 62% · 전비 18.5 · 음악 미리보기 (가상)","C+S","#2FAFA8",LIST,"요약"));
+        case "home": {
+            String current=getSharedPreferences("ui_probe",Context.MODE_PRIVATE)
+                .getString("current_label","");
+            if(current.isEmpty())list.add(info("home/none","현재 재생 중인 콘텐츠 없음","UI 테스트 앱 · 오디오 연결 전","현재 콘텐츠"));
+            else list.add(info("home/current",current,"마지막 선택 · 실제 재생 없음","현재 콘텐츠"));
             break;
-        case "can":
-            list.add(folder("can/supply","서플라이","공급 전원 · 데모","V","#6389EB",CATEGORY_GRID,"CAN 메뉴"));
-            list.add(folder("can/efficiency","전비기록","주행 기록 · 데모","EV","#6389EB",CATEGORY_GRID,"CAN 메뉴"));
-            list.add(folder("can/status","상태","차량 상태 · 데모","ST","#6389EB",CATEGORY_GRID,"CAN 메뉴"));
-            list.add(folder("can/log","로깅","신호 로깅 · 데모","LOG","#6389EB",CATEGORY_GRID,"CAN 메뉴"));
-            list.add(info("can/sample/soc","SOC 62% · 가상 데이터","실제 CAN·OBD 연결 없음","미리보기"));
-            list.add(info("can/sample/eff","평균 전비 18.5 kWh/100km · 가상","실제 측정값 아님","미리보기"));
+        }
+        case "radio": {
+            list.add(folder("radio/kr","국내","국내 6개 방송국","KR","#E4A156",CATEGORY_GRID,"Radio 메뉴"));
+            list.add(folder("radio/world","해외","해외 2개 방송국","INT","#E4A156",CATEGORY_GRID,"Radio 메뉴"));
+            String recent=getSharedPreferences("ui_probe",Context.MODE_PRIVATE).getString("recent_radio","");
+            if(recent.isEmpty())list.add(info("radio/empty","최근 재생 기록 없음","국내·해외에서 채널을 선택하세요","최근 재생"));
+            else for(String id:recent.split(",")){
+                String title=stationName(id);
+                if(title!=null)list.add(stationItem(id,title,"최근 선택 · 미리보기",LIST,"최근 재생"));
+            }
             break;
-        case "radio":
-            list.add(folder("radio/kr","국내","국내 방송국 메뉴","KR","#E4A156",CATEGORY_GRID,"Radio 메뉴"));
-            list.add(folder("radio/world","해외","해외 방송국 메뉴","INT","#E4A156",CATEGORY_GRID,"Radio 메뉴"));
-            list.add(info("radio/demo1","89.1 KBS Cool FM","국내 · 가상 방송 목록","미리보기"));
-            list.add(info("radio/demo2","KIIS-FM LA","해외 · 가상 방송 목록","미리보기"));
+        }
+        case "radio/kr":
+            for(String id:new String[]{"kr1","kr2","kr3","kr4","kr5","kr6"})
+                list.add(stationItem(id,stationName(id),"국내 · 라디오 UI",CATEGORY_GRID,"국내"));
+            break;
+        case "radio/world":
+            for(String id:new String[]{"kiis","gallery"})
+                list.add(stationItem(id,stationName(id),"해외 · 라디오 UI",CATEGORY_GRID,"해외"));
             break;
         case "streaming":
-            list.add(folder("streaming/liked","좋아요","좋아요 표시한 곡","♥","#A58AEB",CATEGORY_GRID,"Streaming 메뉴"));
-            list.add(folder("streaming/saved","저장","저장한 곡","↓","#A58AEB",CATEGORY_GRID,"Streaming 메뉴"));
-            list.add(folder("streaming/rec","추천","추천 음악","★","#A58AEB",CATEGORY_GRID,"Streaming 메뉴"));
-            list.add(folder("streaming/recent","최근재생","최근 재생","↺","#A58AEB",CATEGORY_GRID,"Streaming 메뉴"));
-            list.add(info("streaming/demo1","Demo Track A","샘플 음악 · 실제 재생 없음","미리보기"));
-            list.add(info("streaming/demo2","Demo Track B","샘플 음악 · 실제 재생 없음","미리보기"));
-            list.add(info("streaming/demo3","Demo Track C","샘플 음악 · 실제 재생 없음","미리보기"));
+            list.add(folder("streaming/playlists","플레이리스트","플레이리스트 목록","PL","#A58AEB",CATEGORY_GRID,"Streaming 메뉴"));
+            list.add(folder("streaming/downloads","다운로드","다운로드한 음악","↓","#A58AEB",CATEGORY_GRID,"Streaming 메뉴"));
+            for(int i=1;i<=10;i++){
+                String n=String.format(java.util.Locale.ROOT,"%02d",i);
+                list.add(info("streaming/liked/"+n,"좋아요 항목 "+n+" (샘플)","실제 좋아요 데이터 연결 전","좋아요"));
+            }
             break;
-        case "home/radio":
-            list.add(info("home/radio/soc","CAN · SOC 62% (가상)","실제 차량 데이터 아님","요약"));
-            list.add(info("home/radio/now","Radio · 89.1 Cool FM (가상)","라디오 신호 연결 없음","요약"));
+        case "streaming/playlists":
+            list.add(info("streaming/playlists/empty","플레이리스트 연결 전","실제 스트리밍 엔진 연결 후 목록 표시","플레이리스트"));
             break;
-        case "home/streaming":
-            list.add(info("home/streaming/soc","CAN · 전비 18.5 (가상)","실제 차량 데이터 아님","요약"));
-            list.add(info("home/streaming/now","Streaming · Demo Track A","실제 음악 재생 없음","요약"));
+        case "streaming/downloads":
+            list.add(info("streaming/downloads/empty","다운로드 목록 연결 전","실제 다운로드 데이터 연결 후 표시","다운로드"));
             break;
-        case "can/supply": list.add(info("demo/supply","13.8 V (가상)","모의 전원 공급 정보","서플라이"));break;
-        case "can/efficiency": list.add(info("demo/eff","18.5 kWh/100km (가상)","모의 전비 기록","전비기록"));break;
-        case "can/status": list.add(info("demo/status","SOC 62% · 연결 끊김 (가상)","실제 CAN 수신 없음","상태"));break;
-        case "can/log": list.add(info("demo/log","로깅 대기 · 0 프레임","CAN 신호 수집 없음","로깅"));break;
-        case "radio/kr": list.add(info("demo/kr1","89.1 KBS Cool FM","가상 국내 라디오","국내")); list.add(info("demo/kr2","107.7 SBS PowerFM","가상 국내 라디오","국내"));break;
-        case "radio/world": list.add(info("demo/us1","KIIS-FM LA","가상 해외 라디오","해외"));list.add(info("demo/us2","Gallery 41","가상 해외 라디오","해외"));break;
-        case "streaming/liked":
-        case "streaming/saved":
-        case "streaming/rec":
-        case "streaming/recent":
-            String section = parentId.substring(parentId.lastIndexOf('/')+1);
-            list.add(info(parentId+"/a","Demo Track A","["+section+"] 실제 음원 없음","목록"));
-            list.add(info(parentId+"/b","Demo Track B","["+section+"] 실제 음원 없음","목록"));
+        case "can":
+            // Future CAN display: intentionally blank, with no fake measurements.
             break;
         }
         Log.i(TAG,"children: "+parentId+" count="+list.size());
         result.sendResult(list);
+    }
+
+    private void rememberRadio(String id,String title) {
+        SharedPreferences p=getSharedPreferences("ui_probe",Context.MODE_PRIVATE);
+        java.util.LinkedHashSet<String> ordered=new java.util.LinkedHashSet<>();
+        ordered.add(id);
+        String old=p.getString("recent_radio","");
+        if(!old.isEmpty())for(String x:old.split(","))if(stationName(x)!=null)ordered.add(x);
+        StringBuilder sb=new StringBuilder();
+        int count=0;
+        for(String x:ordered){if(count++>=8)break;if(sb.length()>0)sb.append(',');sb.append(x);}
+        p.edit().putString("recent_radio",sb.toString())
+            .putString("current_label",title).apply();
+    }
+    static String stationName(String id) {
+        if(id==null)return null;
+        switch(id){
+        case "kr1":return "89.1 KBS CoolFM";
+        case "kr2":return "91.9 MBC FM4U";
+        case "kr3":return "93.9 CBS MusicFM";
+        case "kr4":return "95.9 MBC 표준FM";
+        case "kr5":return "102.7 AFN EagleFM";
+        case "kr6":return "107.7 SBS PowerFM";
+        case "kiis":return "102.7 KIIS-FM LA";
+        case "gallery":return "Gallery 41";
+        default:return null;
+        }
+    }
+    private MediaBrowser.MediaItem stationItem(String id,String title,String subtitle,int style,String group){
+        Bundle extras=new Bundle();
+        extras.putInt(STYLE_SINGLE,style);
+        extras.putString(STYLE_GROUP,group);
+        MediaDescription d=new MediaDescription.Builder().setMediaId("radio/station/"+id)
+            .setTitle(title).setSubtitle(subtitle)
+            .setIconBitmap(StationArt.bitmap(this,id,112)).setExtras(extras).build();
+        return new MediaBrowser.MediaItem(d,MediaBrowser.MediaItem.FLAG_PLAYABLE);
     }
     private static MediaBrowser.MediaItem folder(String id,String title,String subtitle,
             String glyph,String color,int style,String group) {
