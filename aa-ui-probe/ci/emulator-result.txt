@@ -1,2 +1,2 @@
-RUN_ID=44192025217
-RESULT=PASS phone launch, AA root 4 tab tree, CAN/Radio/Streaming menu counts
+RUN_ID=44408591509
+RESULT=PASS phone launch, Home Radio Streaming CAN order, Radio 2 groups, Streaming 2 groups and liked 10, CAN empty
