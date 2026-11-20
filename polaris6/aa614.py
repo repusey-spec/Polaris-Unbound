@@ -133,6 +133,16 @@ change(auto,
             out.addTab(Tab.Builder().setContentId(item.mediaId).setTitle(item.name()).setIcon(icon).build())''',
     "top CAL tabs use packaged drawable icons")
 
+# Seed the recent menu from the EXISTING last-audible-radio record, so the
+# first update can show the last heard channel without another playback.
+change(callback,
+'''        val recent=Polaris613Nav.recent(context)
+            .mapNotNull { RadioCatalog.find(it)?.let { _ -> polarisRadio613(it) } }''',
+'''        val recent=(listOfNotNull(PolarisLastSource.radioToResume(context)) +
+            Polaris613Nav.recent(context)).distinct()
+            .mapNotNull { RadioCatalog.find(it)?.let { _ -> polarisRadio613(it) } }''',
+    "seed recent list from actual previously played radio")
+
 # The original bitmap service remains for legacy media sources. Add high-
 # contrast, big, bold versions for browse cards only.
 station=src/"polaris/StationArt.java"
@@ -208,4 +218,11 @@ for name,path in paths.items():
 ''',encoding="utf-8")
 print("6.14 SOURCE PREPARED ONLY: 4 vector tab icons; catalogue overseas stations;")
 print("phone+AA audible recent radio; Home current/last music; readable station art.")
+# 6.13's regression test intentionally asserted the incorrect 2-station demo;
+# this expected count must change to the actual 7 overseas catalog entries.
+test=root/"app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA613BrowserTest.kt"
+if test.exists():
+    change(test, 'assertEquals(2,get("polaris:radio:world:v613").size)',
+           'assertEquals(7,get("polaris:radio:world:v613").size)',
+           "updated overseas regression count")
 print("No APK build, version increment, signing, or release performed.")
