@@ -1,0 +1,222 @@
+name: Polaris 6.14 full media production direct APK
+on:
+  push:
+    branches: [experiment/polaris-6-14-fixes-draft]
+    paths: ['polaris6/aa614.py', 'polaris6/version614.py', 'polaris6/verify614.py', 'polaris6/PolarisAA613BrowserTest.kt', 'polaris6/smoke614.py', '.github/workflows/polaris614-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: polaris6-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record build run ID for verified artifact retrieval
+        run: |
+          mkdir -p polaris6/diagnostics
+          printf 'RUN_ID=%s\nCOMMIT=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > polaris6/diagnostics/614-build-run.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/614-build-run.txt
+          git commit -m 'Record Polaris 6.14 build run ID' || true
+          git push origin HEAD:experiment/polaris-6-14-fixes-draft
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Pin InterTune engine
+        run: |
+          git clone --depth 1 --branch v0.12.10 --recurse-submodules https://github.com/ItzSkyeYT/InterTune.git "$RUNNER_TEMP/intertune"
+          test "$(git -C "$RUNNER_TEMP/intertune" rev-parse HEAD)" = 4ff39e9e12a20f93d5dfd24c52fe925cbbb50020
+      - name: Apply Polaris integration and original signer
+        run: |
+          base64 -d polaris6/intertune.patch.gz.b64 | gzip -d > "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$RUNNER_TEMP/polaris.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$RUNNER_TEMP/polaris.patch"
+          python3 polaris6/native_603.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify.py "$RUNNER_TEMP/intertune"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/radio604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply --check "$GITHUB_WORKSPACE/polaris6/stream604.patch"
+          git -C "$RUNNER_TEMP/intertune" apply "$GITHUB_WORKSPACE/polaris6/stream604.patch"
+          python3 polaris6/verify604.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/playlist605.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify605.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/fixes606.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify606.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/mini607.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify607.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa608.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify608.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa609.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify609.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa610.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify610.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/cal611.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify611.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/version611.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/fix612_release_cal.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa613.py "$RUNNER_TEMP/intertune"
+          cp polaris6/PolarisAA613BrowserTest.kt "$RUNNER_TEMP/intertune/app/src/androidTest/java/com/dd3boh/outertune/polaris/PolarisAA613BrowserTest.kt"
+          python3 polaris6/verify613.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/aa614.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/version614.py "$RUNNER_TEMP/intertune"
+          python3 polaris6/verify614.py "$RUNNER_TEMP/intertune"
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/intertune/polaris.jks"
+          cat > "$RUNNER_TEMP/intertune/keystore.properties" <<'EOF'
+          storeFile=../polaris.jks
+          storePassword=android
+          keyAlias=polarisdebug
+          keyPassword=android
+          EOF
+      - name: Android toolchain
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.13113456' 'cmake;3.31.6' > /dev/null
+      - name: Release unit tests
+        working-directory: ${{ runner.temp }}/intertune
+        run: ./gradlew --build-cache :app:testCoreReleaseUnitTest --tests "com.dd3boh.outertune.polaris.PolarisAA609Test" --tests "com.dd3boh.outertune.polaris.PolarisVoiceRouterTest" --tests "com.dd3boh.outertune.polaris.PolarisAA608Test" --stacktrace --max-workers=2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.14-validated-unit-results
+          path: ${{ runner.temp }}/intertune/app/build/test-results/testCoreReleaseUnitTest/
+          retention-days: 30
+      - name: Minified release and release instrumentation APK
+        working-directory: ${{ runner.temp }}/intertune
+        run: ./gradlew --build-cache :app:assembleCoreRelease :app:assembleCoreReleaseAndroidTest --stacktrace --max-workers=2
+      - name: Verify install identity and signature
+        run: |
+          mkdir -p delivery
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.14_100614.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_6.14_100614.apk > delivery/apk-badging.txt
+          grep "package: name='app.hush.music.polarisradio.debug' versionCode='100614' versionName='6.14'" delivery/apk-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_6.14_100614.apk > delivery/signature.txt
+          grep '477721bae3a205d4e6369e76482868978b74931a0b2c4dfe85f3b07a7b40bea8' delivery/signature.txt
+          sha256sum delivery/Polaris_6.14_100614.apk > delivery/SHA256.txt
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/mapping/coreRelease/mapping.txt" delivery/ProGuard-mapping.txt
+          cp -r "$RUNNER_TEMP/intertune/app/build/test-results/testCoreReleaseUnitTest" delivery/test-results
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/androidTest/core/release/"*.apk delivery/Polaris_6.14_tests.apk
+      - name: Verify FINAL release APK still declares CAL service and both automotive modes
+        run: |
+          set -euo pipefail
+          APK=delivery/Polaris_6.14_100614.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/merged-apk-manifest.txt
+          "$AAPT" dump permissions "$APK" > delivery/apk-permissions.txt
+          python3 - <<'PY'
+          import os, subprocess, zipfile
+          from pathlib import Path
+          apk='delivery/Polaris_6.14_100614.apk'
+          aapt=os.environ['ANDROID_HOME']+'/build-tools/36.0.0/aapt'
+          found=[]
+          with zipfile.ZipFile(apk) as z:
+              for name in z.namelist():
+                  if not(name.startswith('res/') and name.endswith('.xml')): continue
+                  data=z.read(name)
+                  if (b'template' in data or 'template'.encode('utf-16le') in data) and (b'media' in data or 'media'.encode('utf-16le') in data):
+                      output=subprocess.check_output([aapt,'dump','xmltree',apk,name], text=True)
+                      if 'automotiveApp' in output and 'template' in output and 'media' in output:
+                          found.append((name,output))
+          assert len(found)==1, 'Expected exactly one compiled media+template car descriptor'
+          Path('delivery/automotive-template-descriptor.txt').write_text(found[0][1])
+          print('PASS automotive XML compiled at',found[0][0])
+          PY
+          grep -F 'com.dd3boh.outertune.playback.AutoCarService' delivery/merged-apk-manifest.txt
+          grep -F 'androidx.car.app.category.MEDIA' delivery/merged-apk-manifest.txt
+          grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/merged-apk-manifest.txt
+          grep -F 'androidx.car.app.minCarApiLevel' delivery/merged-apk-manifest.txt
+          grep -F 'androidx.car.app.MEDIA_TEMPLATES' delivery/apk-permissions.txt
+          grep -F 'template' delivery/automotive-template-descriptor.txt
+          grep -F 'media' delivery/automotive-template-descriptor.txt
+          printf '%s\n' "PASS: FINAL APK has CAL service, signed media-template permission, media-browser fallback and template descriptor" > delivery/CAL-MANIFEST-VERIFIED.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.14-100613-validated
+          path: delivery/
+          retention-days: 30
+  smoke:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Polaris-6.14-100613-validated
+          path: delivery
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Complete desugared runtime for the TEST APK only
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
+          mkdir -p "$RUNNER_TEMP/polaris614-test-runtime"
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/polaris614-test-runtime/polaris.jks"
+          python3 polaris614-ci/fix_test_desugar614.py
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            python3 polaris6/smoke614.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.14-validated-smoke
+          path: smoke/
+          retention-days: 14
+      - name: Publish direct standalone APK only (no ZIP release)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -f delivery/Polaris_6.14_100614.apk
+          grep -q 'OK (1 test)' smoke/session-test.txt
+          TAG="polaris-6.14"
+          APK="delivery/Polaris_6.14_100614.apk"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Polaris 6.14 (100614)" \
+              --notes "Official signed Polaris 6.14 build. Android Auto Home / Radio / Streaming / CAN. Existing InterTune media engine, real liked songs and radio playback, original station artwork. CAN intentionally blank. Only APK included."
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
+            grep -Fx "Polaris_6.14_100614.apk"
+          echo "DIRECT_APK=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Polaris_6.14_100614.apk"
+
+      - name: Record Android 13 smoke-test verdict
+        if: always()
+        run: |
+          git fetch origin experiment/polaris-6-14-fixes-draft
+          git reset --hard origin/experiment/polaris-6-14-fixes-draft
+          mkdir -p polaris6/diagnostics
+          if grep -q 'OK (1 test)' smoke/session-test.txt 2>/dev/null; then
+            VERDICT='PASS v6.14 Android 13 root/menus/empty CAN instrumentation test'
+          else
+            VERDICT='FAIL Android 13 v6.13 instrumentation'
+          fi
+          printf 'RUN_ID=%s\nRESULT=%s\n' "$GITHUB_RUN_ID" "$VERDICT" > polaris6/diagnostics/614-android13-result.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add polaris6/diagnostics/614-android13-result.txt
+          git commit -m 'Record Polaris 6.14 Android 13 validation' || true
+          git push origin HEAD:experiment/polaris-6-14-fixes-draft
