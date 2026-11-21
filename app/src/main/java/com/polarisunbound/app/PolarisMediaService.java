@@ -3,6 +3,8 @@ package com.polarisunbound.app;
 import android.os.Bundle;
 import android.content.Intent;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.media.AudioManager;
 import android.media.AudioFocusRequest;
@@ -55,6 +57,23 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         sendBroadcast(i);
     }
     private MediaSessionCompat session;
+    // Stop an active radio stream when its external audio output (including Bluetooth
+    // A2DP) disconnects, rather than unexpectedly playing from the phone speaker.
+    // ACTION_AUDIO_BECOMING_NOISY needs no Bluetooth runtime permission.
+    private boolean audioRouteReceiverRegistered=false;
+    private final BroadcastReceiver audioRouteReceiver=new BroadcastReceiver(){
+        @Override public void onReceive(Context context,Intent intent){
+            if(intent==null ||
+               !AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) return;
+            // Only stop radio. MP3 and other sources retain their existing behavior.
+            if(currentRadioId==null || userStopped || player==null || session==null) return;
+            if(!player.isPlaying() && !player.getPlayWhenReady()) return;
+            trace("AUDIO output disconnected -> stop radio: "+currentRadioId);
+            player.pause();
+            // Use the existing Stop path to cancel retries and AA automatic restore.
+            session.getController().getTransportControls().stop();
+        }
+    };
     private ExoPlayer player;
     private final ExecutorService resolver=Executors.newSingleThreadExecutor();
     private final ExecutorService programExecutor=Executors.newFixedThreadPool(3);
@@ -495,6 +514,13 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         startLocalRadioClockLoop();
         startPositionSaver();
         observeCarConnection();
+        try{
+            registerReceiver(audioRouteReceiver,
+                new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+            audioRouteReceiverRegistered=true;
+        }catch(Exception e){
+            trace("AUDIO route receiver unavailable: "+e);
+        }
     }
 
 
@@ -2785,6 +2811,11 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     }
 
     @Override public void onDestroy(){
+        if(audioRouteReceiverRegistered){
+            try{ unregisterReceiver(audioRouteReceiver); }
+            catch(Exception ignored){}
+            audioRouteReceiverRegistered=false;
+        }
         getSharedPreferences("radio_presets",MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(radioPresetListener);
         saveLastPlaybackPosition();
