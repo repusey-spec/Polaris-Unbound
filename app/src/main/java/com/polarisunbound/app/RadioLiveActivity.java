@@ -127,6 +127,31 @@ public class RadioLiveActivity extends Activity {
     private String channel(){return "kr2".equals(id)?"FM4U":"STFM";}
     private static String enc(String s)throws Exception{return URLEncoder.encode(s,"UTF-8");}
     private static String field(JSONObject o,String k){return o.isNull(k)?"":o.optString(k,"");}
+    // Exact text mapping from the KBS PC liveChat.js client.
+    private static final String[] KBS_EMOTICONS={
+        "(뽀뽀)", "(식사)", "(비웃음)", "(설렘)", "(댄스)", "(NO)", "(OK)", "(좌절)", "(큰웃음)", "(애정)",
+        "(응원)", "(졸림)", "(기대)", "(분노)", "(인사)", "(공포)", "(잠)", "(눈물)", "(대성통곡)", "(슬픔)",
+        "(굿)", "(난감)", "(결심)", "(귀찮음)", "(심심)", "(놀람)", "(사과)", "(당황)", "(부끄러움)", "(어질어질)",
+        "(배고픔)", "(신나)", "(화남)", "(기쁨)", "(황당)", "(궁금)", "(음악감상)", "(반함)", "(짜증)", "(삐짐)",
+        "(생일축하)", "(식사)", "(일하는모습)", "(행복)", "(신남)", "(출근중)", "(운동)", "(기쁨)", "(신남)", "(더움)",
+        "(휴식)", "(열남)", "(잠)", "(기대)", "(공포)", "(태풍)", "(간식)", "(어이없음)", "(즐거움)", "(즐거움)",
+        "(놀람)", "(의심)", "(영화관람)", "(열심)", "(부듯)", "(가는중)", "(꽃구경)", "(인사)", "(공격)", "(웃음)",
+        "(질주)", "(아픔)", "(즐거움)", "(외로움)", "(추움)", "(취미생활)", "(행복)", "(선물)", "(티타임)", "(뒤뚱뒤뚱)"
+    };
+    private static String kbsChatBody(JSONObject o){
+        String msg=field(o,"msg");
+        String code=field(o,"emoticon").trim();
+        String label="";
+        if(!code.isEmpty()&&!"null".equalsIgnoreCase(code)){
+            if(code.matches("[a-h][0-9]")){
+                label=KBS_EMOTICONS[(code.charAt(0)-'a')*10+code.charAt(1)-'0'];
+            }else{
+                label="(이모티콘: "+code+")";
+            }
+        }
+        if(msg.trim().isEmpty())return label.isEmpty()?"(내용 없음)":label;
+        return label.isEmpty()?msg:label+" "+msg;
+    }
     private void pollSong(int g){
         if(g!=generation)return;
         try{
@@ -331,7 +356,7 @@ public class RadioLiveActivity extends Activity {
                     for(int i=0;i<a.length();i++){
                         JSONObject o=a.getJSONObject(i);
                         String name="0".equals(field(o,"s_flag"))?field(o,"user_id"):field(o,"user_name");
-                        messages.put(field(o,"seq"),name+"  "+shortTime(field(o,"date_created"))+"\n"+field(o,"msg"));
+                        messages.put(field(o,"seq"),name+"  "+shortTime(field(o,"date_created"))+"\n"+kbsChatBody(o));
                     }
                     seq=r.optLong("nextSeq",seq);Log.i(TAG,"KBS chat count="+a.length());
                 }
