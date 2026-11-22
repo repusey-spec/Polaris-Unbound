@@ -51,52 +51,25 @@ public class RadioLiveActivity extends Activity {
         super.onCreate(b);
         id=getIntent().getStringExtra("station");
         if(!"kr1".equals(id)&&!"kr2".equals(id)){finish();return;}
-        LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(Color.WHITE);
-        // Paint the actual status-bar inset, including Android 15+ edge-to-edge.
-        android.view.Window window=getWindow();
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-        window.setStatusBarColor(Color.TRANSPARENT);
-        window.setNavigationBarColor(Color.WHITE);
-        if(android.os.Build.VERSION.SDK_INT>=29)window.setStatusBarContrastEnforced(false);
-        if(android.os.Build.VERSION.SDK_INT>=30){
-            window.setDecorFitsSystemWindows(false);
-            android.view.WindowInsetsController controller=window.getInsetsController();
-            if(controller!=null){
-                // White status indicators; dark navigation buttons on white.
-                controller.setSystemBarsAppearance(
-                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-                    android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS|
-                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+        // Keep the 0.65 layout and inset dispatch. Paint only its status inset.
+        LinearLayout root=new LinearLayout(this){
+            private final android.graphics.Paint statusPaint=new android.graphics.Paint();
+            @Override protected void onDraw(android.graphics.Canvas canvas){
+                super.onDraw(canvas);
+                int top=Math.max(0,getPaddingTop()-dp(8));
+                if(top>0){
+                    statusPaint.setColor(CHAT_ACCENT);
+                    canvas.drawRect(0,0,getWidth(),top,statusPaint);
+                }
             }
-        }else{
-            android.view.View decor=window.getDecorView();
-            int flags=decor.getSystemUiVisibility();
-            flags&=~android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            flags|=android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE|
-                android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|
-                android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
-            if(android.os.Build.VERSION.SDK_INT>=26)flags|=android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-            decor.setSystemUiVisibility(flags);
-        }
-        android.view.View statusBackground=new android.view.View(this);
-        statusBackground.setBackgroundColor(CHAT_ACCENT);
-        LinearLayout.LayoutParams statusLp=new LinearLayout.LayoutParams(-1,0);
-        statusLp.bottomMargin=dp(8);
-        root.addView(statusBackground,statusLp);
+        };
+        root.setOrientation(1);root.setBackgroundColor(Color.WHITE);
+        root.setWillNotDraw(false);
+        root.setPadding(0,dp(8),0,dp(8));
         root.setOnApplyWindowInsetsListener((v,insets)->{
-            int left,top,right,bottom;
-            if(android.os.Build.VERSION.SDK_INT>=30){
-                android.graphics.Insets safe=insets.getInsets(android.view.WindowInsets.Type.systemBars()|
-                    android.view.WindowInsets.Type.displayCutout());
-                left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;
-            }else{
-                left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();
-                right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();
-            }
-            v.setPadding(left,0,right,bottom);
-            android.view.ViewGroup.LayoutParams lp=statusBackground.getLayoutParams();
-            if(lp.height!=top){lp.height=top;statusBackground.setLayoutParams(lp);}
+            v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop()+dp(8),
+                insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+            v.invalidate();
             return insets;
         });
         TextView back=label("‹   "+CurrentProgramResolver.stationName(id),21);back.setTypeface(null,Typeface.BOLD);
@@ -109,7 +82,6 @@ public class RadioLiveActivity extends Activity {
         chatScroll=new ScrollView(this);comments=label("",14);comments.setGravity(Gravity.TOP);
         comments.setTextIsSelectable(false);
         chatScroll.addView(comments);root.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
-        // Fixed boundary outside scrolling chat, immediately above navigation.
         addChatDivider(root,2);
         setContentView(root);root.requestApplyInsets();
     }
