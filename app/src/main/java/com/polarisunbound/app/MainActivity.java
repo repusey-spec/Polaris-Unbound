@@ -696,7 +696,12 @@ public class MainActivity extends AppCompatActivity {
         }else{
             String label=RadioPresets.stationName(id);
             ImageButton button=stationButton(id,(slot+1)+"번 "+label);
-            button.setOnClickListener(x->playId(id,label));
+            button.setOnClickListener(x->{
+                playId(id,label);
+                Intent info=new Intent(this,RadioInfoActivity.class);
+                info.putExtra(RadioInfoActivity.EXTRA_STATION_ID,id);
+                startActivity(info);
+            });
             v=button;
         }
         v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
