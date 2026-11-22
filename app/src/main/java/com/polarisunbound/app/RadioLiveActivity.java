@@ -22,11 +22,12 @@ public class RadioLiveActivity extends Activity {
     private static final String MBC="https://miniapi.imbc.com";
     private final Handler ui=new Handler(Looper.getMainLooper());
     private ScheduledExecutorService jobs;
-    private int generation=0;
+    private volatile int generation=0;
     private String id;
     private TextView program,song,comments,chatStatus;
     private String currentRoom="",currentBid="",currentGid="";
-    private long scheduleAt=0,seq=-1;
+    private long scheduleAt=0,seq=-1,nextKbsSchedule=0,keyRetryAt=0;
+    private String webKey="",etag="";
     private final LinkedHashMap<String,String> messages=new LinkedHashMap<>();
     private final TimeZone korea=TimeZone.getTimeZone("Asia/Seoul");
 
@@ -38,25 +39,30 @@ public class RadioLiveActivity extends Activity {
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         id=getIntent().getStringExtra("station");
-        if(!"kr1".equals(id)&&!"kr2".equals(id)&&!"kr4".equals(id)){finish();return;}
+        if(!"kr1".equals(id)&&!"kr2".equals(id)){finish();return;}
         LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xff151922);
-        root.setPadding(0,dp(18),0,dp(12));
+        root.setPadding(0,dp(8),0,dp(8));
+        root.setOnApplyWindowInsetsListener((v,insets)->{
+            v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop()+dp(8),
+                insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom()+dp(8));
+            return insets;
+        });
         TextView back=label("‹   "+CurrentProgramResolver.stationName(id),21);back.setTypeface(null,Typeface.BOLD);
         back.setOnClickListener(v->finish());root.addView(back);
         program=label("현재 방송 확인 중",17);root.addView(program);
         song=label("현재 재생곡 확인 중",22);song.setTypeface(null,Typeface.BOLD);root.addView(song);
         TextView heading=label("청취자 메시지",18);heading.setTypeface(null,Typeface.BOLD);root.addView(heading);
         chatStatus=label("연결 확인 중",13);chatStatus.setTextColor(0xffb6bfd0);root.addView(chatStatus);
-        ScrollView scroll=new ScrollView(this);comments=label("",17);comments.setGravity(Gravity.TOP);
+        ScrollView scroll=new ScrollView(this);comments=label("",14);comments.setGravity(Gravity.TOP);
         scroll.addView(comments);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-        setContentView(root);
+        setContentView(root);root.requestApplyInsets();
     }
     @Override protected void onResume(){
-        super.onResume();if(id==null)return;
+        super.onResume();if(id==null||isFinishing())return;
         final int g=++generation;
         jobs=Executors.newScheduledThreadPool(2);
         jobs.scheduleWithFixedDelay(()->pollSong(g),0,"kr1".equals(id)?20:10,TimeUnit.SECONDS);
-        jobs.scheduleWithFixedDelay(()->pollChat(g),0,"kr1".equals(id)?2:10,TimeUnit.SECONDS);
+        jobs.scheduleWithFixedDelay(()->pollChat(g),0,"kr1".equals(id)?5:10,TimeUnit.SECONDS);
     }
     @Override protected void onPause(){
         generation++;if(jobs!=null){jobs.shutdownNow();jobs=null;}super.onPause();
@@ -116,32 +122,119 @@ public class RadioLiveActivity extends Activity {
             show(g,song,value.trim().isEmpty()?"현재 곡 정보 없음":value);
         }catch(Exception e){Log.w(TAG,id+" song "+e.getClass().getSimpleName()+": "+e.getMessage());show(g,song,"곡 정보 조회 실패");}
     }
+    private long scheduleTime(String day,String time){
+        if(day.length()!=8||time.length()<6)return -1;
+        try{
+            int h=Integer.parseInt(time.substring(0,2));
+            int m=Integer.parseInt(time.substring(2,4)),s=Integer.parseInt(time.substring(4,6));
+            long base=parseDate(day,"yyyyMMdd");
+            if(base<0||h<0||h>47||m<0||m>59||s<0||s>59)return -1;
+            return base+1000L*(h*3600+m*60+s);
+        }catch(Exception e){return -1;}
+    }
+    private String shortTime(String s){
+        if(s.matches("\\d{8} \\d{6}"))return s.substring(9,11)+":"+s.substring(11,13)+":"+s.substring(13,15);
+        if(s.length()>=19&&s.charAt(10)==' ')return s.substring(11,19);
+        if(s.length()>=19&&s.charAt(10)=='T')return s.substring(11,19);
+        return s;
+    }
+    private String fetchText(String url)throws Exception{
+        HttpURLConnection c=(HttpURLConnection)new URL(url).openConnection();
+        c.setConnectTimeout(6000);c.setReadTimeout(8000);c.setInstanceFollowRedirects(false);
+        c.setRequestProperty("Accept","*/*");
+        try{
+            if(c.getResponseCode()!=200)throw new IOException("KBS 웹 설정 조회 실패");
+            try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+                byte[] buf=new byte[8192];int n;
+                while((n=in.read(buf))!=-1){out.write(buf,0,n);if(out.size()>4000000)throw new IOException("웹 설정 크기 초과");}
+                return out.toString("UTF-8");
+            }
+        }finally{c.disconnect();}
+    }
+    // The public browser client publishes its app identifier in its JavaScript.
+    // Resolve it at runtime rather than storing a third-party key in the repository.
+    private String getWebKey()throws Exception{
+        if(!webKey.isEmpty())return webKey;
+        long now=System.currentTimeMillis();
+        if(now<keyRetryAt)throw new IOException("KBS 웹 설정 재시도 대기");
+        keyRetryAt=now+60000;
+        String js=null;
+        try{
+            String page="https://onair.kbs.co.kr/?ch_code=25&ch_type=radioList&chat=on";
+            org.jsoup.nodes.Document doc=org.jsoup.Jsoup.parse(fetchText(page),page);
+            for(org.jsoup.nodes.Element script:doc.select("script[src]")){
+                String u=script.absUrl("src");
+                URL url=new URL(u);
+                String host=url.getHost();
+                if("https".equals(url.getProtocol())&&("static.kbs.co.kr".equals(host)||"onair.kbs.co.kr".equals(host))&&url.getPath().endsWith("/liveChat.js")){
+                    js=fetchText(u);break;
+                }
+            }
+        }catch(Exception ignored){}
+        if(js==null)js=fetchText("https://static.kbs.co.kr/contents/20261118094618/resources/onair/js/liveChat.js");
+        java.util.regex.Matcher matcher=java.util.regex.Pattern.compile("API_KEY\\s*:\\s*['\"]([A-Fa-f0-9]{64})['\"]").matcher(js);
+        if(!matcher.find())throw new IOException("KBS 공개 웹 설정 형식 변경");
+        webKey=matcher.group(1);return webKey;
+    }
+    private JSONObject fetchKbsChat()throws Exception{
+        String key=getWebKey();
+        HttpURLConnection c=(HttpURLConnection)new URL("https://interact.static.kbs.co.kr/chatweb?room_code="+enc(currentRoom)+"&seq="+seq+"&count=30").openConnection();
+        c.setConnectTimeout(6000);c.setReadTimeout(8000);c.setInstanceFollowRedirects(false);c.setUseCaches(false);
+        c.setRequestProperty("Accept","application/json");c.setRequestProperty("webauthkey",key);
+        if(!etag.isEmpty())c.setRequestProperty("If-None-Match",etag);
+        try{
+            int code=c.getResponseCode();Log.i(TAG,"KBS chat HTTP "+code);
+            if(code==304)return null;
+            if(code!=200)throw new IOException("HTTP "+code);
+            try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+                byte[] buf=new byte[8192];int n;
+                while((n=in.read(buf))!=-1){out.write(buf,0,n);if(out.size()>4000000)throw new IOException("response too large");}
+                JSONObject r=new JSONObject(out.toString("UTF-8"));
+                if("0".equals(field(r,"result"))){
+                    String tag=c.getHeaderField("etag");etag=tag==null?"":tag;
+                }
+                return r;
+            }
+        }finally{c.disconnect();}
+    }
     private int minutes(String s){
         if(s==null||s.length()<4)return -1;
         try{return Integer.parseInt(s.substring(0,2))*60+Integer.parseInt(s.substring(2,4));}catch(Exception e){return -1;}
     }
     private boolean within(int n,int a,int b){return a>=0&&b>=0&&a!=b&&(a<b?n>=a&&n<b:n>=a||n<b);}
     private void refreshSchedule(int g)throws Exception{
-        if(System.currentTimeMillis()-scheduleAt<45000)return;
+        if("kr1".equals(id)?System.currentTimeMillis()<nextKbsSchedule:System.currentTimeMillis()-scheduleAt<45000)return;
         Date now=new Date();Calendar cal=Calendar.getInstance(korea);
         int minute=cal.get(Calendar.HOUR_OF_DAY)*60+cal.get(Calendar.MINUTE);
         JSONObject chosen=null;
         if("kr1".equals(id)){
-            String day=fmt("yyyyMMdd",now);
-            JSONObject r=new JSONObject(get(KBS+"/api/mobile/kong_broadcast_schedule_now_list_new3?channel_code=25&planned_day="+day,"KBS schedule"));
-            JSONArray a=r.getJSONArray("schedule_items");
-            for(int i=0;i<a.length();i++){
-                JSONObject o=a.getJSONObject(i);
-                JSONObject ch=o.optJSONObject("channel_code");
-                if(ch!=null&&!"25".equals(field(ch,"value")))continue;
-                String date=field(o,"programming_date");
-                long start=parseDate(date+field(o,"start_time").substring(0,6),"yyyyMMddHHmmss");
-                long end=parseDate(date+field(o,"end_time").substring(0,6),"yyyyMMddHHmmss");
-                if(start>0&&end>0&&end<=start)end+=86400000L;
-                if(start<=now.getTime()&&end>now.getTime()){chosen=o;break;}
+            nextKbsSchedule=System.currentTimeMillis()+15000;
+            JSONArray groups=new JSONArray(get("https://static.api.kbs.co.kr/mediafactory/v1/schedule/onair_now?local_station_code=00&channel_code=25","KBS schedule"));
+            long nowMs=now.getTime(), chosenEnd=0;
+            for(int j=0;j<groups.length();j++){
+                JSONObject group=groups.optJSONObject(j);
+                if(group==null||!"25".equals(field(group,"channel_code")))continue;
+                JSONArray a=group.optJSONArray("schedules");if(a==null)continue;
+                for(int i=0;i<a.length();i++){
+                    JSONObject o=a.optJSONObject(i);if(o==null)continue;
+                    String date=field(o,"service_date");
+                    if(date.isEmpty())date=field(o,"program_planned_date");
+                    JSONObject running=o.optJSONObject("running");
+                    String st=running==null?field(o,"service_start_time"):field(running,"start_time");
+                    String en=running==null?field(o,"service_end_time"):field(running,"end_time");
+                    if(st.isEmpty())st=field(o,"service_start_time");
+                    if(en.isEmpty())en=field(o,"service_end_time");
+                    long begin=scheduleTime(date,st), finish=scheduleTime(date,en);
+                    if(begin>0&&finish>0&&finish<=begin)finish+=86400000L;
+                    if(begin>0&&begin<=nowMs&&finish>nowMs){chosen=o;chosenEnd=finish;break;}
+                }
+                if(chosen!=null)break;
             }
-            String room=chosen==null?"":field(chosen,"room_code");
-            if(!room.equals(currentRoom)){messages.clear();seq=-1;currentRoom=room;show(g,comments,"");}
+            if(g!=generation)return;
+            String room=chosen==null?"":field(chosen,"parent_code");
+            if(chosen!=null&&room.isEmpty())room="25_etc";
+            if(!room.equals(currentRoom)){messages.clear();seq=-1;etag="";currentRoom=room;show(g,comments,"");}
+            nextKbsSchedule=chosen==null?nowMs+15000:Math.min(nowMs+45000,chosenEnd);
             show(g,program,chosen==null?"현재 프로그램 확인 불가":field(chosen,"program_title"));
         }else{
             JSONArray a=new JSONArray(get(MBC+"/schedule/scheduleList","MBC schedule"));
@@ -161,19 +254,27 @@ public class RadioLiveActivity extends Activity {
         }
         scheduleAt=System.currentTimeMillis();
     }
-    private void pollChat(int g){
+    private synchronized void pollChat(int g){
         if(g!=generation)return;
         try{
             refreshSchedule(g);
             if("kr1".equals(id)){
-                if(currentRoom.isEmpty()||currentRoom.endsWith("_etc"))throw new IOException("채팅방 없음");
-                JSONObject r=new JSONObject(get("https://interact.static.kbs.co.kr/Chat?room_code="+enc(currentRoom)+"&seq="+seq+"&count=20","KBS chat"));
-                JSONArray a=r.getJSONArray("list");
-                if(r.optInt("result",-1)!=0)throw new IOException("채팅 요청 거절");
-                for(int i=0;i<a.length();i++){
-                    JSONObject o=a.getJSONObject(i);messages.put(field(o,"seq"),field(o,"user_name")+"  "+field(o,"date_created")+"\n"+field(o,"msg"));
+                if(currentRoom.isEmpty())throw new IOException("채팅방 없음");
+                JSONObject r=fetchKbsChat();
+                if(g!=generation)return;
+                if(r!=null){
+                    if(!"0".equals(field(r,"result"))){
+                        webKey="";etag="";throw new IOException("KBS 채팅 인증 또는 조회 실패");
+                    }
+                    if(!currentRoom.equals(field(r,"room_code")))throw new IOException("채팅방 불일치");
+                    JSONArray a=r.getJSONArray("list");
+                    for(int i=0;i<a.length();i++){
+                        JSONObject o=a.getJSONObject(i);
+                        String name="0".equals(field(o,"s_flag"))?field(o,"user_id"):field(o,"user_name");
+                        messages.put(field(o,"seq"),name+"  "+shortTime(field(o,"date_created"))+"\n"+field(o,"msg"));
+                    }
+                    seq=r.optLong("nextSeq",seq);Log.i(TAG,"KBS chat count="+a.length());
                 }
-                seq=r.optLong("nextSeq",seq);Log.i(TAG,"KBS chat count="+a.length());
             }else{
                 if(currentBid.isEmpty()||currentGid.isEmpty())throw new IOException("프로그램 ID 없음");
                 JSONObject r=new JSONObject(get(MBC+"/minimsg/msgList?bid="+enc(currentBid)+"&gid="+enc(currentGid)+"&page=1&pagesize=20","MBC chat"));
@@ -182,7 +283,7 @@ public class RadioLiveActivity extends Activity {
                 for(int i=a.length()-1;i>=0;i--){
                     JSONObject o=a.getJSONObject(i);
                     if(!field(o,"RegDate").startsWith(today))continue;
-                    messages.put(field(o,"SeqID"),field(o,"UserNm")+"  "+field(o,"RegDate")+"\n"+field(o,"Comment"));
+                    messages.put(field(o,"SeqID"),field(o,"UserNm")+"  "+shortTime(field(o,"RegDate"))+"\n"+field(o,"Comment"));
                 }
                 Log.i(TAG,"MBC chat received="+a.length()+" today="+messages.size());
             }
