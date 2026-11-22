@@ -17,6 +17,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class RadioLiveActivity extends Activity {
+    private static final int CHAT_ACCENT=0xff4f5e79;
     private static final String TAG="PolarisRadioAPI";
     private static final String KBS="https://kong2017.kbs.co.kr";
     private static final String MBC="https://miniapi.imbc.com";
@@ -39,26 +40,77 @@ public class RadioLiveActivity extends Activity {
         TextView v=new TextView(this); v.setText(s);v.setTextSize(size);v.setTextColor(0xff171717);
         v.setPadding(dp(12),dp(8),dp(12),dp(8));return v;
     }
+    private void addChatDivider(LinearLayout root,int thickness){
+        android.view.View line=new android.view.View(this);
+        line.setBackgroundColor(CHAT_ACCENT);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(thickness));
+        lp.leftMargin=dp(12);lp.rightMargin=dp(12);
+        root.addView(line,lp);
+    }
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         id=getIntent().getStringExtra("station");
         if(!"kr1".equals(id)&&!"kr2".equals(id)){finish();return;}
         LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(Color.WHITE);
-        root.setPadding(0,dp(8),0,dp(8));
+        // Paint the actual status-bar inset, including Android 15+ edge-to-edge.
+        android.view.Window window=getWindow();
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.WHITE);
+        if(android.os.Build.VERSION.SDK_INT>=29)window.setStatusBarContrastEnforced(false);
+        if(android.os.Build.VERSION.SDK_INT>=30){
+            window.setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller=window.getInsetsController();
+            if(controller!=null){
+                // White status indicators; dark navigation buttons on white.
+                controller.setSystemBarsAppearance(
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS|
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+            }
+        }else{
+            android.view.View decor=window.getDecorView();
+            int flags=decor.getSystemUiVisibility();
+            flags&=~android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            flags|=android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE|
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            if(android.os.Build.VERSION.SDK_INT>=26)flags|=android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            decor.setSystemUiVisibility(flags);
+        }
+        android.view.View statusBackground=new android.view.View(this);
+        statusBackground.setBackgroundColor(CHAT_ACCENT);
+        LinearLayout.LayoutParams statusLp=new LinearLayout.LayoutParams(-1,0);
+        statusLp.bottomMargin=dp(8);
+        root.addView(statusBackground,statusLp);
         root.setOnApplyWindowInsetsListener((v,insets)->{
-            v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop()+dp(8),
-                insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom()+dp(8));
+            int left,top,right,bottom;
+            if(android.os.Build.VERSION.SDK_INT>=30){
+                android.graphics.Insets safe=insets.getInsets(android.view.WindowInsets.Type.systemBars()|
+                    android.view.WindowInsets.Type.displayCutout());
+                left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;
+            }else{
+                left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();
+                right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(left,0,right,bottom);
+            android.view.ViewGroup.LayoutParams lp=statusBackground.getLayoutParams();
+            if(lp.height!=top){lp.height=top;statusBackground.setLayoutParams(lp);}
             return insets;
         });
         TextView back=label("‹   "+CurrentProgramResolver.stationName(id),21);back.setTypeface(null,Typeface.BOLD);
         back.setOnClickListener(v->finish());root.addView(back);
         program=label("현재 방송 확인 중",17);root.addView(program);
         song=label("현재 재생곡 확인 중",22);song.setTypeface(null,Typeface.BOLD);root.addView(song);
+        addChatDivider(root,1);
         TextView heading=label("청취자 메시지",18);heading.setTypeface(null,Typeface.BOLD);root.addView(heading);
         chatStatus=label("연결 확인 중",13);chatStatus.setTextColor(0xff666666);root.addView(chatStatus);
         chatScroll=new ScrollView(this);comments=label("",14);comments.setGravity(Gravity.TOP);
         comments.setTextIsSelectable(false);
         chatScroll.addView(comments);root.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
+        // Fixed boundary outside scrolling chat, immediately above navigation.
+        addChatDivider(root,2);
         setContentView(root);root.requestApplyInsets();
     }
     @Override protected void onResume(){
