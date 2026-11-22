@@ -371,11 +371,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void base(String title){
         ensureShell();
-        tabsBar.setVisibility(View.VISIBLE);
-        refreshTabs();
+        tabsBar.setVisibility(View.GONE);
+        tabsBar.removeAllViews();
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         radioPlaybackButton=null;
+        scheduleView=null;
+        LinearLayout radioFooter=null;
         if(!"radio".equals(currentPage)){
             TextView h=new TextView(this); h.setText(title); h.setTextSize(28); h.setTextColor(Color.WHITE); h.setPadding(0,8,0,12); body.addView(h);
         }
@@ -385,13 +387,17 @@ public class MainActivity extends AppCompatActivity {
         mp3Duration=null;
         if("radio".equals(currentPage)){
             status=null;
-            // The current station/programme is the radio page heading.
-            addSchedulePanel();
+            // Fixed radio playback footer, separate from the scrolling presets.
+            radioFooter=new LinearLayout(this);
+            radioFooter.setOrientation(LinearLayout.VERTICAL);
+            radioFooter.setPadding(dp(12),dp(2),dp(12),dp(4));
+            radioFooter.setBackgroundColor(0xB51B2028);
+            addSchedulePanel(radioFooter);
             radioPlaybackButton=radioControlButton();
             radioPlaybackButton.setOnClickListener(v->toggleRadioPlayback());
             LinearLayout.LayoutParams controlLp=new LinearLayout.LayoutParams(-1,-2);
-            controlLp.setMargins(0,2,0,16);
-            body.addView(radioPlaybackButton,controlLp);
+            controlLp.setMargins(0,2,0,dp(4));
+            radioFooter.addView(radioPlaybackButton,controlLp);
             updateRadioPlaybackButton(lastPlaybackState);
             updateRadioScheduleFromMetadata();
         }else if("mp3".equals(currentPage)||"can".equals(currentPage)){
@@ -412,7 +418,13 @@ public class MainActivity extends AppCompatActivity {
             body.addView(stop,stopLp);
         }
         updateMiniPlayerVisibility();
-        sc.addView(body); pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
+        sc.addView(body);
+        if(radioFooter!=null){
+            LinearLayout column=new LinearLayout(this);column.setOrientation(LinearLayout.VERTICAL);
+            column.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+            column.addView(radioFooter,new LinearLayout.LayoutParams(-1,-2));
+            pageHost.addView(column,new FrameLayout.LayoutParams(-1,-1));
+        }else pageHost.addView(sc,new FrameLayout.LayoutParams(-1,-1));
     }
 
     private String radioIdFromMetadata(MediaMetadataCompat m){
@@ -2516,10 +2528,10 @@ public class MainActivity extends AppCompatActivity {
         p.edit().putStringSet("favorite_ids",set).apply();
     }
 
-    private void addSchedulePanel(){
+    private void addSchedulePanel(LinearLayout parent){
         scheduleView=new TextView(this); scheduleView.setText("편성정보"); scheduleView.setTextSize(17);
-        scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(12,24,12,20);
-        body.addView(scheduleView,new LinearLayout.LayoutParams(-1,-2));
+        scheduleView.setTextColor(Color.WHITE); scheduleView.setPadding(dp(4),dp(4),dp(4),dp(4));
+        parent.addView(scheduleView,new LinearLayout.LayoutParams(-1,-2));
         if(selectedRadioId!=null) refreshSchedule(selectedRadioId);
     }
     private void refreshSchedule(final String id){

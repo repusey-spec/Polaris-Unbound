@@ -25,6 +25,9 @@ public class RadioLiveActivity extends Activity {
     private volatile int generation=0;
     private String id;
     private TextView program,song,comments,chatStatus;
+    private ScrollView chatScroll;
+    private String lastKbsSong="";
+    private long lastKbsSongStart=-1,lastKbsSongUntil=-1;
     private String currentRoom="",currentBid="",currentGid="";
     private long scheduleAt=0,seq=-1,nextKbsSchedule=0,keyRetryAt=0;
     private String webKey="",etag="";
@@ -33,14 +36,14 @@ public class RadioLiveActivity extends Activity {
 
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
     private TextView label(String s,int size){
-        TextView v=new TextView(this); v.setText(s);v.setTextSize(size);v.setTextColor(Color.WHITE);
+        TextView v=new TextView(this); v.setText(s);v.setTextSize(size);v.setTextColor(0xff171717);
         v.setPadding(dp(12),dp(8),dp(12),dp(8));return v;
     }
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         id=getIntent().getStringExtra("station");
         if(!"kr1".equals(id)&&!"kr2".equals(id)){finish();return;}
-        LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xff151922);
+        LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(Color.WHITE);
         root.setPadding(0,dp(8),0,dp(8));
         root.setOnApplyWindowInsetsListener((v,insets)->{
             v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop()+dp(8),
@@ -52,16 +55,17 @@ public class RadioLiveActivity extends Activity {
         program=label("현재 방송 확인 중",17);root.addView(program);
         song=label("현재 재생곡 확인 중",22);song.setTypeface(null,Typeface.BOLD);root.addView(song);
         TextView heading=label("청취자 메시지",18);heading.setTypeface(null,Typeface.BOLD);root.addView(heading);
-        chatStatus=label("연결 확인 중",13);chatStatus.setTextColor(0xffb6bfd0);root.addView(chatStatus);
-        ScrollView scroll=new ScrollView(this);comments=label("",14);comments.setGravity(Gravity.TOP);
-        scroll.addView(comments);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        chatStatus=label("연결 확인 중",13);chatStatus.setTextColor(0xff666666);root.addView(chatStatus);
+        chatScroll=new ScrollView(this);comments=label("",14);comments.setGravity(Gravity.TOP);
+        comments.setTextIsSelectable(false);
+        chatScroll.addView(comments);root.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(root);root.requestApplyInsets();
     }
     @Override protected void onResume(){
         super.onResume();if(id==null||isFinishing())return;
         final int g=++generation;
         jobs=Executors.newScheduledThreadPool(2);
-        jobs.scheduleWithFixedDelay(()->pollSong(g),0,"kr1".equals(id)?20:10,TimeUnit.SECONDS);
+        jobs.scheduleWithFixedDelay(()->pollSong(g),0,10,TimeUnit.SECONDS);
         jobs.scheduleWithFixedDelay(()->pollChat(g),0,"kr1".equals(id)?5:10,TimeUnit.SECONDS);
     }
     @Override protected void onPause(){
@@ -69,6 +73,32 @@ public class RadioLiveActivity extends Activity {
     }
     private void show(int g,TextView view,String value){
         ui.post(()->{if(g==generation&&!isFinishing())view.setText(value);});
+    }
+    private void showChat(int g,List<String> lines){
+        ui.post(()->{
+            if(g!=generation||isFinishing()||chatScroll==null)return;
+            boolean follow=comments.getHeight()==0||comments.getText().length()==0||
+                comments.getBottom()-chatScroll.getScrollY()-chatScroll.getHeight()<=dp(48);
+            int oldY=chatScroll.getScrollY();
+            android.text.SpannableStringBuilder content=new android.text.SpannableStringBuilder();
+            for(String line:lines){
+                if(content.length()>0)content.append("\n\n");
+                int start=content.length();content.append(line);
+                int header=line.indexOf('\n');
+                if(header>0){
+                    content.setSpan(new android.text.style.ForegroundColorSpan(0xff666666),start,start+header,33);
+                    content.setSpan(new android.text.style.RelativeSizeSpan(0.85f),start,start+header,33);
+                }
+            }
+            if(lines.isEmpty())content.append("오늘 수신된 메시지 없음");
+            if(android.text.TextUtils.equals(comments.getText(),content))return;
+            comments.setText(content);
+            chatScroll.post(()->{
+                if(g!=generation||isFinishing())return;
+                if(follow)chatScroll.fullScroll(android.view.View.FOCUS_DOWN);
+                else chatScroll.scrollTo(0,oldY);
+            });
+        });
     }
     private String get(String url,String name)throws Exception{
         HttpURLConnection c=(HttpURLConnection)new URL(url).openConnection();
@@ -104,13 +134,31 @@ public class RadioLiveActivity extends Activity {
             if("kr1".equals(id)){
                 JSONObject r=new JSONObject(get(KBS+"/api/mobile/melon_song_list?channel_code=25","KBS song"));
                 JSONArray a=r.getJSONArray("items");Log.i(TAG,"KBS song items="+a.length());
-                long newest=-1,now=System.currentTimeMillis();
+                long newest=-1,now=System.currentTimeMillis(),validUntil=-1;
                 for(int i=0;i<a.length();i++){
-                    JSONObject o=a.getJSONObject(i);long ts=parseDate(field(o,"timestamp"),"yyyyMMddHHmmss");
-                    long dur=o.optLong("duration",0)*1000;
-                    if(ts>=newest&&ts>0&&ts<=now+30000&&dur>0&&now<ts+dur+30000){
-                        newest=ts;value=field(o,"song_title")+" – "+field(o,"artist");
+                    JSONObject o=a.optJSONObject(i);if(o==null)continue;
+                    String title=field(o,"song_title").trim(),artist=field(o,"artist").trim();
+                    String stamp=field(o,"timestamp");
+                    long ts=parseSongTime(stamp);
+                    if(ts<=0)ts=parseSongTime(field(o,"lastupdatetime"));
+                    long duration=o.optLong("duration",0);
+                    long playtime=o.optLong("playtime",0);
+                    long seconds=duration>0?duration:playtime;
+                    if(seconds>3600&&seconds<=3600000)seconds/=1000;
+                    if(seconds<=0||seconds>3600)seconds=240;
+                    long end=ts+seconds*1000L;
+                    boolean valid=ts>0&&ts<=now+60000&&now<=end+60000&&!title.isEmpty();
+                    Log.i(TAG,"KBS song time="+stamp+" duration="+duration+" playtime="+playtime+" ageSec="+((now-ts)/1000)+" accepted="+valid);
+                    if(valid&&ts>=newest){
+                        newest=ts;validUntil=end+60000;
+                        value=artist.isEmpty()?title:title+" – "+artist;
                     }
+                }
+                if(g!=generation)return;
+                if(!value.isEmpty()){
+                    lastKbsSong=value;lastKbsSongStart=newest;lastKbsSongUntil=validUntil;
+                }else if(now<=lastKbsSongUntil&&!lastKbsSong.isEmpty()){
+                    value=lastKbsSong;
                 }
             }else{
                 JSONArray a=new JSONArray(get(MBC+"/music/somItem","MBC song"));
@@ -121,6 +169,18 @@ public class RadioLiveActivity extends Activity {
             }
             show(g,song,value.trim().isEmpty()?"현재 곡 정보 없음":value);
         }catch(Exception e){Log.w(TAG,id+" song "+e.getClass().getSimpleName()+": "+e.getMessage());show(g,song,"곡 정보 조회 실패");}
+    }
+    private long parseSongTime(String value){
+        String s=value==null?"":value.trim();
+        if(s.matches("\\d{14}"))return parseDate(s,"yyyyMMddHHmmss");
+        if(s.matches("\\d{8} \\d{6}"))return parseDate(s,"yyyyMMdd HHmmss");
+        if(s.matches("\\d{13}"))try{return Long.parseLong(s);}catch(Exception ignored){}
+        if(s.matches("\\d{10}"))try{return Long.parseLong(s)*1000L;}catch(Exception ignored){}
+        if(s.length()>=19){
+            String t=s.substring(0,19).replace('T',' ');
+            return parseDate(t,"yyyy-MM-dd HH:mm:ss");
+        }
+        return -1;
     }
     private long scheduleTime(String day,String time){
         if(day.length()!=8||time.length()<6)return -1;
@@ -278,7 +338,7 @@ public class RadioLiveActivity extends Activity {
             }else{
                 if(currentBid.isEmpty()||currentGid.isEmpty())throw new IOException("프로그램 ID 없음");
                 JSONObject r=new JSONObject(get(MBC+"/minimsg/msgList?bid="+enc(currentBid)+"&gid="+enc(currentGid)+"&page=1&pagesize=20","MBC chat"));
-                JSONArray a=r.getJSONArray("MsgList");messages.clear();
+                JSONArray a=r.getJSONArray("MsgList");
                 String today=fmt("yyyy-MM-dd",new Date());
                 for(int i=a.length()-1;i>=0;i--){
                     JSONObject o=a.getJSONObject(i);
@@ -288,8 +348,8 @@ public class RadioLiveActivity extends Activity {
                 Log.i(TAG,"MBC chat received="+a.length()+" today="+messages.size());
             }
             while(messages.size()>80)messages.remove(messages.keySet().iterator().next());
-            ArrayList<String> lines=new ArrayList<>(messages.values());Collections.reverse(lines);
-            show(g,comments,lines.isEmpty()?"오늘 수신된 메시지 없음":android.text.TextUtils.join("\n\n",lines));
+            ArrayList<String> lines=new ArrayList<>(messages.values());
+            showChat(g,lines);
             show(g,chatStatus,"갱신 "+fmt("HH:mm:ss",new Date())+" · "+messages.size()+"개");
         }catch(Exception e){Log.w(TAG,id+" chat "+e.getClass().getSimpleName()+": "+e.getMessage());show(g,chatStatus,"메시지 조회 실패: "+e.getMessage());}
     }
