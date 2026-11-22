@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-    <application android:usesCleartextTraffic="true" android:theme="@style/Theme.PolarisUnbound" android:label="폴라리스 라디오 0.66" android:icon="@drawable/ic_launcher">
+    <application android:usesCleartextTraffic="true" android:theme="@style/Theme.PolarisUnbound" android:label="폴라리스 라디오 0.67" android:icon="@drawable/ic_launcher">
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -14,7 +14,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <activity android:name=".RadioLiveActivity" android:exported="false"/>
+        <activity android:name=".RadioLiveActivity" android:exported="false" android:theme="@style/Theme.PolarisUnbound.RadioLive"/>
         <service android:name=".PolarisMediaService" android:exported="true" android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService"/>
