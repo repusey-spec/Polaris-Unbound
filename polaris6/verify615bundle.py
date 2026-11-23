@@ -14,7 +14,7 @@ gradle=(root/"app/build.gradle.kts").read_text()
 checks={
 "Home reads already working Radio recent":'Polaris613Nav.recent(context).firstOrNull()' in callback,
 "Home returns radio plus music separately":'return listOfNotNull(radio,music)' in callback,
-"Home recognizes active radio/streaming":'PolarisRadioRequests.stationId(it)==null' in callback,
+"Home worker thread safe":'val music=Polaris613Nav.lastPlayed(context)?.let { item ->' in callback and 'session.player.currentMediaItem' not in callback.split('private fun polaris613Home(')[1].split('    }')[0],
 "last audible radio no longer replaces music":'else Polaris613Nav.rememberPlayed(context,item)' in last,
 "old radio record filtered from music":'PolarisRadioRequests.stationId(it)==null' in nav,
 "real source change refreshes Home":'screen.refreshHomeIfSelected()' in auto,

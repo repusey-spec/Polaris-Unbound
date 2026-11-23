@@ -46,12 +46,10 @@ one(callback,
                 ).build()
             }
         }
-        // Keep radio and music independent, even after another source starts.
-        val current=session.player.currentMediaItem
-        val currentMusic=current?.takeIf {
-            it.mediaId.isNotBlank() && PolarisRadioRequests.stationId(it)==null
-        }
-        val music=(currentMusic ?: Polaris613Nav.lastPlayed(context))?.let { item ->
+        // MediaLibrary onGetChildren runs on a background executor and may not
+        // access session.player (the player enforces its application looper).
+        // Use the last actually audible music persisted by the Player.Listener.
+        val music=Polaris613Nav.lastPlayed(context)?.let { item ->
             item.buildUpon().setMediaMetadata(
                 item.mediaMetadata.buildUpon()
                     .setTitle("최근 음악 · " +
