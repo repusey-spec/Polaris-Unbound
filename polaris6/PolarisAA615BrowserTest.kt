@@ -80,14 +80,12 @@ class PolarisAA615BrowserTest {
             assertEquals("Home must have one radio row AND one music row",2,rows.size)
             assertTrue(rows[0].mediaMetadata.title.toString().startsWith("최근 라디오"))
             assertTrue(rows[1].mediaMetadata.title.toString().startsWith("최근 음악"))
-            assertEquals("kr1",rows[0].mediaId.removePrefix("polaris:radio:tile:").takeIf {
-                it=="kr1"
-            } ?: "kr1") // verify actual radio entry above through title as well
+            assertTrue("Home radio item must use last channel",rows[0].mediaId.endsWith("kr1"))
             assertTrue(rows[0].mediaMetadata.title.toString().contains("KBS"))
             assertTrue(rows[1].mediaMetadata.title.toString().contains("Recorded music 615") ||
                 rows[1].mediaId.isNotBlank())
         } finally {
-            if(::connected.isInitialized) ins.runOnMainSync {
+            ins.runOnMainSync {
                 MediaController.releaseFuture(connected)
             }
             radio.edit().clear().apply {
