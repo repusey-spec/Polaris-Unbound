@@ -33,6 +33,11 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Normalize 6.15 instrumentation APK filename in smoke driver
+        run: |
+          test -f delivery/Polaris_6.15_tests.apk
+          sed -i 's#delivery/Polaris_6.14_tests.apk#delivery/Polaris_6.15_tests.apk#g' polaris6/smoke615.py
+          grep -F 'delivery/Polaris_6.15_tests.apk' polaris6/smoke615.py
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 33
