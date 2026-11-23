@@ -13,10 +13,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Download the ALREADY VERIFIED 6.15 APK from build run 45163771681
+      - name: Fetch the REBUILT 6.15 APK with the Home thread fix
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download 45163771681 --repo "$GITHUB_REPOSITORY" -n Polaris-6.15-100615-validated -D delivery
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 75); do
+            if gh run download 45170357423 --repo "$GITHUB_REPOSITORY" -n Polaris-6.15-100615-validated -D delivery; then break; fi
+            echo "Build artifact not ready yet (attempt $attempt)"
+            sleep 12
+          done
+          test -s delivery/Polaris_6.15_100615.apk
+          sha256sum -c delivery/SHA256.txt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
