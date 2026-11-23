@@ -1,0 +1,70 @@
+name: Polaris 6.15 Android 13 final smoke and direct APK release
+on:
+  push:
+    branches: [experiment/polaris-6-15-home-and-radio-final]
+    paths: ['polaris6/fix_test_desugar615.py', '.github/workflows/polaris615-smoke-rescue.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the ALREADY VERIFIED 6.15 APK from build run 45163771681
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh run download 45163771681 --repo "$GITHUB_REPOSITORY" -n Polaris-6.15-100615-validated -D delivery
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Complete desugared runtime for the TEST APK only
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
+          mkdir -p "$RUNNER_TEMP/polaris615-test-runtime"
+          base64 -d .github/polaris-debug.keystore.b64 > "$RUNNER_TEMP/polaris615-test-runtime/polaris.jks"
+          python3 polaris6/fix_test_desugar615.py
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            python3 polaris6/smoke615.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Polaris-6.15-validated-smoke
+          path: smoke/
+          retention-days: 14
+      - name: Publish direct standalone APK only (no ZIP release)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -f delivery/Polaris_6.15_100615.apk
+          grep -q 'OK (2 tests)' smoke/session-test.txt
+          TAG="polaris-6.15"
+          APK="delivery/Polaris_6.15_100615.apk"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Polaris 6.15 (100615)" \
+              --notes "Official signed Polaris 6.15 build. AA Home two independent last-played radio and music rows; original four tabs and Radio recent untouched; projection + 2500ms auto-start delay, AFN fallback, overseas city clock, approved wordless radio category artworks; CAN placeholder and InterTune engine unchanged. Only APK included."
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
+            grep -Fx "Polaris_6.15_100615.apk"
+          echo "DIRECT_APK=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/Polaris_6.15_100615.apk"
+
