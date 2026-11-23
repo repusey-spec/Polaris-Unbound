@@ -759,7 +759,7 @@ public class MainActivity extends AppCompatActivity {
             gear.setBackground(roundedBg(0x88232A35,24f));
             gear.setContentDescription("폴라리스 라디오 설정");
             gear.setOnClickListener(v->startActivity(new Intent(this,RadioSettingsActivity.class)));
-            FrameLayout.LayoutParams gearLp=new FrameLayout.LayoutParams(dp(44),dp(44),Gravity.END|Gravity.TOP);
+            FrameLayout.LayoutParams gearLp=new FrameLayout.LayoutParams(dp(44),dp(44),android.view.Gravity.END|android.view.Gravity.TOP);
             gearLp.rightMargin=dp(4);
             header.addView(gear,gearLp);
             body.addView(header,new LinearLayout.LayoutParams(-1,dp(48)));
