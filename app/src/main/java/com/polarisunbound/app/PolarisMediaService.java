@@ -155,6 +155,10 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private AudioFocusRequest focusRequest;
     private static final String CHANNEL_ID="polaris_playback";
     private static final int NOTIFICATION_ID=71;
+    private static final String ACTION_RADIO_PREV="com.polarisunbound.app.NOTIFICATION_PREVIOUS";
+    private static final String ACTION_RADIO_TOGGLE="com.polarisunbound.app.NOTIFICATION_TOGGLE";
+    private static final String ACTION_RADIO_NEXT="com.polarisunbound.app.NOTIFICATION_NEXT";
+    private boolean radioNotificationActive=false;
     private static final String[] RADIO_ORDER={
         "kr1","kr2","kr3","kr4","kr5","kr6",
         "gallery","wild949",
@@ -1054,6 +1058,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,TITLES.get(id))
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART,StationArt.bitmap(this,id,256));
         session.setMetadata(mb.build());
+        updateRadioNotification();
     }
 
 
@@ -1423,19 +1428,77 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
     }
 
-    private void enterPlaybackForeground(String title){
-        Notification n=new NotificationCompat.Builder(this,CHANNEL_ID)
+    private android.app.PendingIntent radioControlIntent(String action,int code){
+        Intent intent=new Intent(this,PolarisMediaService.class).setAction(action);
+        int flags=android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+        if(Build.VERSION.SDK_INT>=23)flags|=android.app.PendingIntent.FLAG_IMMUTABLE;
+        return android.app.PendingIntent.getService(this,code,intent,flags);
+    }
+
+    @Override public int onStartCommand(Intent intent,int flags,int startId){
+        if(intent!=null && session!=null){
+            String action=intent.getAction();
+            if(ACTION_RADIO_PREV.equals(action) ||
+               ACTION_RADIO_TOGGLE.equals(action) ||
+               ACTION_RADIO_NEXT.equals(action)){
+                MediaControllerCompat.TransportControls controls=session.getController().getTransportControls();
+                if(ACTION_RADIO_PREV.equals(action))controls.skipToPrevious();
+                else if(ACTION_RADIO_NEXT.equals(action))controls.skipToNext();
+                else if(player!=null && (player.isPlaying() || (player.getPlayWhenReady() && !userStopped)))
+                    controls.pause();
+                else controls.play();
+                return START_STICKY;
+            }
+        }
+        return super.onStartCommand(intent,flags,startId);
+    }
+
+    private Notification playbackNotification(String fallbackTitle){
+        String station=currentRadioId==null ? fallbackTitle : RadioPresets.stationName(currentRadioId);
+        String sub=currentRadioId==null ? "재생 중" : radioProgramTitle(currentRadioId);
+        boolean playing=player!=null && (player.isPlaying() || (player.getPlayWhenReady() && !userStopped));
+        Intent open=new Intent(this,MainActivity.class);
+        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        int piFlags=android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+        if(Build.VERSION.SDK_INT>=23)piFlags|=android.app.PendingIntent.FLAG_IMMUTABLE;
+        NotificationCompat.Builder builder=new NotificationCompat.Builder(this,CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("Polaris Unbound")
-            .setContentText(title==null ? "라디오 재생 중" : title)
+            .setContentTitle(station==null?"폴라리스 라디오":station)
+            .setContentText(sub)
+            .setContentIntent(android.app.PendingIntent.getActivity(this,71,open,piFlags))
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .build();
-        startForeground(NOTIFICATION_ID,n);
+            .setShowWhen(false);
+        if(currentRadioId!=null){
+            builder.setLargeIcon(StationArt.bitmap(this,currentRadioId,192));
+            builder.addAction(android.R.drawable.ic_media_previous,"이전 채널",
+                radioControlIntent(ACTION_RADIO_PREV,72));
+            builder.addAction(playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
+                playing ? "일시정지" : "재개",radioControlIntent(ACTION_RADIO_TOGGLE,73));
+            builder.addAction(android.R.drawable.ic_media_next,"다음 채널",
+                radioControlIntent(ACTION_RADIO_NEXT,74));
+            builder.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                .setMediaSession(session.getSessionToken())
+                .setShowActionsInCompactView(0,1,2));
+        }
+        return builder.build();
+    }
+
+    private void enterPlaybackForeground(String title){
+        radioNotificationActive=true;
+        startForeground(NOTIFICATION_ID,playbackNotification(title));
+    }
+
+    private void updateRadioNotification(){
+        if(!radioNotificationActive || currentRadioId==null)return;
+        NotificationManager nm=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+        if(nm!=null)nm.notify(NOTIFICATION_ID,playbackNotification(RadioPresets.stationName(currentRadioId)));
     }
 
     private void leavePlaybackForeground(){
+        radioNotificationActive=false;
         stopForeground(true);
     }
 
@@ -1521,6 +1584,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
     private void startRadio(String id){
         String url=STREAMS.get(id);
         if(url==null || userStopped) return;
+        RadioPresets.rememberRecent(this,id);
         radioBufferingHandler.removeCallbacksAndMessages(null);
         radioHasPlayed=false;
         trace("STREAM selected: "+id);
@@ -2577,6 +2641,7 @@ public class PolarisMediaService extends MediaBrowserServiceCompat {
         }
 
         session.setPlaybackState(b.build());
+        updateRadioNotification();
     }
 
     @Override public BrowserRoot onGetRoot(String pkg,int uid,Bundle hints){

@@ -104,6 +104,35 @@ public final class RadioPresets {
         return ids;
     }
 
+    /** Most recently selected radio channels. Never used to reorder presets. */
+    public static synchronized String[] recentIds(Context c){
+        String saved=preferences(c).getString("recent_radio_ids","");
+        List<String> result=new ArrayList<>(4);
+        if(saved==null||saved.isEmpty())return new String[0];
+        for(String id:saved.split(",")){
+            if(indexOf(id)>=0 && !result.contains(id)){
+                result.add(id);
+                if(result.size()==4)break;
+            }
+        }
+        return result.toArray(new String[0]);
+    }
+
+    public static synchronized void rememberRecent(Context c,String id){
+        if(indexOf(id)<0)return;
+        List<String> entries=new ArrayList<>(4);
+        entries.add(id);
+        for(String old:recentIds(c)){
+            if(!old.equals(id) && entries.size()<4)entries.add(old);
+        }
+        StringBuilder joined=new StringBuilder();
+        for(String entry:entries){
+            if(joined.length()>0)joined.append(',');
+            joined.append(entry);
+        }
+        preferences(c).edit().putString("recent_radio_ids",joined.toString()).apply();
+    }
+
     /** AA lists only playable items, retaining the order of physical cells. */
     public static String[] orderedIds(Context c){
         String[] grid=layoutIds(c);

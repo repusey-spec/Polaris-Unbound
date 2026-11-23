@@ -42,6 +42,7 @@ public class MainActivity extends AppCompatActivity {
     private MediaControllerCompat controller;
     private TextView status;
     private TextView radioPlaybackButton;
+    private LinearLayout recentRadioRow;
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
     private TextView scheduleView;
@@ -236,6 +237,7 @@ public class MainActivity extends AppCompatActivity {
                             @Override public void onMetadataChanged(MediaMetadataCompat metadata){
                                 lastMetadata=metadata;
                                 updateRadioScheduleFromMetadata();
+                                refreshRecentRadio();
                                 updateRadioPlaybackButton(lastPlaybackState);
                                 updateMiniPlayerMetadata();
                                 updateNowPlayingMetadata();
@@ -376,6 +378,7 @@ public class MainActivity extends AppCompatActivity {
         pageHost.removeAllViews();
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         radioPlaybackButton=null;
+        recentRadioRow=null;
         scheduleView=null;
         LinearLayout radioFooter=null;
         if(!"radio".equals(currentPage)){
@@ -744,7 +747,25 @@ public class MainActivity extends AppCompatActivity {
             labels.addView(label,lp);
             column+=span;
         }
-        body.addView(labels,new LinearLayout.LayoutParams(-1,dp(48)));
+        if(first==0){
+            // Reserve a real touch target at the right of the first region header.
+            // The gear belongs to the radio screen, not the label flow.
+            FrameLayout header=new FrameLayout(this);
+            labels.setPadding(0,0,dp(50),0);
+            header.addView(labels,new FrameLayout.LayoutParams(-1,dp(48)));
+            ImageButton gear=new ImageButton(this);
+            gear.setImageResource(android.R.drawable.ic_menu_preferences);
+            gear.setColorFilter(Color.WHITE);
+            gear.setBackground(roundedBg(0x88232A35,24f));
+            gear.setContentDescription("폴라리스 라디오 설정");
+            gear.setOnClickListener(v->startActivity(new Intent(this,RadioSettingsActivity.class)));
+            FrameLayout.LayoutParams gearLp=new FrameLayout.LayoutParams(dp(44),dp(44),Gravity.END|Gravity.TOP);
+            gearLp.rightMargin=dp(4);
+            header.addView(gear,gearLp);
+            body.addView(header,new LinearLayout.LayoutParams(-1,dp(48)));
+        }else{
+            body.addView(labels,new LinearLayout.LayoutParams(-1,dp(48)));
+        }
     }
 
     private void addRadioPresetRow(String[] layout,int first){
@@ -752,6 +773,37 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout row=radioRow();
         for(int column=0;column<4;column++)
             addRadioCard(row,layout[first+column],first+column);
+    }
+
+    private void addRecentRadioCard(LinearLayout row,String id){
+        View cell;
+        if(id==null){
+            View empty=new View(this);
+            empty.setBackgroundColor(Color.TRANSPARENT);
+            cell=empty;
+        }else{
+            ImageButton tile=stationButton(id,RadioPresets.stationName(id)+" 최근 청취 채널");
+            tile.setOnClickListener(v->{
+                playId(id,RadioPresets.stationName(id));
+                if("kr1".equals(id)||"kr2".equals(id)){
+                    Intent detail=new Intent(this,RadioLiveActivity.class);
+                    detail.putExtra("station",id);
+                    startActivity(detail);
+                }
+            });
+            cell=tile;
+        }
+        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
+        bp.setMargins(10,10,10,10);
+        row.addView(cell,bp);
+    }
+
+    private void refreshRecentRadio(){
+        if(recentRadioRow==null)return;
+        recentRadioRow.removeAllViews();
+        String[] recent=RadioPresets.recentIds(this);
+        for(int i=0;i<4;i++)
+            addRecentRadioCard(recentRadioRow,i<recent.length?recent[i]:null);
     }
 
     private void showDomestic(){
@@ -765,6 +817,9 @@ public class MainActivity extends AppCompatActivity {
         // Presets and their region labels can move into any physical position.
         for(int first=0;first<RadioPresets.SLOT_COUNT;first+=4)
             addRadioPresetRow(layout,first);
+        body.addView(radioSectionTitle("최근 들은 채널"));
+        recentRadioRow=radioRow();
+        refreshRecentRadio();
     }
 
 
@@ -2582,7 +2637,12 @@ public class MainActivity extends AppCompatActivity {
             returnFromNowPlaying();
             return;
         }
-        super.onBackPressed();
+        if(RadioSettingsActivity.backExits(this)){
+            if(controller!=null)controller.getTransportControls().stop();
+            finishAffinity();
+        }else{
+            moveTaskToBack(true);
+        }
     }
     @Override protected void onDestroy(){
         progressHandler.removeCallbacksAndMessages(null);

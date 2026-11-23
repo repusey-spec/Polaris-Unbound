@@ -77,8 +77,17 @@ public class RadioLiveActivity extends Activity {
         program=label("현재 방송 확인 중",17);root.addView(program);
         song=label("현재 재생곡 확인 중",22);song.setTypeface(null,Typeface.BOLD);root.addView(song);
         addChatDivider(root,1);
-        TextView heading=label("청취자 메시지",18);heading.setTypeface(null,Typeface.BOLD);root.addView(heading);
-        chatStatus=label("연결 확인 중",13);chatStatus.setTextColor(0xff666666);root.addView(chatStatus);
+        LinearLayout chatHeader=new LinearLayout(this);
+        chatHeader.setOrientation(LinearLayout.HORIZONTAL);
+        chatHeader.setGravity(Gravity.CENTER_VERTICAL);
+        TextView heading=label("청취자 메시지",18);
+        heading.setTypeface(null,Typeface.BOLD);
+        chatHeader.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+        chatStatus=label("연결 확인 중",12);
+        chatStatus.setTextColor(0xff666666);
+        chatStatus.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        chatHeader.addView(chatStatus,new LinearLayout.LayoutParams(-2,-2));
+        root.addView(chatHeader);
         chatScroll=new ScrollView(this);comments=label("",14);comments.setGravity(Gravity.TOP);
         comments.setTextIsSelectable(false);
         chatScroll.addView(comments);root.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
@@ -104,8 +113,11 @@ public class RadioLiveActivity extends Activity {
             boolean follow=comments.getHeight()==0||comments.getText().length()==0||
                 comments.getBottom()-chatScroll.getScrollY()-chatScroll.getHeight()<=dp(48);
             int oldY=chatScroll.getScrollY();
+            boolean reversed=RadioSettingsActivity.chatReversed(this);
+            ArrayList<String> display=new ArrayList<>(lines);
+            if(reversed)Collections.reverse(display);
             android.text.SpannableStringBuilder content=new android.text.SpannableStringBuilder();
-            for(String line:lines){
+            for(String line:display){
                 if(content.length()>0)content.append("\n\n");
                 int start=content.length();content.append(line);
                 int header=line.indexOf('\n');
@@ -119,7 +131,7 @@ public class RadioLiveActivity extends Activity {
             comments.setText(content);
             chatScroll.post(()->{
                 if(g!=generation||isFinishing())return;
-                if(follow)chatScroll.fullScroll(android.view.View.FOCUS_DOWN);
+                if(follow)chatScroll.fullScroll(reversed ? android.view.View.FOCUS_UP : android.view.View.FOCUS_DOWN);
                 else chatScroll.scrollTo(0,oldY);
             });
         });
