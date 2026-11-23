@@ -19,6 +19,21 @@ runtime=work/'runtime';runtime.mkdir(exist_ok=True)
 command=['java','-Xmx2g','-cp',str(tools/'lib/d8.jar'),'com.android.tools.r8.L8','--release','--min-api','24','--lib',str(sdk/'platforms/android-36/android.jar'),'--desugared-lib',str(work/'desugar.json'),'--output',str(runtime),*inputs]
 subprocess.run(command,check=True)
 dexes=sorted(runtime.glob('classes*.dex'));assert dexes,'L8 produced no runtime DEX'
+# The release is R8-minified and does not contain Kotlin helpers used only
+# by androidTest (notably MapsKt.toMap). Install Kotlin stdlib in TEST APK only.
+# This MUST NOT modify/rebuild the signed production APK.
+kotlin_jar=work/'kotlin-stdlib-2.1.0.jar'
+kotlin_jar.write_bytes(urllib.request.urlopen(
+    'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.1.0/kotlin-stdlib-2.1.0.jar',
+    timeout=60).read())
+kotlin_dex_dir=work/'kotlin-dex';kotlin_dex_dir.mkdir(exist_ok=True)
+subprocess.run(['java','-Xmx2g','-cp',str(tools/'lib/d8.jar'),
+    'com.android.tools.r8.D8','--release','--min-api','24',
+    '--lib',str(sdk/'platforms/android-36/android.jar'),
+    '--output',str(kotlin_dex_dir),str(kotlin_jar)],check=True)
+kotlin_dexes=sorted(kotlin_dex_dir.glob('classes*.dex'))
+assert kotlin_dexes,'D8 produced no Kotlin stdlib DEX'
+dexes+=kotlin_dexes
 test=delivery/'Polaris_6.15_tests.apk';unsigned=work/'tests-unsigned.apk'
 with zipfile.ZipFile(test) as old,zipfile.ZipFile(unsigned,'w') as new:
     for info in old.infolist():
@@ -33,5 +48,5 @@ subprocess.run([str(tools/'apksigner'),'sign','--ks',str(work/'polaris.jks'),'--
 subprocess.run([str(tools/'apksigner'),'verify','--print-certs',str(test)],check=True)
 assert hashlib.sha256(app.read_bytes()).hexdigest()==expected,'Production APK changed'
 Path('smoke').mkdir(exist_ok=True)
-Path('smoke/runtime-fix.json').write_text(json.dumps({'production_apk_sha256':expected,'test_apk_sha256':hashlib.sha256(test.read_bytes()).hexdigest(),'runtime':'desugar_jdk_libs 2.1.5, full L8 runtime only in the test APK','dex_files':len(dexes)},indent=2))
+Path('smoke/runtime-fix.json').write_text(json.dumps({'production_apk_sha256':expected,'test_apk_sha256':hashlib.sha256(test.read_bytes()).hexdigest(),'runtime':'desugar_jdk_libs 2.1.5 + Kotlin stdlib 2.1.0, test APK only','dex_files':len(dexes)},indent=2))
 print('PASS: complete test-only time runtime; production APK unchanged')
