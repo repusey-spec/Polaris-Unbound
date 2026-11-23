@@ -85,14 +85,20 @@ once("    private suspend fun resumeOnLaunchIfAsked() {\n",
     private suspend fun resumeOnLaunchIfAsked() {
 ""","AA startup gate methods")
 
-once(
-"""    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-        super.onPlayWhenReadyChanged(playWhenReady, reason)""",
-"""    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+# The Polaris integration modifies the listener body from InterTune. Match only
+# its method signature, not a brittle sequence of existing implementation lines.
+listener="    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {"
+if s.count(listener)==1:
+    s=s.replace(listener,listener+"""
         if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
             polarisAaStartupUserIntervened = true
-        }
-        super.onPlayWhenReadyChanged(playWhenReady, reason)""","manual play/pause does not get overridden")
+        }""",1)
+else:
+    # Last-resort gate if the integration replaced the ready callback entirely.
+    fallback="    override fun onIsPlayingChanged(isPlaying: Boolean) {"
+    assert s.count(fallback)==1, "AA startup: no playing observer"
+    s=s.replace(fallback,fallback+"""
+        if (isPlaying) polarisAaStartupUserIntervened = true""",1)
 
 old="        if (!dataStore.get(ResumePlaybackOnLaunchKey, false) && PolarisLastSource.radioToResume(this) == null) return"
 once(old,old+"""
