@@ -43,6 +43,13 @@ public class MainActivity extends AppCompatActivity {
     private TextView status;
     private TextView radioPlaybackButton;
     private LinearLayout recentRadioRow;
+    // Resized after the scroll viewport receives its real, inset-adjusted bounds.
+    // The audio footer remains outside the viewport, and radio cards stay square.
+    private ScrollView responsiveRadioScroll;
+    private final ArrayList<LinearLayout> responsiveTileRows=new ArrayList<>();
+    private final ArrayList<LinearLayout> responsiveHeadingRows=new ArrayList<>();
+    private FrameLayout responsiveFirstHeading;
+    private TextView responsiveRecentHeading;
     private LinearLayout tabsBar;
     private FrameLayout pageHost;
     private TextView scheduleView;
@@ -379,6 +386,11 @@ public class MainActivity extends AppCompatActivity {
         ScrollView sc=new ScrollView(this); body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(24,18,24,24);
         radioPlaybackButton=null;
         recentRadioRow=null;
+        responsiveRadioScroll="radio".equals(currentPage)?sc:null;
+        responsiveTileRows.clear();
+        responsiveHeadingRows.clear();
+        responsiveFirstHeading=null;
+        responsiveRecentHeading=null;
         scheduleView=null;
         LinearLayout radioFooter=null;
         if(!"radio".equals(currentPage)){
@@ -688,7 +700,7 @@ public class MainActivity extends AppCompatActivity {
         v.setTextSize(19);
         v.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
         v.setTextColor(Color.WHITE);
-        v.setPadding(dp(4),dp(16),dp(4),dp(4));
+        v.setPadding(dp(4),dp(9),dp(4),dp(2));
         return v;
     }
 
@@ -696,8 +708,121 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout row=new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         body.addView(row,new LinearLayout.LayoutParams(-1,-2));
+        responsiveTileRows.add(row);
         return row;
     }
+
+    private void addSquareRadioTile(LinearLayout row,View content){
+        // A weighted cell preserves the four columns while its centered artwork
+        // can shrink independently in height without becoming rectangular.
+        int initialSide=dp(72),gap=dp(3);
+        FrameLayout cell=new FrameLayout(this);
+        FrameLayout.LayoutParams tileLp=new FrameLayout.LayoutParams(
+            initialSide,initialSide,android.view.Gravity.TOP|android.view.Gravity.CENTER_HORIZONTAL);
+        tileLp.topMargin=gap;
+        cell.addView(content,tileLp);
+        row.addView(cell,new LinearLayout.LayoutParams(0,initialSide+2*gap,1));
+    }
+
+    private void applyResponsiveRadioLayout(){
+        if(!"radio".equals(currentPage)||responsiveRadioScroll==null ||
+           responsiveRadioScroll.getWidth()<=0||responsiveRadioScroll.getHeight()<=0||
+           responsiveTileRows.isEmpty())return;
+
+        // Use the measured scrollable viewport, not raw display resolution.
+        // Android's status/nav bar insets and the fixed playback footer are
+        // already excluded from this height.
+        int width=responsiveRadioScroll.getWidth()
+            -responsiveRadioScroll.getPaddingLeft()-responsiveRadioScroll.getPaddingRight()
+            -body.getPaddingLeft()-body.getPaddingRight();
+        if(width<=0)return;
+        int viewportHeight=responsiveRadioScroll.getHeight();
+        int cellWidth=width/4;
+        int gap=Math.max(dp(2),Math.min(dp(5),cellWidth/22));
+        int maxSquare=Math.min(dp(112),cellWidth-2*gap);
+        if(maxSquare<=0)return;
+
+        int activeHeadings=0;
+        boolean[] hasHeading=new boolean[responsiveHeadingRows.size()];
+        for(int i=0;i<responsiveHeadingRows.size();i++){
+            LinearLayout header=responsiveHeadingRows.get(i);
+            boolean shown=i==0; // Always reserve the gear in the first header.
+            for(int j=0;j<header.getChildCount();j++){
+                View child=header.getChildAt(j);
+                if(child instanceof TextView &&
+                   ((TextView)child).getText().length()>0)shown=true;
+            }
+            hasHeading[i]=shown;
+            if(shown)activeHeadings++;
+        }
+
+        int rowCount=responsiveTileRows.size();
+        int headerHeight=dp(45);
+        int minimumHeader=dp(40);
+        int blankHeader=dp(6);
+        int recentTitleHeight=dp(42);
+        int paddingHeight=body.getPaddingTop()+body.getPaddingBottom();
+        int fixed=paddingHeight+recentTitleHeight+
+            activeHeadings*headerHeight+
+            (hasHeading.length-activeHeadings)*blankHeader;
+        int required=fixed+rowCount*(maxSquare+2*gap);
+
+        // First reclaim oversized heading space, then shrink square tiles.
+        // On very short screens enforce a 60dp minimum and keep scrolling.
+        if(required>viewportHeight && activeHeadings>0){
+            int deficit=required-viewportHeight;
+            int reduction=(deficit+activeHeadings-1)/activeHeadings;
+            headerHeight=Math.max(minimumHeader,headerHeight-reduction);
+            fixed=paddingHeight+recentTitleHeight+
+                activeHeadings*headerHeight+
+                (hasHeading.length-activeHeadings)*blankHeader;
+        }
+        int square=Math.min(maxSquare,
+            Math.max(dp(60),(viewportHeight-fixed)/rowCount-2*gap));
+
+        for(LinearLayout row:responsiveTileRows){
+            for(int i=0;i<row.getChildCount();i++){
+                FrameLayout cell=(FrameLayout)row.getChildAt(i);
+                LinearLayout.LayoutParams slotLp=(LinearLayout.LayoutParams)cell.getLayoutParams();
+                if(slotLp.height!=square+2*gap){
+                    slotLp.height=square+2*gap;
+                    cell.setLayoutParams(slotLp);
+                }
+                if(cell.getChildCount()>0){
+                    View art=cell.getChildAt(0);
+                    FrameLayout.LayoutParams artLp=(FrameLayout.LayoutParams)art.getLayoutParams();
+                    if(artLp.width!=square||artLp.height!=square||artLp.topMargin!=gap){
+                        artLp.width=square;artLp.height=square;artLp.topMargin=gap;
+                        art.setLayoutParams(artLp);
+                    }
+                }
+            }
+        }
+        for(int i=0;i<responsiveHeadingRows.size();i++){
+            int h=hasHeading[i]?headerHeight:blankHeader;
+            LinearLayout header=responsiveHeadingRows.get(i);
+            header.setMinimumHeight(0);
+            android.view.ViewGroup.LayoutParams lp=header.getLayoutParams();
+            if(lp.height!=h){lp.height=h;header.setLayoutParams(lp);}
+            for(int j=0;j<header.getChildCount();j++){
+                View label=header.getChildAt(j);
+                android.view.ViewGroup.LayoutParams labelLp=label.getLayoutParams();
+                if(labelLp.height!=h){labelLp.height=h;label.setLayoutParams(labelLp);}
+            }
+            if(i==0 && responsiveFirstHeading!=null){
+                android.view.ViewGroup.LayoutParams wrapperLp=responsiveFirstHeading.getLayoutParams();
+                if(wrapperLp.height!=h){wrapperLp.height=h;responsiveFirstHeading.setLayoutParams(wrapperLp);}
+            }
+        }
+        if(responsiveRecentHeading!=null){
+            android.view.ViewGroup.LayoutParams lp=responsiveRecentHeading.getLayoutParams();
+            if(lp.height!=recentTitleHeight){
+                lp.height=recentTitleHeight;
+                responsiveRecentHeading.setLayoutParams(lp);
+            }
+        }
+    }
+
 
     private void addRadioCard(LinearLayout row,String id,int slot){
         android.view.View v;
@@ -722,9 +847,7 @@ public class MainActivity extends AppCompatActivity {
             v=button;
         }
         v.setOnLongClickListener(x->{ choosePreset(slot); return true; });
-        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
-        bp.setMargins(10,10,10,10);
-        row.addView(v,bp);
+        addSquareRadioTile(row,v);
     }
 
     private void addRadioRegionLabels(String[] ordered,int first){
@@ -732,7 +855,8 @@ public class MainActivity extends AppCompatActivity {
         labels.setOrientation(LinearLayout.HORIZONTAL);
         // Every physical row reserves the same header height. Region headings
         // can appear over any cell without moving cards in that row up/down.
-        labels.setMinimumHeight(dp(48));
+        labels.setMinimumHeight(0);
+        responsiveHeadingRows.add(labels);
         for(int column=0;column<4;){
             String region=RadioPresets.region(ordered[first+column]);
             int span=1;
@@ -753,13 +877,14 @@ public class MainActivity extends AppCompatActivity {
             FrameLayout header=new FrameLayout(this);
             labels.setPadding(0,0,dp(50),0);
             header.addView(labels,new FrameLayout.LayoutParams(-1,dp(48)));
+            responsiveFirstHeading=header;
             ImageButton gear=new ImageButton(this);
             gear.setImageResource(android.R.drawable.ic_menu_preferences);
             gear.setColorFilter(Color.WHITE);
             gear.setBackground(roundedBg(0x88232A35,24f));
             gear.setContentDescription("폴라리스 라디오 설정");
             gear.setOnClickListener(v->startActivity(new Intent(this,RadioSettingsActivity.class)));
-            FrameLayout.LayoutParams gearLp=new FrameLayout.LayoutParams(dp(44),dp(44),android.view.Gravity.END|android.view.Gravity.TOP);
+            FrameLayout.LayoutParams gearLp=new FrameLayout.LayoutParams(dp(38),dp(38),android.view.Gravity.END|android.view.Gravity.TOP);
             gearLp.rightMargin=dp(4);
             header.addView(gear,gearLp);
             body.addView(header,new LinearLayout.LayoutParams(-1,dp(48)));
@@ -793,9 +918,7 @@ public class MainActivity extends AppCompatActivity {
             });
             cell=tile;
         }
-        LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,210,1);
-        bp.setMargins(10,10,10,10);
-        row.addView(cell,bp);
+        addSquareRadioTile(row,cell);
     }
 
     private void refreshRecentRadio(){
@@ -804,6 +927,8 @@ public class MainActivity extends AppCompatActivity {
         String[] recent=RadioPresets.recentIds(this);
         for(int i=0;i<4;i++)
             addRecentRadioCard(recentRadioRow,i<recent.length?recent[i]:null);
+        if(responsiveRadioScroll!=null)
+            responsiveRadioScroll.post(this::applyResponsiveRadioLayout);
     }
 
     private void showDomestic(){
@@ -813,13 +938,19 @@ public class MainActivity extends AppCompatActivity {
         base("라디오");
 
         String[] layout=RadioPresets.layoutIds(this);
-        // Four fixed-height 4-column rows: 13 stations + 3 invisible cells.
-        // Presets and their region labels can move into any physical position.
+        // Four adjustable four-column rows, with preserved preset ordering.
         for(int first=0;first<RadioPresets.SLOT_COUNT;first+=4)
             addRadioPresetRow(layout,first);
-        body.addView(radioSectionTitle("최근 들은 채널"));
+        responsiveRecentHeading=radioSectionTitle("최근 들은 채널");
+        body.addView(responsiveRecentHeading);
         recentRadioRow=radioRow();
         refreshRecentRadio();
+        final ScrollView scroll=responsiveRadioScroll;
+        scroll.addOnLayoutChangeListener((v,l,t,r,b,oldL,oldT,oldR,oldB)->{
+            if(r-l!=oldR-oldL || b-t!=oldB-oldT)
+                applyResponsiveRadioLayout();
+        });
+        scroll.post(this::applyResponsiveRadioLayout);
     }
 
 
