@@ -53,8 +53,8 @@ one(auto,
 '''    val (picture, cover) = carContext.picture(item.mediaMetadata.artworkUri, R.drawable.music_note)
     val tile = GridItem.Builder().setTitle(item.name()).setImage(picture, if (cover) GridItem.IMAGE_TYPE_LARGE else GridItem.IMAGE_TYPE_ICON)''',
 '''    val categoryArt = when(item.mediaId) {
-        Polaris613Nav.KR -> R.drawable.polaris615_kr
-        Polaris613Nav.WORLD -> R.drawable.polaris615_world
+        Polaris613Nav.KR -> R.drawable.polaris616_kr
+        Polaris613Nav.WORLD -> R.drawable.polaris616_world
         RadioCatalog.PLAYLIST_ROOT_ID -> R.drawable.polaris616_playlist
         Polaris613Nav.DOWNLOADS -> R.drawable.polaris616_download
         else -> null
@@ -82,19 +82,32 @@ one(nav,
 '''        .appendPath(id).appendQueryParameter("v","616").build()''',
 "new artwork URI for Media3 fallback")
 
-# Actual compact, legible white glyphs on purple: no Korean words printed.
-draw=root/"app/src/main/res/drawable-nodpi";draw.mkdir(parents=True,exist_ok=True)
-def vector(name,path):
-    (draw/("polaris616_"+name+".xml")).write_text(f'''<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="256dp" android:height="256dp"
-    android:viewportWidth="256" android:viewportHeight="256">
-    <path android:fillColor="#6246B6" android:pathData="M36,0 L220,0 Q256,0 256,36 L256,220 Q256,256 220,256 L36,256 Q0,256 0,220 L0,36 Q0,0 36,0 Z" />
-    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="13" android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="{path}" />
-</vector>
-''',encoding="utf-8")
-vector("playlist","M74,80 L182,80 M74,128 L182,128 M74,176 L151,176")
-vector("download","M128,57 L128,164 M88,130 L128,170 L168,130 M69,186 L69,207 L187,207 L187,186")
-print("PASS: Home title-only rows, persisted album artwork, four resource-backed category tiles, cache-busted fallback")
+# Four EXACT approved, monochrome square PNGs, extracted from the user
+# chosen final designs. Do not redraw text, gradients or purple placeholders.
+from shutil import copyfile
+draw=root/"app/src/main/res/drawable-nodpi"; draw.mkdir(parents=True,exist_ok=True)
+for name in ("kr","world","playlist","download"):
+    source=Path(__file__).with_name("art616_"+name+".png")
+    assert source.is_file(), "Missing approved art: "+str(source)
+    raw=source.read_bytes()
+    assert raw.startswith(b"\x89PNG\r\n\x1a\n") and len(raw)>500
+    copyfile(source,draw/("polaris616_"+name+".png"))
+
+# Media-browser fallback MUST deliver the same artwork as native CAL.
+provider=pkg/"polaris/Polaris613ArtProvider.kt"
+one(provider,
+'''            if(id=="kr" || id=="world") {
+                val res=if(id=="kr") R.drawable.polaris615_kr
+                    else R.drawable.polaris615_world''',
+'''            if(id=="kr" || id=="world" || id=="playlists" || id=="downloads") {
+                val res=when(id) {
+                    "kr" -> R.drawable.polaris616_kr
+                    "world" -> R.drawable.polaris616_world
+                    "playlists" -> R.drawable.polaris616_playlist
+                    else -> R.drawable.polaris616_download
+                }''', "four fallback arts match native resources")
+one(provider,'File(ctx.cacheDir,"polaris-615-icons")',
+    'File(ctx.cacheDir,"polaris-616-icons")',"invalidate old raster icon cache")
+
+print("PASS: 6.16 monochrome user-approved four PNG assets in native and browser paths")
+print("PASS: existing Home + 6.15 Radio recent and music playback unchanged")

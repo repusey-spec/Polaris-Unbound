@@ -24,7 +24,7 @@ log=adb('logcat','-d',timeout=30);(OUT/'launch-logcat.txt').write_text(log)
 assert not re.search(r'FATAL EXCEPTION|ANR in '+re.escape(PKG),log),'Startup crash or ANR'
 # Run service instrumentation from a stopped activity, independently of onboarding animations.
 adb('shell','am','force-stop',PKG)
-adb('install','-r','delivery/Polaris_6.14_tests.apk',timeout=90)
+adb('install','-r','delivery/Polaris_6.16_tests.apk',timeout=90)
 try:
  with (OUT/'session-test.txt').open('w') as stream:
   proc=subprocess.Popen(['adb','shell','am','instrument','-w','-r','-e','class','com.dd3boh.outertune.polaris.PolarisAA616BrowserTest',PKG+'.test/androidx.test.runner.AndroidJUnitRunner'],text=True,stdout=stream,stderr=subprocess.STDOUT)

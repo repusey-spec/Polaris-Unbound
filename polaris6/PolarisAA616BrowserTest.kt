@@ -46,6 +46,20 @@ class PolarisAA616BrowserTest {
             assertTrue(streaming.size>=2)
             assertEquals("polaris:playlists:v610",streaming[0].mediaId)
             assertEquals("polaris:stream:downloads:v613",streaming[1].mediaId)
+            // Actually read the four category images from the app's ContentProvider.
+            // Previous tests only checked IDs, allowing textual fallback artwork.
+            for (category in radio.take(2) + streaming.take(2)) {
+                val uri=category.mediaMetadata.artworkUri
+                assertNotNull("Missing artwork URI for " + category.mediaId,uri)
+                context.contentResolver.openInputStream(uri!!).use { stream ->
+                    assertNotNull("Unopenable category image: " + category.mediaId,stream)
+                    val bitmap=android.graphics.BitmapFactory.decodeStream(stream)
+                    assertNotNull("Undecodable image " + category.mediaId,bitmap)
+                    assertEquals(160,bitmap!!.width)
+                    assertEquals(160,bitmap.height)
+                    bitmap.recycle()
+                }
+            }
             assertTrue(get("polaris:can:v613").isEmpty())
             assertEquals(6,get("polaris:radio:kr:v613").size)
             assertEquals(7,get("polaris:radio:world:v613").size)
