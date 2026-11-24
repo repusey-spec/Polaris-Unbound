@@ -15,7 +15,7 @@ checks={
 "native streaming art":'R.drawable.polaris616_playlist' in auto and 'R.drawable.polaris616_download' in auto,
 "cache bust browser":'appendQueryParameter("v","616")' in nav,
 "version":'versionCode = 100616' in (r/"app/build.gradle.kts").read_text(),
-"four approved PNG resources":all((r/("app/src/main/res/drawable-nodpi/polaris616_"+k+".png")).read_bytes().startswith(b"\\x89PNG\\r\\n\\x1a\\n") for k in ("kr","world","playlist","download")),
+"four approved PNG resources":all((r/("app/src/main/res/drawable-nodpi/polaris616_"+k+".png")).read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for k in ("kr","world","playlist","download")),
 "same 4 image resources used by content provider":all("R.drawable.polaris616_"+k in (root/"polaris/Polaris613ArtProvider.kt").read_text() for k in ("kr","world","playlist","download")),
 "old icon cache invalidated":'polaris-616-icons' in (root/"polaris/Polaris613ArtProvider.kt").read_text(),
 }
