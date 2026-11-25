@@ -1,0 +1,176 @@
+name: Polaris VPN 0.01 - route test APK
+on:
+  push:
+    branches: [experiment/polaris-vpn-001]
+    paths: [".github/workflows/polaris-vpn-001-route-test.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  route-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Fetch pinned Windscribe source
+        run: |
+          git clone --recurse-submodules https://github.com/Windscribe/Android-App.git "$RUNNER_TEMP/windscribe"
+          git -C "$RUNNER_TEMP/windscribe" checkout 5a37e6afafded0279d67714eec878f9524ae90dc
+          git -C "$RUNNER_TEMP/windscribe" submodule update --init --recursive
+      - name: Set up isolated route-test application
+        working-directory: ${{ runner.temp }}/windscribe
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('mobile/build.gradle.kts')
+          s=p.read_text()
+          old='applicationId = rootProject.extra["AppId"] as String'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,'applicationId = "com.polaris.vpn.routetest"'))
+          p=Path('base/src/main/res/values/untranslatable.xml')
+          s=p.read_text()
+          assert '>Windscribe</string>' in s
+          p.write_text(s.replace('>Windscribe</string>', '>Polaris VPN 0.01</string>',1))
+          p=Path('base/src/main/java/com/windscribe/vpn/backend/tunnel/WindscribeVpnService.kt')
+          s=p.read_text()
+          old='''            config.disallowedApps.forEach { runCatching { builder.addDisallowedApplication(it) } }
+                      config.allowedApps.forEach { runCatching { builder.addAllowedApplication(it) } }'''
+          # Replace only the two application selection statements; this is an isolated diagnostic,
+          # deliberately scoped to its own package, not a system-wide VPN.
+          a='            config.disallowedApps.forEach { runCatching { builder.addDisallowedApplication(it) } }'
+          b='            config.allowedApps.forEach { runCatching { builder.addAllowedApplication(it) } }'
+          assert s.count(a)==1 and s.count(b)==1
+          s=s.replace(a,'            builder.addAllowedApplication(packageName)').replace(b,'            if (config.dnsServers.isNotEmpty()) builder.allowBypass()')
+          p.write_text(s)
+          p=Path('mobile/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          assert '    <application' in s
+          s=s.replace('    <application','    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <application',1)
+          s=s.replace('        <activity\n','''        <activity android:name=".ui.RouteProbeActivity" android:exported="true" android:label="Polaris VPN 경로 진단">
+                  <intent-filter>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent-filter>
+              </activity>
+              <activity
+          ''',1)
+          p.write_text(s)
+          p=Path('mobile/src/main/java/com/windscribe/mobile/ui/RouteProbeActivity.java')
+          p.write_text(r'''package com.windscribe.mobile.ui;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.net.ConnectivityManager;
+          import android.net.Network;
+          import android.net.NetworkCapabilities;
+          import android.widget.*;
+          import android.content.Context;
+          import android.view.View;
+          import java.net.*;
+          import java.io.*;
+          import java.nio.charset.StandardCharsets;
+
+          public class RouteProbeActivity extends Activity {
+              TextView result;
+              Button run;
+              @Override public void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  LinearLayout content=new LinearLayout(this);
+                  content.setOrientation(LinearLayout.VERTICAL);
+                  content.setPadding(24,24,24,24);
+                  TextView title=new TextView(this);
+                  title.setText("Polaris VPN 0.01 | Route diagnostic\nWindscribe login + WireGuard first; then test here.\nOnly this app is tunnelled. Not a general-purpose VPN.");
+                  title.setTextSize(17);
+                  content.addView(title);
+                  run=new Button(this);
+                  run.setText("Test direct / default / VPN");
+                  content.addView(run);
+                  result=new TextView(this);
+                  result.setTextIsSelectable(true);
+                  ScrollView scroll=new ScrollView(this);
+                  scroll.addView(result);
+                  content.addView(scroll);
+                  setContentView(content);
+                  run.setOnClickListener(v -> {
+                      run.setEnabled(false);
+                      result.setText("Testing...");
+                      new Thread(() -> {
+                          String report;
+                          try { report=probe(); } catch(Exception e) { report=e.toString(); }
+                          final String done=report;
+                          runOnUiThread(() -> {result.setText(done);run.setEnabled(true);});
+                      }).start();
+                  });
+              }
+              String probe() {
+                  ConnectivityManager cm=(ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
+                  StringBuilder s=new StringBuilder();
+                  s.append("Default: ").append(ip(null)).append("\n");
+                  boolean physical=false, vpn=false;
+                  for (Network n : cm.getAllNetworks()) {
+                      NetworkCapabilities c=cm.getNetworkCapabilities(n);
+                      if(c==null || !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
+                      if(c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                          vpn=true; s.append("VPN ").append(n).append(": ").append(ip(n)).append("\n");
+                      } else if(c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+                              (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))) {
+                          physical=true; s.append(c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)?"Direct WiFi ":"Direct cellular ").append(n).append(": ").append(ip(n)).append("\n");
+                      }
+                  }
+                  if(!vpn) s.append("No visible VPN network\n");
+                  if(!physical) s.append("No physical network visible\n");
+                  s.append("Default recheck: ").append(ip(null));
+                  return s.toString();
+              }
+              String ip(Network network) {
+                  HttpURLConnection c=null;
+                  try {
+                      URL u=new URL("https://api.ipify.org/");
+                      c=(HttpURLConnection)(network==null?u.openConnection(Proxy.NO_PROXY):network.openConnection(u,Proxy.NO_PROXY));
+                      c.setConnectTimeout(8000);
+                      c.setReadTimeout(8000);
+                      c.setUseCaches(false);
+                      c.setRequestProperty("Connection","close");
+                      int code=c.getResponseCode();
+                      if(code!=200)return "HTTP "+code;
+                      try(BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream(),StandardCharsets.UTF_8))) {
+                          return "HTTP "+code+" "+r.readLine();
+                      }
+                  } catch(Exception e) {return e.getClass().getSimpleName()+": "+e.getMessage();}
+                  finally {if(c!=null)c.disconnect();}
+              }
+          }''')
+          PY
+      - name: Install Android native toolchain
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+      - name: Build signed ARM64 diagnostic APK
+        working-directory: ${{ runner.temp }}/windscribe
+        env:
+          VERSION_NAME: '0.01'
+          VERSION_CODE: '1'
+        run: |
+          chmod +x gradlew
+          ./gradlew :mobile:assembleFdroidDebug -PabiFilter=arm64-v8a --stacktrace --max-workers=2
+      - name: Verify and collect APK
+        run: |
+          set -euo pipefail
+          mkdir -p delivery
+          APK=$(find "$RUNNER_TEMP/windscribe/mobile/build/outputs/apk/fdroid/debug" -maxdepth 1 -name '*.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" delivery/Polaris_VPN_0.01_Route_Test.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging delivery/Polaris_VPN_0.01_Route_Test.apk | tee delivery/badging.txt
+          grep -F "package: name='com.polaris.vpn.routetest' versionCode='1' versionName='0.01'" delivery/badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs delivery/Polaris_VPN_0.01_Route_Test.apk
+          sha256sum delivery/Polaris_VPN_0.01_Route_Test.apk > delivery/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-VPN-001-Route-Test-APK
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 14
