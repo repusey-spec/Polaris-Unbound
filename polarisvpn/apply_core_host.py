@@ -21,6 +21,13 @@ for f in ("windscribe-core.aar","windscribe-core-dependencies.gradle"):
     shutil.copy2(ws/"windscribe-core/build/outputs/aar"/f, lib/f)
 with appgrad.open("a") as f:
     f.write('\n dependencies { implementation(files("libs/windscribe-core.aar")) }\napply(from = "libs/windscribe-core-dependencies.gradle")\n')
+# The original list already accepts LGPL-2.1 under its long-form name.
+# JNA's POM uses the shorter alias. JUnit's POM names EPL-1.0.
+# Preserve strict mode, dependency notices and license metadata for this private test.
+a=appgrad.read_text()
+assert a.count('allowedLicenses.addAll(')==1
+a=a.replace('allowedLicenses.addAll(', 'allowedLicenses.addAll("LGPL, version 2.1", "EPL-1.0", "Eclipse Public License 1.0", ', 1)
+appgrad.write_text(a)
 toml=root/"gradle/libs.versions.toml"
 for old,new in [('kotlin = "2.2.21"','kotlin = "2.3.21"'),('hilt = "2.57.2"','hilt = "2.59.2"'),('ksp = "2.3.1"','ksp = "2.3.9"')]:
     replace(toml,old,new)
