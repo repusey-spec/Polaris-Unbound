@@ -13,8 +13,8 @@ def replace(p, old, new):
     p.write_text(s.replace(old,new,1))
 appgrad=root/"app/build.gradle.kts"
 replace(appgrad,'applicationId = "app.hush.music.polarisradio.debug"','applicationId = "com.polaris.vpn"')
-replace(appgrad,'versionCode = 100616','versionCode = 2')
-replace(appgrad,'versionName = "6.16"','versionName = "0.02"')
+replace(appgrad,'versionCode = 100616','versionCode = 3')
+replace(appgrad,'versionName = "6.16"','versionName = "0.03"')
 # Flip7 test: only ARM64; compress native libraries in the delivered APK.
 replace(appgrad,'    defaultConfig {','    defaultConfig {\n        ndk { abiFilters.clear(); abiFilters.add("arm64-v8a") }')
 with appgrad.open("a") as f:
@@ -91,9 +91,9 @@ s=s.replace('        <activity\n','''        <activity android:name=".polaris.Po
         </provider>
         <activity
 '''.replace('\\$','$'),1)
-s=s.replace('android:label="@string/app_name"','android:label="Polaris VPN 0.02"')
+s=s.replace('android:label="@string/app_name"','android:label="Polaris VPN 0.03"')
 # Force the launcher activity label too, independently of resource overrides.
-s,n=re.subn(r'(<activity\b[^>]*android:name="\.MainActivity")',r'\1 android:label="Polaris VPN 0.02"',s,count=1)
+s,n=re.subn(r'(<activity\b[^>]*android:name="\.MainActivity")',r'\1 android:label="Polaris VPN 0.03"',s,count=1)
 assert n==1, "Launcher activity missing"
 manifest.write_text(s)
 # Preserve the existing UI, add one settings entry.
@@ -114,7 +114,7 @@ settings.write_text(s)
 # Rename visible app_name resources without changing unrelated strings.
 for p in (root/"app/src").glob("*/res/values*/*.xml"):
     s=p.read_text()
-    s2=re.sub(r'(<string name="app_name"[^>]*>)[^<]*(</string>)',r'\g<1>Polaris VPN 0.02\g<2>',s)
+    s2=re.sub(r'(<string name="app_name"[^>]*>)[^<]*(</string>)',r'\g<1>Polaris VPN 0.03\g<2>',s)
     if s!=s2:p.write_text(s2)
 # Hilt core's shared network routing must never leak radio via the VPN.
 # Only radio socket calls are explicitly bound; other app requests use Android's default network.
