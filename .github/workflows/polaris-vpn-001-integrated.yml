@@ -1,13 +1,13 @@
-name: Polaris VPN 0.03 - ARM64 integrated player build
+name: Polaris 6.17 - ARM64 vehicle VPN release candidate
 on:
   push:
-    branches: [experiment/polaris-vpn-003]
+    branches: [release/polaris-6.17-vpn]
     paths: [".github/workflows/polaris-vpn-001-integrated.yml", "polarisvpn/**"]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: polaris-vpn-003-integrated
+  group: polaris-617-integrated
   cancel-in-progress: true
 jobs:
   integrated-apk:
@@ -51,10 +51,12 @@ jobs:
           p.write_text(s)
           PY
           python3 "$GITHUB_WORKSPACE/polarisvpn/limit_wireguard.py" "$RUNNER_TEMP/windscribe"
+          python3 "$GITHUB_WORKSPACE/polarisvpn/release617.py" core "$RUNNER_TEMP/windscribe"
           chmod +x gradlew
           ./gradlew :windscribe-core:bundle --stacktrace --max-workers=2
           test -s windscribe-core/build/outputs/aar/windscribe-core.aar
           test -s windscribe-core/build/outputs/aar/windscribe-core-dependencies.gradle
+          python3 "$GITHUB_WORKSPACE/polarisvpn/release617.py" prune "$RUNNER_TEMP/windscribe"
       - name: Pin InterTune engine
         run: |
           git clone --depth 1 --branch v0.12.10 --recurse-submodules https://github.com/ItzSkyeYT/InterTune.git "$RUNNER_TEMP/intertune"
@@ -116,6 +118,7 @@ jobs:
           python3 polarisvpn/apply_core_host.py "$RUNNER_TEMP/intertune" "$RUNNER_TEMP/windscribe"
           cp polarisvpn/PolarisVpnActivity.kt "$RUNNER_TEMP/intertune/app/src/main/java/com/dd3boh/outertune/polaris/"
           python3 polarisvpn/apply_route_ip.py "$RUNNER_TEMP/intertune"
+          python3 polarisvpn/release617.py host "$RUNNER_TEMP/intertune"
       - name: Compile and sign integrated player APK
         working-directory: ${{ runner.temp }}/intertune
         run: ./gradlew --build-cache :app:assembleCoreRelease --stacktrace --max-workers=2
@@ -123,21 +126,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_VPN_0.03.apk
-          APK=delivery/Polaris_VPN_0.03.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.17.apk
+          APK=delivery/Polaris_6.17.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee delivery/badging.txt
-          grep -F "package: name='com.polaris.vpn' versionCode='3' versionName='0.03'" delivery/badging.txt
-          grep -Fx "application-label:'Polaris VPN 0.03'" delivery/badging.txt
+          grep -F "package: name='com.polaris.vpn' versionCode='100617' versionName='6.17'" delivery/badging.txt
+          grep -Fx "application-label:'Polaris 6.17'" delivery/badging.txt
           grep -Fx "native-code: 'arm64-v8a'" delivery/badging.txt
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.AutoCarService' delivery/manifest.txt
           grep -F 'com.windscribe.vpn.backend.tunnel.WindscribeVpnService' delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.polaris.PolarisVpnActivity' delivery/manifest.txt
+          grep -F 'com.windscribe.vpn.bootreceiver.WindscribeBootReceiver' delivery/manifest.txt
           python3 - <<'PY'
           import zipfile
-          with zipfile.ZipFile('delivery/Polaris_VPN_0.03.apk') as z:
+          from pathlib import Path
+          with zipfile.ZipFile('delivery/Polaris_6.17.apk') as z:
               libs=[n for n in z.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so')]
               assert all(n.split('/')[1]=='arm64-v8a' for n in z.namelist() if n.startswith('lib/') and n.endswith('.so'))
               from collections import defaultdict
@@ -148,9 +153,9 @@ jobs:
               with open('delivery/size-breakdown.txt','w') as f:
                   for key,value in sorted(groups.items(),key=lambda x:-x[1]):
                       f.write(f'{value/1000000:.3f} MB {key}\n')
+              print(Path('delivery/size-breakdown.txt').read_text())
               print(libs)
-              from pathlib import Path
-              print("APK size MB:", Path('delivery/Polaris_VPN_0.03.apk').stat().st_size / 1000000)
+              print("APK size MB:", Path('delivery/Polaris_6.17.apk').stat().st_size / 1000000)
               for entry in z.infolist():
                   if entry.filename.startswith('lib/') and entry.filename.endswith('.so'):
                       assert entry.compress_type != zipfile.ZIP_STORED, 'Uncompressed native library: '+entry.filename
@@ -160,7 +165,7 @@ jobs:
           sha256sum "$APK" > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-VPN-003-ARM64-APK
+          name: Polaris-6.17-ARM64-APK
           path: delivery/
           if-no-files-found: error
           retention-days: 14
