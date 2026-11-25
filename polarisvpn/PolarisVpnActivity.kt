@@ -66,7 +66,7 @@ class PolarisVpnActivity : ComponentActivity() {
             setOnClickListener { click() }
             body.addView(this)
         }
-        label("Polaris VPN 0.02 · Windscribe / WireGuard")
+        label("Polaris VPN 0.03 · Windscribe / WireGuard")
         label("실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.")
         name = edit("Windscribe 계정")
         password = edit("비밀번호", true)
