@@ -1,4 +1,4 @@
-name: Polaris VPN 0.01 - integrated player build
+name: Polaris VPN 0.02 - ARM64 integrated player build
 on:
   push:
     branches: [experiment/polaris-vpn-001]
@@ -121,11 +121,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_VPN_0.01.apk
-          APK=delivery/Polaris_VPN_0.01.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_VPN_0.02.apk
+          APK=delivery/Polaris_VPN_0.02.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee delivery/badging.txt
-          grep -F "package: name='com.polaris.vpn' versionCode='1' versionName='0.01'" delivery/badging.txt
+          grep -F "package: name='com.polaris.vpn' versionCode='2' versionName='0.02'" delivery/badging.txt
+          grep -Fx "application-label:'Polaris VPN 0.02'" delivery/badging.txt
+          grep -Fx "native-code: 'arm64-v8a'" delivery/badging.txt
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.AutoCarService' delivery/manifest.txt
@@ -133,8 +135,17 @@ jobs:
           grep -F 'com.dd3boh.outertune.polaris.PolarisVpnActivity' delivery/manifest.txt
           python3 - <<'PY'
           import zipfile
-          with zipfile.ZipFile('delivery/Polaris_VPN_0.01.apk') as z:
+          with zipfile.ZipFile('delivery/Polaris_VPN_0.02.apk') as z:
               libs=[n for n in z.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so')]
+              assert all(n.split('/')[1]=='arm64-v8a' for n in z.namelist() if n.startswith('lib/') and n.endswith('.so'))
+              from collections import defaultdict
+              groups=defaultdict(int)
+              for entry in z.infolist():
+                  key=entry.filename if entry.filename.endswith('.so') else entry.filename.split('/')[0]
+                  groups[key]+=entry.compress_size
+              with open('delivery/size-breakdown.txt','w') as f:
+                  for key,value in sorted(groups.items(),key=lambda x:-x[1]):
+                      f.write(f'{value/1000000:.3f} MB {key}\n')
               print(libs)
               assert any('wg-go' in n or 'wireguard' in n.lower() for n in libs), 'Missing ARM64 WireGuard binary'
           PY
@@ -142,7 +153,7 @@ jobs:
           sha256sum "$APK" > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-VPN-001-INTEGRATED-APK
+          name: Polaris-VPN-002-ARM64-APK
           path: delivery/
           if-no-files-found: error
           retention-days: 14
