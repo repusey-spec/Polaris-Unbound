@@ -24,6 +24,12 @@ with appgrad.open("a") as f:
 toml=root/"gradle/libs.versions.toml"
 for old,new in [('kotlin = "2.2.21"','kotlin = "2.3.21"'),('hilt = "2.57.2"','hilt = "2.59.2"'),('ksp = "2.3.1"','ksp = "2.3.9"')]:
     replace(toml,old,new)
+# Hilt 2.59 requires AGP 9.0+, per the upstream 2.59 release notes.
+# Keep the existing project's legacy Kotlin and variant DSL during this test.
+replace(toml,'androidGradlePlugin = "8.11.1"','androidGradlePlugin = "9.0.0"')
+props=root/"gradle.properties"
+with props.open("a") as f:
+    f.write("\nandroid.builtInKotlin=false\nandroid.newDsl=false\n")
 # Preserve all existing App initialization, but use Windscribe's application base
 # so the inherited core fields are initialized by the single host Hilt graph.
 app=pkg/"App.kt"
@@ -135,4 +141,90 @@ s=s.replace('android.util.Log.i("PolarisVpnRoute", "Radio media transport: physi
 '''PolarisVpnReport.note("Radio media: physical network=" + n +
                 ", DNS servers=" + (cm.getLinkProperties(n)?.dnsServers?.size ?: 0))''')
 radio.write_text(s)
+# Existing station-address resolution and program-guide fetches must also bypass VPN.
+for file, pairs in {
+    "PolarisRadioResolver.kt":[
+        ("URL(endpoint).openConnection()", "PolarisRadioNetwork.openConnection(URL(endpoint))")
+    ],
+    "CurrentProgramResolver.java":[
+        ("new URL(endpoint).openConnection()", "PolarisRadioNetwork.openConnection(new URL(endpoint))"),
+        ("new URL(url).openConnection()", "PolarisRadioNetwork.openConnection(new URL(url))")
+    ]
+}.items():
+    p=pkg/"polaris"/file
+    for a,b in pairs:
+        replace(p,a,b)
+network=pkg/"polaris/PolarisRadioNetwork.kt"
+network.write_text(r'''package com.dd3boh.outertune.polaris
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import com.windscribe.vpn.Windscribe
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.Proxy
+import java.net.URL
+
+object PolarisRadioNetwork {
+    private fun caps(cm: ConnectivityManager, n: Network): NetworkCapabilities? =
+        cm.getNetworkCapabilities(n)?.takeIf {
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+            !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+            (it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+             it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+             it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+        }
+
+    fun physical(context: Context): Network {
+        val cm=context.getSystemService(ConnectivityManager::class.java)
+        cm.activeNetwork?.let { if (caps(cm,it)!=null) return it }
+        return cm.allNetworks.mapNotNull { n -> caps(cm,n)?.let { n to it } }
+            .filter { (_, c) -> c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) }
+            .sortedWith(compareByDescending<Pair<Network,NetworkCapabilities>> {
+                it.second.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+            }.thenByDescending {
+                it.second.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            })
+            .firstOrNull()?.first ?: throw IOException("No physical radio network")
+    }
+
+    @JvmStatic
+    @Throws(IOException::class)
+    fun openConnection(url: URL): HttpURLConnection {
+        val context=Windscribe.appContext
+        val n=physical(context)
+        val cm=context.getSystemService(ConnectivityManager::class.java)
+        PolarisVpnReport.note("Radio address/guide: physical network="+n+
+            ", DNS servers="+(cm.getLinkProperties(n)?.dnsServers?.size ?: 0))
+        return n.openConnection(url,Proxy.NO_PROXY) as HttpURLConnection
+    }
+}
+''')
+# Bind every radio path via the same physical-network selector.
+s=radio.read_text()
+s=re.sub(r'    private fun physical\(n: Network\).*?(?=    override fun newCall)', 
+    '''    private fun directNetwork(): Network = PolarisRadioNetwork.physical(Windscribe.appContext)
+
+''',s,flags=re.S)
+assert "PolarisRadioNetwork.physical" in s
+s=s.replace("import okhttp3.Call","import com.windscribe.vpn.Windscribe\nimport okhttp3.Call")
+radio.write_text(s)
+# Also feed the original Polaris TXT diagnostics, not just InterTune's trail.
+s=report.read_text()
+s=s.replace('android.util.Log.i("PolarisVpnRoute", value)','PolarisErrorReport.record("VPN " + value)')
+report.write_text(s)
+# Keep a phone-only entry in the original radio screen as well as music settings.
+p=pkg/"polaris/PolarisRadioScreen.kt"
+s=p.read_text()
+a="TextButton(onClick={PolarisErrorReport.open(context)})"
+if a in s:
+    s=s.replace(a, '''TextButton(onClick={context.startActivity(android.content.Intent(context, PolarisVpnActivity::class.java))}){Text("VPN 설정")}
+        '''+a,1)
+    p.write_text(s)
+# Assert the existing report activity and player were preserved.
+assert (pkg/"polaris/PolarisReportActivity.kt").is_file()
+assert (pkg/"playback/MusicService.kt").is_file()
 print("Host integration applied; compilation and runtime verification still required.")
