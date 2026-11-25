@@ -36,7 +36,7 @@ for old,new in [('kotlin = "2.2.21"','kotlin = "2.3.21"'),('hilt = "2.57.2"','hi
 replace(toml,'androidGradlePlugin = "8.11.1"','androidGradlePlugin = "9.0.0"')
 props=root/"gradle.properties"
 with props.open("a") as f:
-    f.write("\nandroid.builtInKotlin=false\nandroid.newDsl=false\n")
+    f.write("\nandroid.builtInKotlin=false\nandroid.newDsl=false\nandroid.r8.optimizedResourceShrinking=false\n")
 # Preserve all existing App initialization, but use Windscribe's application base
 # so the inherited core fields are initialized by the single host Hilt graph.
 app=pkg/"App.kt"
