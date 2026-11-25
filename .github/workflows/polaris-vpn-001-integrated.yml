@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: polaris-vpn-integrated
+  group: polaris-vpn-002-integrated
   cancel-in-progress: true
 jobs:
   integrated-apk:
@@ -50,6 +50,7 @@ jobs:
           s=s.replace(a,'            builder.addAllowedApplication(packageName)').replace(b,'            builder.allowBypass()')
           p.write_text(s)
           PY
+          python3 "$GITHUB_WORKSPACE/polarisvpn/limit_wireguard.py" "$RUNNER_TEMP/windscribe"
           chmod +x gradlew
           ./gradlew :windscribe-core:bundle --stacktrace --max-workers=2
           test -s windscribe-core/build/outputs/aar/windscribe-core.aar
@@ -147,6 +148,11 @@ jobs:
                   for key,value in sorted(groups.items(),key=lambda x:-x[1]):
                       f.write(f'{value/1000000:.3f} MB {key}\n')
               print(libs)
+              from pathlib import Path
+              print("APK size MB:", Path('delivery/Polaris_VPN_0.02.apk').stat().st_size / 1000000)
+              for entry in z.infolist():
+                  if entry.filename.startswith('lib/') and entry.filename.endswith('.so'):
+                      assert entry.compress_type != zipfile.ZIP_STORED, 'Uncompressed native library: '+entry.filename
               assert any('wg-go' in n or 'wireguard' in n.lower() for n in libs), 'Missing ARM64 WireGuard binary'
           PY
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" > delivery/signature.txt
