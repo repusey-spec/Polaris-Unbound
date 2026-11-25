@@ -33,7 +33,8 @@ class PolarisVpnActivity : ComponentActivity() {
     private lateinit var password: EditText
     private lateinit var otp: EditText
     private lateinit var answer: EditText
-    private lateinit var challenge: TextView
+    private lateinit var challenge: ImageView
+    private lateinit var challengeRefresh: Button
     private lateinit var status: TextView
     private lateinit var cities: Spinner
     private lateinit var login: Button
@@ -65,16 +66,25 @@ class PolarisVpnActivity : ComponentActivity() {
             setOnClickListener { click() }
             body.addView(this)
         }
-        label("Polaris VPN 0.01 · Windscribe / WireGuard")
+        label("Polaris VPN 0.02 · Windscribe / WireGuard")
         label("실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.")
         name = edit("Windscribe 계정")
         password = edit("비밀번호", true)
         otp = edit("2단계 인증 코드 (사용 시)", true)
-        challenge = label("")
-        challenge.typeface = android.graphics.Typeface.MONOSPACE
+        challenge = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "보안 문자 이미지"
+            visibility = android.view.View.GONE
+            body.addView(this, LinearLayout.LayoutParams(-1, (110 * resources.displayMetrics.density).toInt()))
+        }
         answer = edit("보안 문자 답변")
         answer.visibility = android.view.View.GONE
         login = button("로그인") { authenticate() }
+        challengeRefresh = button("보안 문자 새로고침") {
+            clearChallenge()
+            authenticate()
+        }
+        challengeRefresh.visibility = android.view.View.GONE
         refresh = button("서버 목록 새로고침") { loadCities() }
         cities = Spinner(this)
         body.addView(cities)
@@ -114,6 +124,41 @@ class PolarisVpnActivity : ComponentActivity() {
         refresh.isEnabled = !b
         connect.isEnabled = !b
     }
+    private fun clearChallenge() {
+        token = null
+        answer.text.clear()
+        challenge.setImageDrawable(null)
+        challenge.visibility = android.view.View.GONE
+        answer.visibility = android.view.View.GONE
+        challengeRefresh.visibility = android.view.View.GONE
+    }
+    // Follow Windscribe AccessibleCaptchaDialog: decode the ASCII art and draw square cells.
+    // No recognition or automatic submission of the CAPTCHA.
+    private fun renderChallenge(encoded: String): Boolean {
+        val art = try {
+            String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+        } catch (_: IllegalArgumentException) { return false }
+        val rows = art.lines().dropWhile { it.isBlank() }.dropLastWhile { it.isBlank() }
+        val columns = rows.maxOfOrNull { it.length } ?: 0
+        if (rows.isEmpty() || columns == 0 || rows.size > 256 || columns > 256) return false
+        val cell = 4
+        val bitmap = android.graphics.Bitmap.createBitmap(columns * cell, rows.size * cell,
+            android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        val ink = android.graphics.Paint().apply { color = android.graphics.Color.BLACK; isAntiAlias = false }
+        rows.forEachIndexed { y, line ->
+            line.forEachIndexed { x, ch ->
+                if (!ch.isWhitespace()) canvas.drawRect((x*cell).toFloat(), (y*cell).toFloat(),
+                    ((x+1)*cell).toFloat(), ((y+1)*cell).toFloat(), ink)
+            }
+        }
+        challenge.setImageBitmap(bitmap)
+        challenge.visibility = android.view.View.VISIBLE
+        challengeRefresh.visibility = android.view.View.VISIBLE
+        answer.visibility = android.view.View.VISIBLE
+        return true
+    }
     private fun authenticate() {
         val u = name.text.toString().trim()
         val p = password.text.toString()
@@ -138,8 +183,11 @@ class PolarisVpnActivity : ComponentActivity() {
                         show("서버가 그림 CAPTCHA를 요청했습니다. 이 빌드는 공식 텍스트 CAPTCHA만 지원합니다.")
                         return@launch
                     }
-                    challenge.text = ascii
-                    answer.visibility = android.view.View.VISIBLE
+                    if (!renderChallenge(ascii)) {
+                        clearChallenge()
+                        show("보안 문자 표시 오류: 다시 로그인하세요.")
+                        return@launch
+                    }
                     show("보안 문자 답변을 입력한 후 로그인하세요.")
                     return@launch
                 }
@@ -149,10 +197,7 @@ class PolarisVpnActivity : ComponentActivity() {
                             if (captcha != null) supplied else null, floatArrayOf(), floatArrayOf())
                     }
                 }
-                token = null
-                answer.text.clear()
-                challenge.text = ""
-                answer.visibility = android.view.View.GONE
+                clearChallenge()
                 when (result) {
                     is CallResult.Error -> show("로그인 실패: " + result.code + " (계정/2FA/보안 문자 확인)")
                     is CallResult.Success -> {
