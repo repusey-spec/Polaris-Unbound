@@ -1,7 +1,7 @@
 name: Polaris VPN 0.03 - ARM64 integrated player build
 on:
   push:
-    branches: [experiment/polaris-vpn-002]
+    branches: [experiment/polaris-vpn-003]
     paths: [".github/workflows/polaris-vpn-001-integrated.yml", "polarisvpn/**"]
   workflow_dispatch:
 permissions:
