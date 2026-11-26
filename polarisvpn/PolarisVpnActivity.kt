@@ -322,6 +322,10 @@ class PolarisVpnActivity : ComponentActivity() {
     }
 
     private fun requestConnection(city: Datacenter) {
+        if (core.vpnConnectionStateManager.state.value.status == com.windscribe.vpn.backend.VPNState.Status.Connecting) {
+            show("VPN 연결 진행 중입니다.")
+            return
+        }
         pendingCity = city
         val permission = VpnService.prepare(this)
         trace("VPN permission already granted=" + (permission == null))
