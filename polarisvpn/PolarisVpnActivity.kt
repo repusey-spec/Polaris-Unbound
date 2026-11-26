@@ -540,7 +540,7 @@ class PolarisVpnActivity : AppCompatActivity() {
         routePrefs.edit().putString("last_city", city.id.toString()).apply()
         core.locationRepository.get().setSelectedCity(city.id)
         core.autoConnectionManager.reset()
-        trace("VPN request; protocol=" + protocol + "/443; mode=" + comparisonMode() + "; city=" + city.id)
+        trace("VPN request; protocol=" + protocol + "/443; mode=" + "D1" + "; city=" + city.id)
         show(protocol + "/443 연결 요청: " + city.nodeName)
         Windscribe.applicationScope.launch {
             try {
