@@ -12,7 +12,7 @@ def replace(p, old, new):
     assert s.count(old)==1, f"{p}: expected one match: {old[:80]}"
     p.write_text(s.replace(old,new,1))
 appgrad=root/"app/build.gradle.kts"
-replace(appgrad,'applicationId = "app.hush.music.polarisradio.debug"','applicationId = "com.polaris.vpn"')
+assert 'applicationId = "app.hush.music.polarisradio.debug"' in appgrad.read_text(), "Original Polaris application ID required"
 replace(appgrad,'versionCode = 100616','versionCode = 3')
 replace(appgrad,'versionName = "6.16"','versionName = "0.03"')
 # Flip7 test: only ARM64; compress native libraries in the delivered APK.
