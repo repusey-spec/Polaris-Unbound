@@ -17,7 +17,7 @@ replace(appgrad,'versionCode = 100616','versionCode = 3')
 replace(appgrad,'versionName = "6.16"','versionName = "0.03"')
 # Flip7 test: only ARM64; compress native libraries in the delivered APK.
 replace(appgrad,'    defaultConfig {','    defaultConfig {\n        ndk { abiFilters.clear(); abiFilters.addAll(listOf("POLARIS_ABI")) }')
-appgrad.write_text(appgrad.read_text().replace('POLARIS_ABI', sys.argv[3].replace(",", '\\", \\"')))
+appgrad.write_text(appgrad.read_text().replace('POLARIS_ABI', sys.argv[3].replace(',', '", "')))
 with appgrad.open("a") as f:
     f.write("\nandroid { packaging { jniLibs { useLegacyPackaging = true } } }\n")
 lib=root/"app/libs"
