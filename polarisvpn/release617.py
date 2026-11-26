@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""6.25 production candidate. Preserve original Polaris production application ID and its existing local data."""
+"""6.26 production candidate. Preserve original Polaris production application ID and its existing local data."""
 from pathlib import Path
 import sys, zipfile, tempfile, subprocess, re, shutil
 mode= sys.argv[1]
@@ -12,7 +12,7 @@ if mode=="core":
     base=root/"base/src/main/java/com/windscribe/vpn"
     p=base/"Windscribe.kt"
     edit(p,"        reloadAfterMigration()","""        reloadAfterMigration()
-        // 6.25: only Polaris plus explicitly chosen external apps use this VPN.
+        // 6.26: only Polaris plus explicitly chosen external apps use this VPN.
         if (!preference.splitTunnelToggle ||
             preference.splitRoutingMode != com.windscribe.vpn.apppreference.PreferencesKeyConstants.INCLUSIVE_MODE) {
             preference.installedApps = listOf(packageName)
@@ -46,6 +46,139 @@ if mode=="core":
         android.util.Log.i("PolarisVpnCore", "engine stopped: " + reason)''')
     edit(p, 'liveTun = established', '''liveTun = established
             android.util.Log.i("PolarisVpnCore", "TUN established")''')
+    # 6.26: diagnostic probes only; never change the native connection verdict.
+    p=base/"backend/VpnBackend.kt"
+    edit(p,'                        val testResult = wsNetWrapper.runTunnelTest(isBridgeAllowed)','''                        val diagnosticId = android.os.SystemClock.elapsedRealtime()
+                        polarisDiagnosticLog(diagnosticId, "WSNet start bridgeAllowed=$isBridgeAllowed " + polarisDiagnosticStats())
+                        startPolarisDiagnostics(diagnosticId)
+                        val testResult = try {
+                            wsNetWrapper.runTunnelTest(isBridgeAllowed)
+                        } finally {
+                            polarisDiagnosticLog(diagnosticId, "WSNet finished " + polarisDiagnosticStats())
+                        }
+                        polarisDiagnosticLog(diagnosticId, "WSNet result success=${testResult.success} ipv4Present=${testResult.ipv4.isNotBlank()} ipv6Present=${testResult.ipv6.isNotBlank()}")''')
+    edit(p,'    fun updateState(vpnState: VPNState) {','''    protected open fun polarisDiagnosticStats(): String = "wgStats=unavailable"
+
+    private fun polarisDiagnosticLog(id: Long, msg: String) {
+        val line = "6.26 probe=$id $msg"
+        android.util.Log.i("PolarisVpnDiag", line)
+        vpnLogger.info(line)
+    }
+
+    // One bounded, read-only diagnostic worker per native test. No process-wide network binding,
+    // no protect() on probe sockets, no success override, no retry of the actual connection.
+    private fun startPolarisDiagnostics(id: Long) {
+        Thread {
+            try {
+                val cm = appContext.getSystemService(android.net.ConnectivityManager::class.java)
+                val active = cm.activeNetwork
+                val bound = cm.boundNetworkForProcess
+                val vpn = cm.allNetworks.firstOrNull { n ->
+                    cm.getNetworkCapabilities(n)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+                } ?: active?.takeIf { n ->
+                    cm.getNetworkCapabilities(n)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+                }
+                val lp = vpn?.let { cm.getLinkProperties(it) }
+                val endpoint = java.net.InetAddress.getByName("10.255.255.1")
+                polarisDiagnosticLog(id, "sdk=" + android.os.Build.VERSION.SDK_INT + " active=" + active +
+                    " bound=" + bound + " vpn=" + vpn + " iface=" + lp?.interfaceName +
+                    " dns=" + lp?.dnsServers?.joinToString { it.hostAddress.orEmpty() } +
+                    " defaultRoute=" + lp?.routes?.any { it.isDefaultRoute })
+                fun tcp(label: String, network: android.net.Network?) {
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    try {
+                        val socket = network?.socketFactory?.createSocket() ?: java.net.Socket()
+                        socket.use { it.connect(java.net.InetSocketAddress(endpoint, 19800), 1800) }
+                        polarisDiagnosticLog(id, "$label TCP19800 OK ms=" + (android.os.SystemClock.elapsedRealtime()-started))
+                    } catch (e: Exception) {
+                        polarisDiagnosticLog(id, "$label TCP19800 FAIL " + e.javaClass.simpleName +
+                            " ms=" + (android.os.SystemClock.elapsedRealtime()-started))
+                    }
+                }
+                fun dns(label: String, network: android.net.Network?) {
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    try {
+                        // DNS A example.com, with a fixed per-socket ID. No user or account data.
+                        val query = byteArrayOf(0x62,0x26,1,0,0,1,0,0,0,0,0,0,
+                            7,101,120,97,109,112,108,101,3,99,111,109,0,0,1,0,1)
+                        java.net.DatagramSocket(null as java.net.SocketAddress?).use { sock ->
+                            network?.bindSocket(sock)
+                            sock.bind(java.net.InetSocketAddress(0))
+                            sock.soTimeout = 1800
+                            sock.connect(endpoint, 53)
+                            sock.send(java.net.DatagramPacket(query, query.size))
+                            val reply = ByteArray(512)
+                            val packet = java.net.DatagramPacket(reply, reply.size)
+                            sock.receive(packet)
+                            val valid = packet.length >= 12 && reply[0] == query[0] && reply[1] == query[1] &&
+                                (reply[2].toInt() and 128) != 0
+                            val rcode = if (valid) reply[3].toInt() and 15 else -1
+                            polarisDiagnosticLog(id, "$label UDP53 reply=$valid rcode=$rcode bytes=" + packet.length +
+                                " ms=" + (android.os.SystemClock.elapsedRealtime()-started))
+                        }
+                    } catch (e: Exception) {
+                        polarisDiagnosticLog(id, "$label UDP53 FAIL " + e.javaClass.simpleName +
+                            " ms=" + (android.os.SystemClock.elapsedRealtime()-started))
+                    }
+                }
+                if (vpn == null) {
+                    polarisDiagnosticLog(id, "No visible VPN Network; explicit probes skipped")
+                } else {
+                    tcp("VPN_BOUND", vpn)
+                    tcp("DEFAULT", null)
+                    dns("VPN_BOUND", vpn)
+                    dns("DEFAULT", null)
+                    // Independent HTTPS check, only on the explicit VPN network.
+                    try {
+                        val c = vpn.openConnection(java.net.URL("https://api.ipify.org/")) as javax.net.ssl.HttpsURLConnection
+                        try {
+                            c.connectTimeout = 2000
+                            c.readTimeout = 2000
+                            c.instanceFollowRedirects = false
+                            val code = c.responseCode
+                            val ip = if (code == 200) c.inputStream.bufferedReader().use { it.readLine()?.take(64).orEmpty() } else ""
+                            polarisDiagnosticLog(id, "VPN_BOUND HTTPS code=$code validIp=" + Util.validIpAddress(ip))
+                        } finally {
+                            c.disconnect()
+                        }
+                    } catch (e: Exception) {
+                        polarisDiagnosticLog(id, "VPN_BOUND HTTPS FAIL " + e.javaClass.simpleName)
+                    }
+                }
+                polarisDiagnosticLog(id, "probes complete " + polarisDiagnosticStats())
+            } catch (e: Exception) {
+                polarisDiagnosticLog(id, "probe worker FAIL " + e.javaClass.simpleName)
+            }
+        }.apply {
+            name = "PolarisVpnDiag"
+            isDaemon = true
+        }.start()
+    }
+
+    fun updateState(vpnState: VPNState) {''')
+    p=base/"backend/wireguard/WireguardBackend.kt"
+    edit(p,'        /** Our profiles carry exactly one peer. */','''        override fun polarisDiagnosticStats(): String =
+            runCatching {
+                val stats = engineBackendLazy.get().currentStatistics
+                val peer = stats?.let { value -> value.peers().firstOrNull()?.let { value.peer(it) } }
+                if (peer == null) "wgStats=unavailable" else
+                    "wgRx=" + peer.rxBytes + " wgTx=" + peer.txBytes +
+                    " handshakeEpochMs=" + peer.latestHandshakeEpochMillis
+            }.getOrDefault("wgStats=error")
+
+        /** Our profiles carry exactly one peer. */''')
+    p=base/"wsnet/WSNetWrapper.kt"
+    edit(p,'        if (isWsNetNoise(message)) {','''        // Categorize native phases without echoing tokens, URLs, or credentials.
+        val phase = when {
+            message.contains("DNS never resolved", ignoreCase = true) -> "dns-never-resolved"
+            message.contains("dns: failed", ignoreCase = true) -> "dns-failed"
+            message.contains("BridgeTokenRequest", ignoreCase = true) -> "bridge-token"
+            message.contains("Tunnel test", ignoreCase = true) -> "tunnel-test"
+            message.contains("BridgeAPI_impl", ignoreCase = true) -> "bridge-api"
+            else -> null
+        }
+        if (phase != null) android.util.Log.i("PolarisVpnDiag", "WSNet native phase=$phase level=$level")
+        if (isWsNetNoise(message)) {''')
     # Keep upstream ConnectionPolicy unchanged.
 elif mode=="prune":
     aar=root/"windscribe-core/build/outputs/aar/windscribe-core.aar"
@@ -79,13 +212,13 @@ elif mode=="prune":
 elif mode=="host":
     pkg=root/"app/src/main/java/com/dd3boh/outertune"
     g=root/"app/build.gradle.kts"
-    edit(g,"versionCode = 3","versionCode = 100625")
-    edit(g,'versionName = "0.03"','versionName = "6.25"')
+    edit(g,"versionCode = 3","versionCode = 100626")
+    edit(g,'versionName = "0.03"','versionName = "6.26"')
     for p in [root/"app/src/main/AndroidManifest.xml",*list((root/"app/src").glob("*/res/values*/*.xml"))]:
         s=p.read_text()
-        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.25"))
+        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.26"))
     a=pkg/"polaris/PolarisVpnActivity.kt"
-    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.25 · Windscribe / WireGuard")
+    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.26 · Windscribe / WireGuard")
     edit(a,"실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.","수동 연결 검증 · 라디오는 직접 통신")
     edit(a,"        prefs.globalUserConnectionPreference = true","""        prefs.autoConnect = false
         prefs.autoStartOnBoot = false
@@ -114,7 +247,7 @@ elif mode=="host":
     edit(a,'        prefs.splitTunnelToggle = false','''        prefs.installedApps = (listOf(packageName) + prefs.installedApps).distinct()
         prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
         prefs.splitTunnelToggle = true''')
-    # 6.25: keep original 0.03 phone IP text from apply_route_ip.py.
+    # 6.26: keep original 0.03 phone IP text from apply_route_ip.py.
     # Do not change AA icons, VPN policy, or media transport.
     p=pkg/"polaris/PolarisRouteIpProbe.kt"
     s=p.read_text()
@@ -196,6 +329,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
         android:strokeLineJoin="round" android:pathData="M2,9 L7,14 M7,9 L2,14 M15,4 L15,18 M15,18 C13,16 9,17 9,20 C9,22 15,22 15,19 M15,4 L22,8"/>
 </vector>
 ''')
-    print("6.25: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
+    print("6.26: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
 else:
     raise ValueError(mode)
