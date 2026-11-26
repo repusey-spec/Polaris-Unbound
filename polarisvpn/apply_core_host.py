@@ -72,7 +72,7 @@ replace(app,'        super.onCreate()','''        com.windscribe.vpn.Windscribe.
         super.onCreate()
         com.dd3boh.outertune.polaris.PolarisVpnReport.observe(this)''')
 # Preserve the original proxy initializer in Proxy mode only; record effective settings.
-replace(app,'ProxyAtStart.setting = ProxyAtStart.of(dataStore[ProxyEnabledKey], dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])','''val polarisProxyMode = getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") == "B"
+replace(app,'ProxyAtStart.setting = ProxyAtStart.of(dataStore[ProxyEnabledKey], dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])','''val polarisProxyMode = getSharedPreferences("polaris_vpn_630", 0).getString("mode", "A") == "B"
         ProxyAtStart.setting = ProxyAtStart.of(polarisProxyMode && dataStore[ProxyEnabledKey] == true, dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])
         android.util.Log.i("PolarisVpnRoute", "Proxy configured=" + (dataStore[ProxyEnabledKey] == true) + " modeAllows=" + polarisProxyMode)''')
 replace(app,'if (dataStore[ProxyEnabledKey] == true) {','if (polarisProxyMode && dataStore[ProxyEnabledKey] == true) {')
@@ -144,7 +144,7 @@ internal object PolarisVpnReport {
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val dns = active?.let { cm.getLinkProperties(it) }?.dnsServers?.size ?: 0
         return "Default VPN=" + (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) +
-            ", DNS servers=" + dns + ", mode=" + context.getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") + ", music=default network, radio=" + (if (PolarisRadioNetwork.directEnabled()) "physical" else "default")
+            ", DNS servers=" + dns + ", mode=" + context.getSharedPreferences("polaris_vpn_630", 0).getString("mode", "A") + ", music=default network, radio=" + (if (PolarisRadioNetwork.directEnabled()) "physical" else "default")
     }
     fun observe(app: Windscribe) {
         Windscribe.applicationScope.launch {
@@ -189,8 +189,26 @@ import java.net.URL
 
 object PolarisRadioNetwork {
     @JvmStatic
-    fun directEnabled(): Boolean = Windscribe.appContext.getSharedPreferences("polaris_vpn_629", 0)
-        .getString("mode", "A") == "D"
+    fun mode(): String = Windscribe.appContext.getSharedPreferences("polaris_vpn_630", 0)
+        .getString("mode", "A") ?: "A"
+
+    @JvmStatic
+    fun directEnabled(): Boolean = mode().startsWith("D")
+
+    fun vpnActive(): Boolean {
+        val cm = Windscribe.appContext.getSystemService(ConnectivityManager::class.java)
+        return cm.activeNetwork?.let { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true
+    }
+
+    fun radioDns(n: Network, host: String): List<java.net.InetAddress> {
+        if (mode() != "D4" || !vpnActive()) return n.getAllByName(host).toList()
+        val prefs = Windscribe.appContext.getSharedPreferences("polaris_vpn_630", 0)
+        val map = org.json.JSONObject(prefs.getString("d4_map", "{}") ?: "{}")
+        val ips = map.optJSONArray(host.lowercase()) ?: throw java.net.UnknownHostException("D4 host not excluded: " + host)
+        return (0 until ips.length()).map { android.net.InetAddresses.parseNumericAddress(ips.getString(it)) }
+    }
+
+    private val radioCalls by lazy { PolarisDirectRadioCalls(Windscribe.appContext) }
 
     private fun caps(cm: ConnectivityManager, n: Network): NetworkCapabilities? =
         cm.getNetworkCapabilities(n)?.takeIf {
@@ -224,7 +242,7 @@ object PolarisRadioNetwork {
         val cm=context.getSystemService(ConnectivityManager::class.java)
         PolarisVpnReport.note("Radio address/guide: physical network="+n+
             ", DNS servers="+(cm.getLinkProperties(n)?.dnsServers?.size ?: 0))
-        return n.openConnection(url,Proxy.NO_PROXY) as HttpURLConnection
+        return PolarisRadioHttpConnection(url, radioCalls)
     }
 }
 ''')
@@ -254,6 +272,7 @@ s=s.replace('    override fun newCall(request: Request): Call = synchronized(loc
         }
         normalClient.connectionPool.evictAll()''')
 s=s.replace(".socketFactory(n.socketFactory)", ".socketFactory(PolarisProtectedSocketFactory(n))")
+s=s.replace("n.getAllByName(host).toList()", "PolarisRadioNetwork.radioDns(n, host)")
 radio.write_text(s)
 (pkg/"polaris/PolarisProtectedSocketFactory.kt").write_text(r'''package com.dd3boh.outertune.polaris
 import android.net.Network
@@ -270,21 +289,94 @@ import javax.net.SocketFactory
 internal class PolarisProtectedSocketFactory(private val network: Network): SocketFactory() {
     override fun createSocket(): Socket {
         val s = Socket()
+        val mode = PolarisRadioNetwork.mode()
         try {
-            val cm = Windscribe.appContext.getSystemService(ConnectivityManager::class.java)
-            val vpn = cm.activeNetwork?.let { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true
-            if (vpn) {
-                if (!WindscribeVpnService.protectRadio(s)) throw IOException("Radio socket protection failed")
-                // protect the socket before connect, without a second explicit bind in a secure VPN.
-                android.util.Log.i("PolarisVpnRoute", "Radio media protected socket")
-            } else network.bindSocket(s)
+            // setTcpNoDelay forces the underlying socket to be created before protect.
+            s.tcpNoDelay = true
+            val vpn = PolarisRadioNetwork.vpnActive()
+            if (!vpn) {
+                network.bindSocket(s)
+            } else if (mode == "D4") {
+                // Destination exclusions are installed by the VPN builder. DNS is pinned to
+                // those explicit addresses; no per-socket protection or network binding.
+                PolarisVpnReport.note("D4 default socket / excluded destination")
+            } else {
+                val protected = if (mode == "D3") {
+                    android.os.ParcelFileDescriptor.fromSocket(s).use { pfd ->
+                        val valid = pfd.fileDescriptor.valid()
+                        val ok = valid && WindscribeVpnService.protectRadioFd(pfd.fd)
+                        PolarisVpnReport.note("D3 FD valid=" + valid + " protect=" + ok)
+                        ok
+                    }
+                } else {
+                    val valid = android.os.ParcelFileDescriptor.fromSocket(s).use { it.fileDescriptor.valid() }
+                    val ok = valid && WindscribeVpnService.protectRadio(s)
+                    PolarisVpnReport.note(mode + " FD valid=" + valid + " protect(Socket)=" + ok)
+                    ok
+                }
+                if (!protected) throw IOException("Radio socket protection failed: " + mode)
+                if (mode == "D2") {
+                    network.bindSocket(s)
+                    PolarisVpnReport.note("D2 physical bind OK network=" + network)
+                }
+            }
             return s
-        } catch (e: Exception) { s.close(); throw e }
+        } catch (e: Exception) {
+            PolarisVpnReport.note(mode + " radio socket FAIL " + e.javaClass.simpleName)
+            s.close()
+            throw e
+        }
     }
     override fun createSocket(host: String, port: Int): Socket = createSocket().apply { connect(InetSocketAddress(network.getAllByName(host).first(), port)) }
     override fun createSocket(host: InetAddress, port: Int): Socket = createSocket().apply { connect(InetSocketAddress(host, port)) }
     override fun createSocket(host: String, port: Int, local: InetAddress, localPort: Int): Socket = createSocket().apply { bind(InetSocketAddress(local, localPort)); connect(InetSocketAddress(network.getAllByName(host).first(), port)) }
     override fun createSocket(host: InetAddress, port: Int, local: InetAddress, localPort: Int): Socket = createSocket().apply { bind(InetSocketAddress(local, localPort)); connect(InetSocketAddress(host, port)) }
+}
+''')
+# Read-only HttpURLConnection compatibility adapter for the radio address/program APIs.
+# Keep the existing normal-mode implementation, route D requests through the same socket/DNS policy as media.
+(pkg/"polaris/PolarisRadioHttpConnection.kt").write_text(r'''package com.dd3boh.outertune.polaris
+
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.InputStream
+import java.io.IOException
+import okhttp3.Call
+import okhttp3.Request
+import okhttp3.Response
+import java.util.concurrent.TimeUnit
+
+internal class PolarisRadioHttpConnection(url: URL, private val factory: Call.Factory) : HttpURLConnection(url) {
+    private var response: Response? = null
+    private var call: Call? = null
+    @Synchronized
+    override fun connect() {
+        if (response != null) return
+        if (requestMethod != "GET" && requestMethod != "HEAD") throw IOException("Unsupported radio HTTP method: " + requestMethod)
+        val b = Request.Builder().url(url.toString()).method(requestMethod, null)
+        for ((name, values) in requestProperties) {
+            for (value in values) b.addHeader(name, value)
+        }
+        val requestCall = factory.newCall(b.build())
+        val timeout = listOf(connectTimeout, readTimeout).filter { it > 0 }.maxOrNull() ?: 15000
+        requestCall.timeout().timeout(timeout.toLong(), TimeUnit.MILLISECONDS)
+        call = requestCall
+        response = requestCall.execute()
+        connected = true
+    }
+    private fun result(): Response { connect(); return checkNotNull(response) }
+    override fun getResponseCode(): Int = result().code
+    override fun getResponseMessage(): String = result().message
+    override fun getInputStream(): InputStream {
+        val r = result()
+        if (!r.isSuccessful) throw IOException("Radio HTTP " + r.code)
+        return r.body?.byteStream() ?: throw IOException("Empty radio response")
+    }
+    override fun getErrorStream(): InputStream? = response?.takeUnless { it.isSuccessful }?.body?.byteStream()
+    override fun getHeaderField(name: String?): String? = if (name == null) null else result().header(name)
+    override fun getHeaderFields(): Map<String, List<String>> = result().headers.toMultimap()
+    override fun usingProxy(): Boolean = false
+    override fun disconnect() { call?.cancel(); response?.close(); response = null; connected = false }
 }
 ''')
 # Also feed the original Polaris TXT diagnostics, not just InterTune's trail.
