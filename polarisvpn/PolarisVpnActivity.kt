@@ -118,9 +118,14 @@ class PolarisVpnActivity : ComponentActivity() {
         button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
         button("VPN 진단 복사") {
-            val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this)
+            lifecycleScope.launch {
+            val coreLog = withContext(Dispatchers.IO) {
+                    runCatching { java.lang.Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "1000", "-s", "PolarisVpnCore:I")).inputStream.bufferedReader().use { it.readText() } }.getOrDefault("Core log unavailable")
+                }
+                val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this) + "\n" + coreLog
             getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("VPN diagnostic", report))
             show("VPN 진단 복사 완료")
+            }
         }
         status = label("")
         trace("SDK=" + android.os.Build.VERSION.SDK_INT + " ABI=" + android.os.Build.SUPPORTED_ABIS.joinToString())
