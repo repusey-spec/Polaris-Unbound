@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.Call
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 internal object PolarisRouteIpProbe {
     data class Factories(val radio: Call.Factory, val music: Call.Factory)
@@ -55,26 +56,38 @@ internal object PolarisRouteIpProbe {
     fun detach(radio: Call.Factory) {
         if (current.value?.radio === radio) current.value = null
     }
-    private fun read(factory: Call.Factory): Result {
-        return try {
-            val request = Request.Builder().url("https://api.ipify.org/")
-                .header("Cache-Control", "no-cache, no-store").build()
-            val call = factory.newCall(request)
-            call.timeout().timeout(10, TimeUnit.SECONDS)
-            call.execute().use { response ->
-                if (!response.isSuccessful) return Result(null, "HTTP " + response.code)
-                val value = response.body?.string()?.trim().orEmpty()
-                val parts = value.split('.')
-                if (parts.size == 4 && parts.all { p ->
-                        p.length in 1..3 && p.all { it in '0'..'9' } &&
-                            (p.toIntOrNull() ?: -1) in 0..255
-                    }) Result(value)
-                else Result(null, "Invalid IPv4 response")
+    private suspend fun read(factory: Call.Factory): Result =
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            try {
+                val request = Request.Builder().url("https://api.ipify.org/")
+                    .header("Cache-Control", "no-cache, no-store").build()
+                val call = factory.newCall(request)
+                call.timeout().timeout(10, TimeUnit.SECONDS)
+                continuation.invokeOnCancellation { call.cancel() }
+                call.enqueue(object : okhttp3.Callback {
+                    override fun onFailure(call: Call, e: java.io.IOException) {
+                        if (continuation.isActive) continuation.resume(Result(null, e.javaClass.simpleName))
+                    }
+                    override fun onResponse(call: Call, response: okhttp3.Response) {
+                        val outcome = try {
+                            response.use {
+                                if (!it.isSuccessful) Result(null, "HTTP " + it.code)
+                                else {
+                                    val value = it.body?.string()?.trim().orEmpty()
+                                    val parts = value.split('.')
+                                    if (parts.size == 4 && parts.all { p ->
+                                        p.length in 1..3 && p.all { it in '0'..'9' } && (p.toIntOrNull() ?: -1) in 0..255
+                                    }) Result(value) else Result(null, "Invalid IPv4 response")
+                                }
+                            }
+                        } catch (e: Exception) { Result(null, e.javaClass.simpleName) }
+                        if (continuation.isActive) continuation.resume(outcome)
+                    }
+                })
+            } catch (e: Exception) {
+                if (continuation.isActive) continuation.resume(Result(null, e.javaClass.simpleName))
             }
-        } catch (e: Exception) {
-            Result(null, e.javaClass.simpleName)
         }
-    }
 
     suspend fun measure(pair: Factories): Pair<Result, Result> = coroutineScope {
         val radio = async(Dispatchers.IO) { read(pair.radio) }
