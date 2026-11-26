@@ -25,6 +25,13 @@ once("    private suspend fun resumeOnLaunchIfAsked() {\n",
 """    /** Polaris 0.50: begin playing 2500 ms AFTER the AA connection signal. */
     private val polarisAaStartDelayMs = 2500L
     private var polarisAaStartupUserIntervened = false
+    private var polarisAaWatcher: androidx.lifecycle.Observer<Int>? = null
+
+    private fun polarisClearAaWatcher() {
+        val watcher = polarisAaWatcher ?: return
+        polarisAaWatcher = null
+        carType.removeObserver(watcher)
+    }
 
     /**
      * A parked phone can start MusicService before the car audio route is ready.
@@ -35,24 +42,18 @@ once("    private suspend fun resumeOnLaunchIfAsked() {\n",
             val projection = androidx.car.app.connection.CarConnection.CONNECTION_TYPE_PROJECTION
             if (carType.value == projection) return@withContext true
             kotlinx.coroutines.withTimeoutOrNull(90_000L) {
-                kotlinx.coroutines.suspendCancellableCoroutine<Unit> { gate ->
-                    val live = carType
-                    val watcher = object : androidx.lifecycle.Observer<Int> {
-                        override fun onChanged(type: Int) {
-                            if (type == projection && gate.isActive) {
-                                live.removeObserver(this)
-                                gate.resume(Unit)
-                            }
+                try {
+                    kotlinx.coroutines.suspendCancellableCoroutine<Unit> { gate ->
+                        val watcher = androidx.lifecycle.Observer<Int> { type ->
+                            if (type == projection && gate.isActive) gate.resume(Unit)
                         }
+                        polarisAaWatcher = watcher
+                        carType.observeForever(watcher)
                     }
-                    gate.invokeOnCancellation {
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            live.removeObserver(watcher)
-                        }
-                    }
-                    live.observeForever(watcher)
+                    true
+                } finally {
+                    polarisClearAaWatcher()
                 }
-                true
             } ?: false
         }
 
@@ -105,6 +106,7 @@ once(old,old+"""
         // Automatic only. Avoid speaker playback before AA's actual connection.
         if (!polarisAaStartReady()) return""","gate the auto resume of both radio and streaming")
 
+once("    override fun onDestroy() {", "    override fun onDestroy() {\n        polarisClearAaWatcher()", "clear AA observer before service teardown")
 assert s.count("if (!polarisAaStartReady()) return")==1
 assert s.count("delay(polarisAaStartDelayMs)")==1
 assert "Resume on launch: last source radio=" in s
