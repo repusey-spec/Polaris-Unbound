@@ -16,8 +16,8 @@ assert 'applicationId = "app.hush.music.polarisradio.debug"' in appgrad.read_tex
 replace(appgrad,'versionCode = 100616','versionCode = 3')
 replace(appgrad,'versionName = "6.16"','versionName = "0.03"')
 # Flip7 test: only ARM64; compress native libraries in the delivered APK.
-replace(appgrad,'    defaultConfig {','    defaultConfig {\n        ndk { abiFilters.clear(); abiFilters.add("POLARIS_ABI") }')
-appgrad.write_text(appgrad.read_text().replace('POLARIS_ABI', sys.argv[3]))
+replace(appgrad,'    defaultConfig {','    defaultConfig {\n        ndk { abiFilters.clear(); abiFilters.addAll(listOf("POLARIS_ABI")) }')
+appgrad.write_text(appgrad.read_text().replace('POLARIS_ABI', sys.argv[3].replace(",", '\\", \\"')))
 with appgrad.open("a") as f:
     f.write("\nandroid { packaging { jniLibs { useLegacyPackaging = true } } }\n")
 lib=root/"app/libs"
@@ -249,7 +249,37 @@ s=s.replace('    override fun newCall(request: Request): Call = synchronized(loc
             return@synchronized normalClient.newCall(request)
         }
         normalClient.connectionPool.evictAll()''')
+s=s.replace(".socketFactory(n.socketFactory)", ".socketFactory(PolarisProtectedSocketFactory(n))")
 radio.write_text(s)
+(pkg/"polaris/PolarisProtectedSocketFactory.kt").write_text(r'''package com.dd3boh.outertune.polaris
+import android.net.Network
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import com.windscribe.vpn.Windscribe
+import com.windscribe.vpn.backend.tunnel.WindscribeVpnService
+import java.net.Socket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.io.IOException
+import javax.net.SocketFactory
+
+internal class PolarisProtectedSocketFactory(private val network: Network): SocketFactory() {
+    override fun createSocket(): Socket {
+        val s = Socket()
+        try {
+            val cm = Windscribe.appContext.getSystemService(ConnectivityManager::class.java)
+            val vpn = cm.activeNetwork?.let { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true
+            if (vpn && !WindscribeVpnService.protectRadio(s)) throw IOException("Radio socket protection failed")
+            network.bindSocket(s)
+            return s
+        } catch (e: Exception) { s.close(); throw e }
+    }
+    override fun createSocket(host: String, port: Int): Socket = createSocket().apply { connect(InetSocketAddress(network.getAllByName(host).first(), port)) }
+    override fun createSocket(host: InetAddress, port: Int): Socket = createSocket().apply { connect(InetSocketAddress(host, port)) }
+    override fun createSocket(host: String, port: Int, local: InetAddress, localPort: Int): Socket = createSocket().apply { bind(InetSocketAddress(local, localPort)); connect(InetSocketAddress(network.getAllByName(host).first(), port)) }
+    override fun createSocket(host: InetAddress, port: Int, local: InetAddress, localPort: Int): Socket = createSocket().apply { bind(InetSocketAddress(local, localPort)); connect(InetSocketAddress(host, port)) }
+}
+''')
 # Also feed the original Polaris TXT diagnostics, not just InterTune's trail.
 s=report.read_text()
 s=s.replace('android.util.Log.i("PolarisVpnRoute", value)','PolarisErrorReport.record("VPN " + value)')
