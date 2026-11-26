@@ -1,13 +1,13 @@
-name: Polaris 6.18 - ARM64 vehicle VPN release candidate
+name: Polaris 6.19 - ARM64 vehicle VPN release candidate
 on:
   push:
-    branches: [release/polaris-6.18-vpn]
+    branches: [release/polaris-6.19-vpn]
     paths: [".github/workflows/polaris-vpn-001-integrated.yml", "polarisvpn/**"]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: polaris-618-integrated
+  group: polaris-619-integrated
   cancel-in-progress: true
 jobs:
   integrated-apk:
@@ -126,12 +126,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.18.apk
-          APK=delivery/Polaris_6.18.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.19.apk
+          APK=delivery/Polaris_6.19.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee delivery/badging.txt
-          grep -F "package: name='com.polaris.vpn' versionCode='100618' versionName='6.18'" delivery/badging.txt
-          grep -Fx "application-label:'Polaris 6.18'" delivery/badging.txt
+          grep -F "package: name='app.hush.music.polarisradio.debug' versionCode='100619' versionName='6.19'" delivery/badging.txt
+          grep -Fx "application-label:'Polaris 6.19'" delivery/badging.txt
           grep -Fx "native-code: 'arm64-v8a'" delivery/badging.txt
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/manifest.txt
@@ -142,7 +142,7 @@ jobs:
           python3 - <<'PY'
           import zipfile
           from pathlib import Path
-          with zipfile.ZipFile('delivery/Polaris_6.18.apk') as z:
+          with zipfile.ZipFile('delivery/Polaris_6.19.apk') as z:
               libs=[n for n in z.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so')]
               assert all(n.split('/')[1]=='arm64-v8a' for n in z.namelist() if n.startswith('lib/') and n.endswith('.so'))
               from collections import defaultdict
@@ -155,17 +155,18 @@ jobs:
                       f.write(f'{value/1000000:.3f} MB {key}\n')
               print(Path('delivery/size-breakdown.txt').read_text())
               print(libs)
-              print("APK size MB:", Path('delivery/Polaris_6.18.apk').stat().st_size / 1000000)
+              print("APK size MB:", Path('delivery/Polaris_6.19.apk').stat().st_size / 1000000)
               for entry in z.infolist():
                   if entry.filename.startswith('lib/') and entry.filename.endswith('.so'):
                       assert entry.compress_type != zipfile.ZIP_STORED, 'Uncompressed native library: '+entry.filename
               assert any('wg-go' in n or 'wireguard' in n.lower() for n in libs), 'Missing ARM64 WireGuard binary'
           PY
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" > delivery/signature.txt
+          grep -Fx 'Signer #1 certificate SHA-256 digest: 477721bae3a205d4e6369e76482868978b74931a0b2c4dfe85f3b07a7b40bea8' delivery/signature.txt
           sha256sum "$APK" > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-6.18-ARM64-APK
+          name: Polaris-6.19-ARM64-APK
           path: delivery/
           if-no-files-found: error
           retention-days: 14
