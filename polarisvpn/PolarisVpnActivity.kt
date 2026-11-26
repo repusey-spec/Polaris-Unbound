@@ -41,6 +41,13 @@ class PolarisVpnActivity : ComponentActivity() {
     private lateinit var connect: Button
     private lateinit var refresh: Button
     private var token: AuthToken? = null
+    private val diagnostic = java.util.ArrayDeque<String>()
+    private fun trace(message: String) {
+        val line = android.os.SystemClock.elapsedRealtime().toString() + " " + message
+        if (diagnostic.size >= 80) diagnostic.removeFirst()
+        diagnostic.addLast(line)
+        PolarisVpnReport.note(line)
+    }
     private var pendingCity: Datacenter? = null
     private var available: List<Datacenter> = emptyList()
 
@@ -110,10 +117,17 @@ class PolarisVpnActivity : ComponentActivity() {
         label("VPN 적용 대상: 스트리밍 + 선택한 앱 / 라디오 직접 통신")
         button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
+        button("VPN 진단 복사") {
+            val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this)
+            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("VPN diagnostic", report))
+            show("VPN 진단 복사 완료")
+        }
         status = label("")
+        trace("SDK=" + android.os.Build.VERSION.SDK_INT + " ABI=" + android.os.Build.SUPPORTED_ABIS.joinToString())
         show(PolarisVpnReport.snapshot(this))
         lifecycleScope.launch {
             core.vpnConnectionStateManager.state.collect {
+                trace("state=" + it.status + " " + PolarisVpnReport.snapshot(this@PolarisVpnActivity))
                 show("Windscribe: " + it.status + "\n" + PolarisVpnReport.snapshot(this@PolarisVpnActivity))
             }
         }
@@ -305,12 +319,16 @@ class PolarisVpnActivity : ComponentActivity() {
     private fun requestConnection(city: Datacenter) {
         pendingCity = city
         val permission = VpnService.prepare(this)
+        trace("VPN permission already granted=" + (permission == null))
         if (permission == null) startConnection() else startActivityForResult(permission, 732)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 732 && resultCode == Activity.RESULT_OK) startConnection()
+        if (requestCode == 732) {
+            trace("VPN permission result=" + resultCode)
+            if (resultCode == Activity.RESULT_OK) startConnection() else show("VPN 권한 승인 실패")
+        }
     }
 
     private fun startConnection() {
@@ -327,9 +345,15 @@ class PolarisVpnActivity : ComponentActivity() {
         prefs.globalUserConnectionPreference = true
         core.locationRepository.get().setSelectedCity(city.id)
         core.autoConnectionManager.reset()
+        trace("WireGuard request; city=" + city.id)
         show("WireGuard 연결 요청: " + city.nodeName)
         Windscribe.applicationScope.launch {
-            core.autoConnectionManager.connectInForeground(ConnectSource.User)
+            try {
+                core.autoConnectionManager.connectInForeground(ConnectSource.User)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                withContext(Dispatchers.Main) { trace("connect exception=" + e.javaClass.name); show("VPN 연결 오류: " + e.javaClass.simpleName) }
+            }
         }
     }
 }
