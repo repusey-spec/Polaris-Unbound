@@ -28,8 +28,8 @@ if mode=="core":
         }""")
     # Do not silently fall back to all-app routing if a selected package was removed.
     p=base/"backend/tunnel/WindscribeVpnService.kt"
-    edit(p,'''            config.disallowedApps.forEach { runCatching { builder.addDisallowedApplication(it) } }
-            config.allowedApps.forEach { runCatching { builder.addAllowedApplication(it) } }''','''            // Polaris is always present; an empty allow-list must never capture all apps.
+    edit(p,'''            builder.addAllowedApplication(packageName)
+            builder.allowBypass()''','''            // Polaris is always present; an empty allow-list must never capture all apps.
             builder.addAllowedApplication(packageName)
             preferencesHelper.installedApps.distinct().filter { it != packageName }.forEach { appId ->
                 try {
@@ -37,7 +37,8 @@ if mode=="core":
                 } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
                     logger.info("Skipping an unavailable VPN-selected app")
                 }
-            }''')
+            }
+            builder.allowBypass()''')
     p=base/"state/ConnectionPolicy.kt"
     s=p.read_text()
     start=s.index("    fun blockingApplies(input: PolicyInput): Boolean =")
