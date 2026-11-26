@@ -48,6 +48,7 @@ class PolarisVpnActivity : ComponentActivity() {
         diagnostic.addLast(line)
         PolarisVpnReport.note(line)
     }
+    private fun comparisonMode(): String = getSharedPreferences("polaris_vpn_compare", 0).getString("mode", "D") ?: "D"
     private var pendingCity: Datacenter? = null
     private var available: List<Datacenter> = emptyList()
 
@@ -114,7 +115,28 @@ class PolarisVpnActivity : ComponentActivity() {
                 show("로그아웃")
             }
         }
-        label("VPN 적용 대상: 스트리밍 + 선택한 앱 / 라디오 직접 통신")
+        label("비교 모드 (연결 끊은 뒤 변경)")
+        val modeButton = button("현재 모드: " + comparisonMode()) {}
+        modeButton.setOnClickListener {
+            if (core.vpnConnectionStateManager.state.value.status != com.windscribe.vpn.backend.VPNState.Status.Disconnected) {
+                show("VPN 연결을 먼저 끊으세요.")
+            } else {
+                val modes = arrayOf("A", "B", "C", "D")
+                val descriptions = arrayOf("A · 전체 기기 / 원본 VPN 경로", "B · 선택 앱 / 우회 금지", "C · 선택 앱 / 우회 허용", "D · C + 라디오 직접 통신")
+                android.app.AlertDialog.Builder(this).setTitle("VPN 비교 모드")
+                    .setSingleChoiceItems(descriptions, modes.indexOf(comparisonMode())) { dialog, index ->
+                        val chosen = modes[index]
+                        if (getSharedPreferences("polaris_vpn_compare", 0).edit().putString("mode", chosen).commit()) {
+                            core.preference.splitTunnelToggle = chosen != "A"
+                            modeButton.text = "현재 모드: " + chosen
+                            trace("Comparison mode=" + chosen)
+                            show("모드 " + chosen + " 저장. 다음 VPN 연결부터 적용. 라디오 재생은 정지 후 다시 시작하세요.")
+                        }
+                        dialog.dismiss()
+                    }.setNegativeButton("취소", null).show()
+            }
+        }
+        label("A~C에서는 라디오도 기본 네트워크 사용. D만 물리 네트워크 분리.")
         button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
         button("VPN 진단 복사") {
@@ -173,7 +195,7 @@ class PolarisVpnActivity : ComponentActivity() {
             !prefs.splitTunnelToggle || prefs.splitRoutingMode != PreferencesKeyConstants.INCLUSIVE_MODE
         prefs.installedApps = updated
         prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
-        prefs.splitTunnelToggle = true
+        prefs.splitTunnelToggle = comparisonMode() != "A"
         PolarisVpnReport.note("VPN external apps selected=" + (updated.size - 1))
         val active = core.vpnConnectionStateManager.state.value.status ==
             com.windscribe.vpn.backend.VPNState.Status.Connected
@@ -385,7 +407,7 @@ class PolarisVpnActivity : ComponentActivity() {
         prefs.globalUserConnectionPreference = true
         core.locationRepository.get().setSelectedCity(city.id)
         core.autoConnectionManager.reset()
-        trace("WireGuard request; city=" + city.id)
+        trace("WireGuard request; mode=" + comparisonMode() + "; city=" + city.id)
         show("WireGuard 연결 요청: " + city.nodeName)
         Windscribe.applicationScope.launch {
             try {
