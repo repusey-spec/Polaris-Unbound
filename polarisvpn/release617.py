@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""6.28 production candidate. Preserve original Polaris production application ID and its existing local data."""
+"""6.29 production candidate. Preserve original Polaris production application ID and its existing local data."""
 from pathlib import Path
 import sys, zipfile, tempfile, subprocess, re, shutil
 mode= sys.argv[1]
@@ -12,33 +12,20 @@ if mode=="core":
     base=root/"base/src/main/java/com/windscribe/vpn"
     p=base/"Windscribe.kt"
     edit(p,"        reloadAfterMigration()","""        reloadAfterMigration()
-        // 6.28: only Polaris plus explicitly chosen external apps use this VPN.
-        val polarisMode = getSharedPreferences("polaris_vpn_compare", 0).getString("mode", "D") ?: "D"
+        // 6.29: only Polaris plus explicitly chosen external apps use this VPN.
+        val polarisMode = getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") ?: "A"
         preference.installedApps = (listOf(packageName) + preference.installedApps).distinct()
         preference.splitRoutingMode = com.windscribe.vpn.apppreference.PreferencesKeyConstants.INCLUSIVE_MODE
-        preference.splitTunnelToggle = polarisMode != "A"
+        preference.splitTunnelToggle = polarisMode in listOf("C", "D")
+        if (polarisMode !in listOf("C", "D")) preference.globalUserConnectionPreference = false
         preference.autoConnect = false
         preference.autoStartOnBoot = false""")
-    # Do not silently fall back to all-app routing if a selected package was removed.
+    # Keep upstream selected-app lists and hold/replacement policies. No allowBypass.
     p=base/"backend/tunnel/WindscribeVpnService.kt"
-    edit(p,'''            builder.addAllowedApplication(packageName)
-            builder.allowBypass()''','''            val polarisMode = getSharedPreferences("polaris_vpn_compare", 0).getString("mode", "D") ?: "D"
-            logger.info("Polaris 6.28 mode=" + polarisMode + " sdk=" + android.os.Build.VERSION.SDK_INT)
-            if (polarisMode == "A") {
-                config.disallowedApps.forEach { runCatching { builder.addDisallowedApplication(it) } }
-                config.allowedApps.forEach { runCatching { builder.addAllowedApplication(it) } }
-            } else {
-            // Polaris is always present in selected-app modes.
-            builder.addAllowedApplication(packageName)
-            preferencesHelper.installedApps.distinct().filter { it != packageName }.forEach { appId ->
-                try {
-                    builder.addAllowedApplication(appId)
-                } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
-                    logger.info("Skipping an unavailable VPN-selected app")
-                }
-            }
-            // Secure VPN in all modes.
-            }''')
+    edit(p, '    override fun requestTun(config: TunConfig): ParcelFileDescriptor {', '''    override fun requestTun(config: TunConfig): ParcelFileDescriptor {
+        val polarisMode = getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A")
+        if (polarisMode !in listOf("C", "D")) throw TunEstablishException("VPN disabled in this Polaris mode")
+        logger.info("Polaris 6.29 mode=" + polarisMode + " sdk=" + android.os.Build.VERSION.SDK_INT)''')
     edit(p, '    companion object {', '''    companion object {
         @Volatile private var polarisService: WindscribeVpnService? = null
         @JvmStatic fun protectRadio(socket: java.net.Socket): Boolean =
@@ -55,9 +42,20 @@ if mode=="core":
         android.util.Log.i("PolarisVpnCore", "engine stopped: " + reason)''')
     edit(p, 'liveTun = established', '''liveTun = established
             android.util.Log.i("PolarisVpnCore", "TUN established")''')
-    # 6.28: diagnostic probes only; never change the native connection verdict.
+    # Wait for actual WireGuard readiness; preserve upstream OpenVPN readiness.
+    p=base/"backend/utils/WindVpnController.kt"
+    edit(p, 'logger.info("WireGuard key limit reached with no screen to ask on; ending the attempt.")', '''logger.info("WireGuard key limit reached with no screen to ask on; ending the attempt.")
+                        preferencesHelper.globalUserConnectionPreference = false''')
+    # Native verdict remains authoritative for VPN; app route checks are separate.
     p=base/"backend/VpnBackend.kt"
-    edit(p,'                        val testResult = wsNetWrapper.runTunnelTest(isBridgeAllowed)','''                        val diagnosticId = android.os.SystemClock.elapsedRealtime()
+    edit(p, 'withTimeout(15.seconds) {', 'withTimeout(25.seconds) {')
+    edit(p, 'Connectivity test timeout: exceeded 15 seconds', 'Connectivity test timeout: exceeded 25 seconds')
+    edit(p,'                        val testResult = wsNetWrapper.runTunnelTest(isBridgeAllowed)','''                        if (!polarisAwaitHandshake()) {
+                            vpnLogger.error("Polaris: WireGuard handshake not ready")
+                            failedConnectivityTest()
+                            return@withTimeout
+                        }
+                        val diagnosticId = android.os.SystemClock.elapsedRealtime()
                         polarisDiagnosticLog(diagnosticId, "WSNet start bridgeAllowed=$isBridgeAllowed " + polarisDiagnosticStats())
                         startPolarisDiagnostics(diagnosticId)
                         val testResult = try {
@@ -67,9 +65,10 @@ if mode=="core":
                         }
                         polarisDiagnosticLog(diagnosticId, "WSNet result success=${testResult.success} ipv4Present=${testResult.ipv4.isNotBlank()} ipv6Present=${testResult.ipv6.isNotBlank()}")''')
     edit(p,'    fun updateState(vpnState: VPNState) {','''    protected open fun polarisDiagnosticStats(): String = "wgStats=unavailable"
+    protected open suspend fun polarisAwaitHandshake(): Boolean = true
 
     private fun polarisDiagnosticLog(id: Long, msg: String) {
-        val line = "6.28 probe=$id $msg"
+        val line = "6.29 probe=$id $msg"
         android.util.Log.i("PolarisVpnDiag", line)
         vpnLogger.info(line)
     }
@@ -146,7 +145,7 @@ if mode=="core":
                             c.instanceFollowRedirects = false
                             val code = c.responseCode
                             val ip = if (code == 200) c.inputStream.bufferedReader().use { it.readLine()?.take(64).orEmpty() } else ""
-                            polarisDiagnosticLog(id, "VPN_BOUND HTTPS code=$code validIp=" + Util.validIpAddress(ip))
+                            polarisDiagnosticLog(id, "VPN_BOUND HTTPS code=$code validIp=" + Util.validIpAddress(ip) + " exit=" + (if (Util.validIpAddress(ip)) ip else "invalid"))
                         } finally {
                             c.disconnect()
                         }
@@ -166,7 +165,18 @@ if mode=="core":
 
     fun updateState(vpnState: VPNState) {''')
     p=base/"backend/wireguard/WireguardBackend.kt"
-    edit(p,'        /** Our profiles carry exactly one peer. */','''        override fun polarisDiagnosticStats(): String =
+    edit(p,'        /** Our profiles carry exactly one peer. */','''        override suspend fun polarisAwaitHandshake(): Boolean {
+            return kotlinx.coroutines.withTimeoutOrNull(8000L) {
+                while (true) {
+                    val stats = polarisDiagnosticStats()
+                    if ((stats.substringAfter("handshakeEpochMs=", "0").toLongOrNull() ?: 0L) > 0L) break
+                    kotlinx.coroutines.delay(200L)
+                }
+                true
+            } ?: false
+        }
+
+        override fun polarisDiagnosticStats(): String =
             runCatching {
                 val stats = engineBackendLazy.get().currentStatistics
                 val peer = stats?.let { value -> value.peers().firstOrNull()?.let { value.peer(it) } }
@@ -221,13 +231,13 @@ elif mode=="prune":
 elif mode=="host":
     pkg=root/"app/src/main/java/com/dd3boh/outertune"
     g=root/"app/build.gradle.kts"
-    edit(g,"versionCode = 3","versionCode = 100628")
-    edit(g,'versionName = "0.03"','versionName = "6.28"')
+    edit(g,"versionCode = 3","versionCode = 100629")
+    edit(g,'versionName = "0.03"','versionName = "6.29"')
     for p in [root/"app/src/main/AndroidManifest.xml",*list((root/"app/src").glob("*/res/values*/*.xml"))]:
         s=p.read_text()
-        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.28"))
+        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.29"))
     a=pkg/"polaris/PolarisVpnActivity.kt"
-    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.28 · Windscribe / WireGuard")
+    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.29 · Windscribe VPN")
     edit(a,"실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.","A–D 비교 진단 · 모드 변경은 VPN 연결 해제 후")
     edit(a,"        prefs.globalUserConnectionPreference = true","""        prefs.autoConnect = false
         prefs.autoStartOnBoot = false
@@ -255,8 +265,8 @@ elif mode=="host":
     manifest.write_text(ms)
     edit(a,'        prefs.splitTunnelToggle = false','''        prefs.installedApps = (listOf(packageName) + prefs.installedApps).distinct()
         prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
-        prefs.splitTunnelToggle = comparisonMode() != "A"''')
-    # 6.28: keep original 0.03 phone IP text from apply_route_ip.py.
+        prefs.splitTunnelToggle = comparisonMode() in listOf("C", "D")''')
+    # 6.29: keep original 0.03 phone IP text from apply_route_ip.py.
     # Do not change AA icons, VPN policy, or media transport.
     p=pkg/"polaris/PolarisRouteIpProbe.kt"
     s=p.read_text()
@@ -294,7 +304,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
                 while (true) {
                     val before = activeVpn(app)
                     val (r,m) = measure(f)
-                    verified.value = before && activeVpn(app) && r.ip != null && m.ip != null && r.ip != m.ip
+                    val mode = app.getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A")
+                    verified.value = before && activeVpn(app) && r.ip != null && m.ip != null &&
+                        (if (mode == "D") r.ip != m.ip else r.ip == m.ip)
                     PolarisVpnReport.note("Streaming route check: " + verified.value +
                         "; radio=" + (r.ip ?: r.failure) + "; music=" + (m.ip ?: m.failure))
                     delay(30_000)
@@ -338,6 +350,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
         android:strokeLineJoin="round" android:pathData="M2,9 L7,14 M7,9 L2,14 M15,4 L15,18 M15,18 C13,16 9,17 9,20 C9,22 15,22 15,19 M15,4 L22,8"/>
 </vector>
 ''')
-    print("6.28: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
+    print("6.29: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
 else:
     raise ValueError(mode)
