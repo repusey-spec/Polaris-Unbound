@@ -122,7 +122,8 @@ class PolarisVpnActivity : ComponentActivity() {
             val coreLog = withContext(Dispatchers.IO) {
                     runCatching { java.lang.Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "1000", "-s", "PolarisVpnCore:I")).inputStream.bufferedReader().use { it.readText() } }.getOrDefault("Core log unavailable")
                 }
-                val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this@PolarisVpnActivity) + "\n" + coreLog
+                val originalLog = withContext(Dispatchers.IO) { readWindscribeLog() }
+                val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this@PolarisVpnActivity) + "\n" + coreLog + "\n" + originalLog
             getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("VPN diagnostic", report))
             show("VPN 진단 복사 완료")
             }
@@ -185,6 +186,36 @@ class PolarisVpnActivity : ComponentActivity() {
         } else {
             show("선택 앱 저장: " + (updated.size - 1) + "개 · 다음 연결부터 적용")
         }
+    }
+
+    private fun readWindscribeLog(): String {
+        val modules = Regex("""(?i)\b(vpn|vpn_backend|auto-connect-watcher|connection-policy|tunnel-health-check|network-info-manager|device-state-manager|wsnet-wrapper|wsnet)\b""")
+        val sensitive = Regex("""(?i)password|private.?key|preshared.?key|session.?hash|auth.?token|authorization|cookie|bearer|credential|secret|username|email|https?://|wg.?config""")
+        val safe = java.util.ArrayDeque<String>()
+        fun collect(reader: java.io.BufferedReader) {
+            reader.lineSequence().forEach { line ->
+                if (modules.containsMatchIn(line) && !sensitive.containsMatchIn(line)) {
+                    if (safe.size >= 450) safe.removeFirst()
+                    safe.addLast(line.take(1500))
+                }
+            }
+        }
+        val current = java.io.File(filesDir, "applog.txt")
+        val rolled = java.io.File(filesDir, "applog.1.log.zip")
+        val errors = mutableListOf<String>()
+        if (rolled.isFile) runCatching {
+            java.util.zip.ZipInputStream(rolled.inputStream()).use { zip ->
+                if (zip.nextEntry != null) collect(zip.bufferedReader())
+            }
+        }.onFailure { errors.add("rolled: " + it.javaClass.simpleName) }
+        if (current.isFile) runCatching {
+            current.bufferedReader().use { collect(it) }
+        }.onFailure { errors.add("current: " + it.javaClass.simpleName) }
+        return "=== Windscribe original diagnostic ===\n" +
+            "applog.txt exists=" + current.isFile + " bytes=" + current.length() +
+            "; rolled=" + rolled.isFile + "; selected lines=" + safe.size +
+            "; errors=" + errors.joinToString() + "\n" +
+            safe.joinToString("\n")
     }
 
     private fun show(value: String) { status.text = value }
