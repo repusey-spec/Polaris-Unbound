@@ -107,6 +107,8 @@ class PolarisVpnActivity : ComponentActivity() {
                 show("로그아웃")
             }
         }
+        label("VPN 적용 대상: 스트리밍 + 선택한 앱 / 라디오 직접 통신")
+        button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
         status = label("")
         show(PolarisVpnReport.snapshot(this))
@@ -116,6 +118,54 @@ class PolarisVpnActivity : ComponentActivity() {
             }
         }
         if (core.userRepository.get().loggedIn()) loadCities()
+    }
+
+    /** Only explicitly selected launchable apps are added to the host's allow-list. */
+    private fun chooseVpnApps() {
+        val pm = packageManager
+        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = pm.queryIntentActivities(launchIntent, 0)
+            .map { it.activityInfo.applicationInfo }
+            .filter { it.packageName != packageName }
+            .distinctBy { it.packageName }
+            .map { it.packageName to pm.getApplicationLabel(it).toString() }
+            .sortedWith(compareBy({ it.second.lowercase() }, { it.first }))
+        val previous = core.preference.installedApps.filter { it != packageName }.toSet()
+        val selected = previous.toMutableSet()
+        val names = apps.map { it.second + "\n" + it.first }.toTypedArray()
+        val checked = BooleanArray(apps.size) { apps[it].first in selected }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("VPN 사용할 앱 선택")
+            .setMultiChoiceItems(names, checked) { _, index, enabled ->
+                val id = apps[index].first
+                if (enabled) selected.add(id) else selected.remove(id)
+            }
+            .setNegativeButton("취소", null)
+            .setNeutralButton("모두 해제") { _, _ -> applyVpnApps(emptySet()) }
+            .setPositiveButton("저장 및 적용") { _, _ -> applyVpnApps(selected) }
+            .show()
+    }
+
+    private fun applyVpnApps(selected: Set<String>) {
+        val prefs = core.preference
+        val updated = (listOf(packageName) + selected.filter { it != packageName }.sorted()).distinct()
+        val changed = prefs.installedApps.toSet() != updated.toSet() ||
+            !prefs.splitTunnelToggle || prefs.splitRoutingMode != PreferencesKeyConstants.INCLUSIVE_MODE
+        prefs.installedApps = updated
+        prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
+        prefs.splitTunnelToggle = true
+        PolarisVpnReport.note("VPN external apps selected=" + (updated.size - 1))
+        val active = core.vpnConnectionStateManager.state.value.status ==
+            com.windscribe.vpn.backend.VPNState.Status.Connected
+        if (changed && active) {
+            show("선택 앱 저장: " + (updated.size - 1) + "개 · VPN 재연결 중")
+            core.autoConnectionManager.reset()
+            Windscribe.applicationScope.launch {
+                core.autoConnectionManager.connectInForeground(ConnectSource.User)
+            }
+        } else {
+            show("선택 앱 저장: " + (updated.size - 1) + "개 · 다음 연결부터 적용")
+        }
     }
 
     private fun show(value: String) { status.text = value }
