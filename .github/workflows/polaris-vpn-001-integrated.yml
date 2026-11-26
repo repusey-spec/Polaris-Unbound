@@ -1,14 +1,14 @@
-name: Polaris 6.27 - ARM32 and ARM64 VPN comparison
+name: Polaris 6.28 - Universal secure VPN
 on:
   push:
-    branches: [release/polaris-6.27]
+    branches: [release/polaris-6.28]
     paths: [".github/workflows/polaris-vpn-001-integrated.yml", "polarisvpn/**"]
   workflow_dispatch:
 permissions:
   contents: read
   statuses: write
 concurrency:
-  group: polaris-627-integrated
+  group: polaris-628-integrated
   cancel-in-progress: true
 jobs:
   integrated-apk:
@@ -16,10 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - abi: arm64-v8a
-            arch: ARM64
-          - abi: armeabi-v7a
-            arch: ARM32
+          - abi: arm64-v8a,armeabi-v7a
+            arch: Universal
     name: integrated-apk (${{ matrix.arch }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -29,7 +27,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.27 building" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.28 building" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
@@ -142,13 +140,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.27_${{ matrix.arch }}.apk
-          APK=delivery/Polaris_6.27_${{ matrix.arch }}.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.28_${{ matrix.arch }}.apk
+          APK=delivery/Polaris_6.28_${{ matrix.arch }}.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee delivery/badging.txt
-          grep -F "package: name='app.hush.music.polarisradio.debug' versionCode='100627' versionName='6.27'" delivery/badging.txt
-          grep -Fx "application-label:'Polaris 6.27'" delivery/badging.txt
-          grep -Fx "native-code: '${{ matrix.abi }}'" delivery/badging.txt
+          grep -F "package: name='app.hush.music.polarisradio.debug' versionCode='100628' versionName='6.28'" delivery/badging.txt
+          grep -Fx "application-label:'Polaris 6.28'" delivery/badging.txt
+          grep -E "^native-code: .*arm64-v8a.*armeabi-v7a|^native-code: .*armeabi-v7a.*arm64-v8a" delivery/badging.txt
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.AutoCarService' delivery/manifest.txt
@@ -158,9 +156,9 @@ jobs:
           python3 - <<'PY'
           import zipfile
           from pathlib import Path
-          with zipfile.ZipFile('delivery/Polaris_6.27_${{ matrix.arch }}.apk') as z:
-              libs=[n for n in z.namelist() if n.startswith('lib/${{ matrix.abi }}/') and n.endswith('.so')]
-              assert all(n.split('/')[1]=='${{ matrix.abi }}' for n in z.namelist() if n.startswith('lib/') and n.endswith('.so'))
+          with zipfile.ZipFile('delivery/Polaris_6.28_${{ matrix.arch }}.apk') as z:
+              libs=[n for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')]
+              assert {n.split('/')[1] for n in libs} == {'arm64-v8a','armeabi-v7a'}
               from collections import defaultdict
               groups=defaultdict(int)
               for entry in z.infolist():
@@ -171,18 +169,18 @@ jobs:
                       f.write(f'{value/1000000:.3f} MB {key}\n')
               print(Path('delivery/size-breakdown.txt').read_text())
               print(libs)
-              print("APK size MB:", Path('delivery/Polaris_6.27_${{ matrix.arch }}.apk').stat().st_size / 1000000)
+              print("APK size MB:", Path('delivery/Polaris_6.28_${{ matrix.arch }}.apk').stat().st_size / 1000000)
               for entry in z.infolist():
                   if entry.filename.startswith('lib/') and entry.filename.endswith('.so'):
                       assert entry.compress_type != zipfile.ZIP_STORED, 'Uncompressed native library: '+entry.filename
-              assert any('wg-go' in n or 'wireguard' in n.lower() for n in libs), 'Missing WireGuard binary'
+              assert all(any(n.startswith('lib/'+abi+'/') and ('wg-go' in n or 'wireguard' in n.lower()) for n in libs) for abi in ('arm64-v8a','armeabi-v7a')), 'Missing WireGuard binary'
           PY
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" > delivery/signature.txt
           grep -Fx 'Signer #1 certificate SHA-256 digest: 477721bae3a205d4e6369e76482868978b74931a0b2c4dfe85f3b07a7b40bea8' delivery/signature.txt
           sha256sum "$APK" > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-6.27-${{ matrix.arch }}-APK
+          name: Polaris-6.28-${{ matrix.arch }}-APK
           path: delivery/
           if-no-files-found: error
           retention-days: 14
@@ -196,4 +194,4 @@ jobs:
         run: |
           state=failure
           if [ "$BUILD_RESULT" = success ]; then state=success; fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.27 $BUILD_RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.28 $BUILD_RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
