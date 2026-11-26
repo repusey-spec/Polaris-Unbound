@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""6.17 production candidate. Preserve the tested 0.03 application ID and account."""
+"""6.18 production candidate. Preserve the tested 0.03 application ID and account."""
 from pathlib import Path
 import sys, zipfile, tempfile, subprocess, re, shutil
 mode= sys.argv[1]
@@ -60,13 +60,13 @@ elif mode=="prune":
 elif mode=="host":
     pkg=root/"app/src/main/java/com/dd3boh/outertune"
     g=root/"app/build.gradle.kts"
-    edit(g,"versionCode = 3","versionCode = 100617")
-    edit(g,'versionName = "0.03"','versionName = "6.17"')
+    edit(g,"versionCode = 3","versionCode = 100618")
+    edit(g,'versionName = "0.03"','versionName = "6.18"')
     for p in [root/"app/src/main/AndroidManifest.xml",*list((root/"app/src").glob("*/res/values*/*.xml"))]:
         s=p.read_text()
-        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.17"))
+        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.18"))
     a=pkg/"polaris/PolarisVpnActivity.kt"
-    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.17 · Windscribe / WireGuard")
+    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.18 · Windscribe / WireGuard")
     edit(a,"실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.","최초 연결 후 자동 재연결 · 라디오는 직접 통신")
     edit(a,"        prefs.globalUserConnectionPreference = true","""        prefs.autoConnect = true
         prefs.autoStartOnBoot = true
@@ -81,19 +81,8 @@ elif mode=="host":
                 core.preference.autoStartOnBoot = false
                 core.vpnController.turnOff()
                 core.userRepository.get().logout()""")
-    p=pkg/"polaris/PolarisShell.kt"
-    s=p.read_text()
-    start=s.index("    val factories by PolarisRouteIpProbe.factories.collectAsState()")
-    end=s.index("\n    }",s.index("                    Text(if(value)radioIp else musicIp",start))+6
-    s=s[:start]+'''    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=12.dp,vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-        listOf(true to "Radio",false to "Streaming").forEach{(value,label)->
-            Button(modifier=Modifier.weight(1f),onClick={onSelect(value)},colors=ButtonDefaults.buttonColors(
-                containerColor=if(radio==value)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor=if(radio==value)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )){Text(label)}
-        }
-    }'''+s[end:]
-    p.write_text(s)
+    # 6.18: keep original 0.03 phone IP text from apply_route_ip.py.
+    # Do not change AA icons, VPN policy, or media transport.
     p=pkg/"polaris/PolarisRouteIpProbe.kt"
     s=p.read_text()
     s=s.replace("import kotlinx.coroutines.Dispatchers",'''import android.net.ConnectivityManager
@@ -174,6 +163,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
         android:strokeLineJoin="round" android:pathData="M2,9 L7,14 M7,9 L2,14 M15,4 L15,18 M15,18 C13,16 9,17 9,20 C9,22 15,22 15,19 M15,4 L22,8"/>
 </vector>
 ''')
-    print("6.17: same package, session retained, auto-connect/boot, route indicator and phone UI restored")
+    print("6.18: same package, session retained, auto-connect/boot, route indicator and phone UI restored")
 else:
     raise ValueError(mode)
