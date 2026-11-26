@@ -129,6 +129,26 @@ class PolarisVpnActivity : AppCompatActivity() {
             }
         }
         label("자동 실행 설정")
+        val proxySwitch = CheckBox(this).apply {
+            text = "VPN 대신 기존 음악 프록시 사용"
+            isChecked = routePrefs.getBoolean("proxy_only", false)
+            body.addView(this)
+        }
+        proxySwitch.setOnCheckedChangeListener { _, checked ->
+            if (core.vpnConnectionStateManager.state.value.status != com.windscribe.vpn.backend.VPNState.Status.Disconnected) {
+                proxySwitch.setOnCheckedChangeListener(null)
+                proxySwitch.isChecked = !checked
+                show("VPN을 먼저 해제하고 화면을 다시 여세요.")
+            } else {
+                routePrefs.edit().putBoolean("proxy_only", checked).commit()
+                if (checked) {
+                    core.preference.autoStartOnBoot = false
+                    core.preference.autoConnect = false
+                    core.preference.globalUserConnectionPreference = false
+                }
+                com.dd3boh.outertune.utils.ProxyAtStart.restart(this)
+            }
+        }
         fun check(title: String, value: Boolean, change: (Boolean) -> Unit) {
             body.addView(CheckBox(this).apply { text = title; isChecked = value
                 setOnCheckedChangeListener { _, checked -> change(checked) }
@@ -142,12 +162,13 @@ class PolarisVpnActivity : AppCompatActivity() {
             }
         }
         check("부팅 후 VPN 자동 연결", core.preference.autoStartOnBoot) {
+            if (it && routePrefs.getBoolean("proxy_only", false)) { show("음악 프록시 사용을 먼저 해제하세요."); return@check }
             core.preference.autoStartOnBoot = it
             if (it && VpnService.prepare(this) != null) show("먼저 VPN을 수동으로 한 번 연결해 권한을 승인하세요.")
         }
         check("연결 끊김 시 자동 재연결", routePrefs.getBoolean("reconnect", false)) {
             routePrefs.edit().putBoolean("reconnect", it).apply()
-            core.preference.autoConnect = it && core.preference.globalUserConnectionPreference
+            core.preference.autoConnect = it && core.preference.globalUserConnectionPreference && !routePrefs.getBoolean("proxy_only", false)
         }
         label("앱 화면 자동 실행은 Android 제한 시 알림을 표시합니다. VPN 자동 연결은 별도 작동합니다.")
         button("VPN 적용 앱 선택") { chooseVpnApps() }
@@ -478,6 +499,7 @@ class PolarisVpnActivity : AppCompatActivity() {
     }
 
     private fun requestConnection(city: Datacenter) {
+        if (routePrefs.getBoolean("proxy_only", false)) { show("음악 프록시 사용을 해제한 후 VPN에 연결하세요."); return }
         if (core.vpnConnectionStateManager.state.value.status == com.windscribe.vpn.backend.VPNState.Status.Connecting) {
             show("VPN 연결 진행 중입니다.")
             return
