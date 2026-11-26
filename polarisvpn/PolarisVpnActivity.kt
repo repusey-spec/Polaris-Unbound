@@ -6,7 +6,7 @@ import android.net.VpnService
 import android.os.Bundle
 import android.text.InputType
 import android.widget.*
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.windscribe.vpn.Windscribe
 import com.windscribe.vpn.api.IApiCallManager
@@ -26,7 +26,7 @@ import javax.inject.Inject
 
 /** Phone-only settings page; the car browser and both playback paths stay in the host. */
 @AndroidEntryPoint
-class PolarisVpnActivity : ComponentActivity() {
+class PolarisVpnActivity : AppCompatActivity() {
     @Inject lateinit var api: IApiCallManager
     private val core: Windscribe get() = application as Windscribe
     private lateinit var name: EditText
@@ -48,7 +48,11 @@ class PolarisVpnActivity : ComponentActivity() {
         diagnostic.addLast(line)
         PolarisVpnReport.note(line)
     }
-    private fun comparisonMode(): String = getSharedPreferences("polaris_vpn_compare", 0).getString("mode", "D") ?: "D"
+    private fun comparisonMode(): String = getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") ?: "A"
+    private val protocolNames = arrayOf("WireGuard 443", "OpenVPN UDP 443", "OpenVPN TCP 443")
+    private val protocolValues = arrayOf(PreferencesKeyConstants.PROTO_WIRE_GUARD, PreferencesKeyConstants.PROTO_UDP, PreferencesKeyConstants.PROTO_TCP)
+    private lateinit var protocolPicker: Spinner
+    private fun selectedProtocol(): String = protocolValues.getOrElse(protocolPicker.selectedItemPosition) { protocolValues[0] }
     private var pendingCity: Datacenter? = null
     private var available: List<Datacenter> = emptyList()
 
@@ -96,7 +100,12 @@ class PolarisVpnActivity : ComponentActivity() {
         refresh = button("서버 목록 새로고침") { loadCities() }
         cities = Spinner(this)
         body.addView(cities)
-        connect = button("선택 서버 WireGuard 연결") {
+        label("VPN 프로토콜 · 포트 443")
+        protocolPicker = Spinner(this)
+        protocolPicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolNames.toList())
+        protocolPicker.setSelection(protocolValues.indexOf(core.preference.savedProtocol).coerceAtLeast(0))
+        body.addView(protocolPicker)
+        connect = button("선택 서버 VPN 연결") {
             available.getOrNull(cities.selectedItemPosition)?.let { requestConnection(it) }
                 ?: show("서버 목록에서 연결할 서버를 선택하세요.")
         }
@@ -122,21 +131,26 @@ class PolarisVpnActivity : ComponentActivity() {
                 show("VPN 연결을 먼저 끊으세요.")
             } else {
                 val modes = arrayOf("A", "B", "C", "D")
-                val descriptions = arrayOf("A · 전체 기기 / 원본 VPN 경로", "B · 선택 앱 / 우회 금지", "C · 선택 앱 / 우회 허용", "D · C + 라디오 직접 통신")
+                val descriptions = arrayOf("A · 일반망 / 프록시 OFF", "B · 일반망 / InterTune 프록시", "C · 선택 앱 VPN / 라디오도 VPN", "D · 선택 앱 VPN / 라디오 직접 (실험)")
                 android.app.AlertDialog.Builder(this).setTitle("VPN 비교 모드")
                     .setSingleChoiceItems(descriptions, modes.indexOf(comparisonMode())) { dialog, index ->
                         val chosen = modes[index]
-                        if (getSharedPreferences("polaris_vpn_compare", 0).edit().putString("mode", chosen).commit()) {
-                            core.preference.splitTunnelToggle = chosen != "A"
+                        if (getSharedPreferences("polaris_vpn_629", 0).edit().putString("mode", chosen).commit()) {
+                            core.preference.splitTunnelToggle = chosen in listOf("C", "D")
+                            core.preference.globalUserConnectionPreference = false
                             modeButton.text = "현재 모드: " + chosen
                             trace("Comparison mode=" + chosen)
-                            show("모드 " + chosen + " 저장. 다음 VPN 연결부터 적용. 라디오 재생은 정지 후 다시 시작하세요.")
+                            android.app.AlertDialog.Builder(this@PolarisVpnActivity)
+                                .setTitle("통신 모드 변경").setMessage("앱을 재시작하여 프록시와 통신 클라이언트를 새로 초기화합니다. B 모드는 기존 음악 설정에서 프록시 주소를 지정하세요.")
+                                .setCancelable(false).setPositiveButton("재시작") { _, _ ->
+                                    com.dd3boh.outertune.utils.ProxyAtStart.restart(this@PolarisVpnActivity)
+                                }.show()
                         }
                         dialog.dismiss()
                     }.setNegativeButton("취소", null).show()
             }
         }
-        label("A~C에서는 라디오도 기본 네트워크 사용. D만 물리 네트워크 분리.")
+        label("A/B: VPN 연결 금지. B: 음악 설정의 프록시 사용. C: 선택 앱 VPN. D: 라디오 직접 통신 실험.")
         button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
         button("VPN 진단 복사") {
@@ -195,7 +209,7 @@ class PolarisVpnActivity : ComponentActivity() {
             !prefs.splitTunnelToggle || prefs.splitRoutingMode != PreferencesKeyConstants.INCLUSIVE_MODE
         prefs.installedApps = updated
         prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
-        prefs.splitTunnelToggle = comparisonMode() != "A"
+        prefs.splitTunnelToggle = comparisonMode() in listOf("C", "D")
         PolarisVpnReport.note("VPN external apps selected=" + (updated.size - 1))
         val active = core.vpnConnectionStateManager.state.value.status ==
             com.windscribe.vpn.backend.VPNState.Status.Connected
@@ -375,6 +389,7 @@ class PolarisVpnActivity : ComponentActivity() {
     }
 
     private fun requestConnection(city: Datacenter) {
+        if (comparisonMode() !in listOf("C", "D")) { show("C 또는 D 모드로 변경 후 재시작하세요."); return }
         if (core.vpnConnectionStateManager.state.value.status == com.windscribe.vpn.backend.VPNState.Status.Connecting) {
             show("VPN 연결 진행 중입니다.")
             return
@@ -402,13 +417,18 @@ class PolarisVpnActivity : ComponentActivity() {
         prefs.isConnectingToStaticIp = false
         prefs.isConnectingToConfigured = false
         prefs.connectionMode = PreferencesKeyConstants.CONNECTION_MODE_MANUAL
-        prefs.savedProtocol = PreferencesKeyConstants.PROTO_WIRE_GUARD
-        prefs.selectedProtocol = PreferencesKeyConstants.PROTO_WIRE_GUARD
+        val protocol = selectedProtocol()
+        prefs.savedProtocol = protocol
+        prefs.selectedProtocol = protocol
+        prefs.selectedPort = "443"
+        prefs.wireGuardPort = "443"
+        prefs.savedUDPPort = "443"
+        prefs.savedTCPPort = "443"
         prefs.globalUserConnectionPreference = true
         core.locationRepository.get().setSelectedCity(city.id)
         core.autoConnectionManager.reset()
-        trace("WireGuard request; mode=" + comparisonMode() + "; city=" + city.id)
-        show("WireGuard 연결 요청: " + city.nodeName)
+        trace("VPN request; protocol=" + protocol + "/443; mode=" + comparisonMode() + "; city=" + city.id)
+        show(protocol + "/443 연결 요청: " + city.nodeName)
         Windscribe.applicationScope.launch {
             try {
                 core.autoConnectionManager.connectInForeground(ConnectSource.User)
