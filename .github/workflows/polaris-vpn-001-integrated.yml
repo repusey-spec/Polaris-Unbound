@@ -1,13 +1,13 @@
-name: Polaris 6.17 - ARM64 vehicle VPN release candidate
+name: Polaris 6.18 - ARM64 vehicle VPN release candidate
 on:
   push:
-    branches: [release/polaris-6.17-vpn]
+    branches: [release/polaris-6.18-vpn]
     paths: [".github/workflows/polaris-vpn-001-integrated.yml", "polarisvpn/**"]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: polaris-617-integrated
+  group: polaris-618-integrated
   cancel-in-progress: true
 jobs:
   integrated-apk:
@@ -126,12 +126,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.17.apk
-          APK=delivery/Polaris_6.17.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.18.apk
+          APK=delivery/Polaris_6.18.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee delivery/badging.txt
-          grep -F "package: name='com.polaris.vpn' versionCode='100617' versionName='6.17'" delivery/badging.txt
-          grep -Fx "application-label:'Polaris 6.17'" delivery/badging.txt
+          grep -F "package: name='com.polaris.vpn' versionCode='100618' versionName='6.18'" delivery/badging.txt
+          grep -Fx "application-label:'Polaris 6.18'" delivery/badging.txt
           grep -Fx "native-code: 'arm64-v8a'" delivery/badging.txt
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/manifest.txt
@@ -142,7 +142,7 @@ jobs:
           python3 - <<'PY'
           import zipfile
           from pathlib import Path
-          with zipfile.ZipFile('delivery/Polaris_6.17.apk') as z:
+          with zipfile.ZipFile('delivery/Polaris_6.18.apk') as z:
               libs=[n for n in z.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so')]
               assert all(n.split('/')[1]=='arm64-v8a' for n in z.namelist() if n.startswith('lib/') and n.endswith('.so'))
               from collections import defaultdict
@@ -155,7 +155,7 @@ jobs:
                       f.write(f'{value/1000000:.3f} MB {key}\n')
               print(Path('delivery/size-breakdown.txt').read_text())
               print(libs)
-              print("APK size MB:", Path('delivery/Polaris_6.17.apk').stat().st_size / 1000000)
+              print("APK size MB:", Path('delivery/Polaris_6.18.apk').stat().st_size / 1000000)
               for entry in z.infolist():
                   if entry.filename.startswith('lib/') and entry.filename.endswith('.so'):
                       assert entry.compress_type != zipfile.ZIP_STORED, 'Uncompressed native library: '+entry.filename
@@ -165,7 +165,7 @@ jobs:
           sha256sum "$APK" > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-6.17-ARM64-APK
+          name: Polaris-6.18-ARM64-APK
           path: delivery/
           if-no-files-found: error
           retention-days: 14
