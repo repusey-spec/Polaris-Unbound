@@ -48,11 +48,9 @@ class PolarisVpnActivity : AppCompatActivity() {
         diagnostic.addLast(line)
         PolarisVpnReport.note(line)
     }
-    private fun comparisonMode(): String = getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") ?: "A"
-    private val protocolNames = arrayOf("WireGuard 443", "OpenVPN UDP 443", "OpenVPN TCP 443")
-    private val protocolValues = arrayOf(PreferencesKeyConstants.PROTO_WIRE_GUARD, PreferencesKeyConstants.PROTO_UDP, PreferencesKeyConstants.PROTO_TCP)
-    private lateinit var protocolPicker: Spinner
-    private fun selectedProtocol(): String = protocolValues.getOrElse(protocolPicker.selectedItemPosition) { protocolValues[0] }
+    private fun comparisonMode(): String = getSharedPreferences("polaris_vpn_630", 0).getString("mode", "A") ?: "A"
+    private fun vpnMode(): Boolean = comparisonMode() == "C" || comparisonMode().startsWith("D")
+    private val routePrefs get() = getSharedPreferences("polaris_vpn_630", 0)
     private var pendingCity: Datacenter? = null
     private var available: List<Datacenter> = emptyList()
 
@@ -100,11 +98,7 @@ class PolarisVpnActivity : AppCompatActivity() {
         refresh = button("서버 목록 새로고침") { loadCities() }
         cities = Spinner(this)
         body.addView(cities)
-        label("VPN 프로토콜 · 포트 443")
-        protocolPicker = Spinner(this)
-        protocolPicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, protocolNames.toList())
-        protocolPicker.setSelection(protocolValues.indexOf(core.preference.savedProtocol).coerceAtLeast(0))
-        body.addView(protocolPicker)
+        label("VPN 프로토콜: WireGuard 443")
         connect = button("선택 서버 VPN 연결") {
             available.getOrNull(cities.selectedItemPosition)?.let { requestConnection(it) }
                 ?: show("서버 목록에서 연결할 서버를 선택하세요.")
@@ -130,13 +124,18 @@ class PolarisVpnActivity : AppCompatActivity() {
             if (core.vpnConnectionStateManager.state.value.status != com.windscribe.vpn.backend.VPNState.Status.Disconnected) {
                 show("VPN 연결을 먼저 끊으세요.")
             } else {
-                val modes = arrayOf("A", "B", "C", "D")
-                val descriptions = arrayOf("A · 일반망 / 프록시 OFF", "B · 일반망 / InterTune 프록시", "C · 선택 앱 VPN / 라디오도 VPN", "D · 선택 앱 VPN / 라디오 직접 (실험)")
+                val modes = arrayOf("A", "B", "C", "D1", "D2", "D3", "D4")
+                val descriptions = arrayOf("A · 일반망 / 프록시 OFF", "B · 일반망 / InterTune 프록시", "C · 선택 앱 VPN / 라디오도 VPN", "D1 · FD 초기화 + protect(Socket)", "D2 · FD 초기화 + protect + 물리망 bind", "D3 · FD 복제 + protect(fd)", "D4 · 목적지 IPv4 제외 (Android 13+)")
                 android.app.AlertDialog.Builder(this).setTitle("VPN 비교 모드")
                     .setSingleChoiceItems(descriptions, modes.indexOf(comparisonMode())) { dialog, index ->
                         val chosen = modes[index]
-                        if (getSharedPreferences("polaris_vpn_629", 0).edit().putString("mode", chosen).commit()) {
-                            core.preference.splitTunnelToggle = chosen in listOf("C", "D")
+                        if (chosen == "D4" && android.os.Build.VERSION.SDK_INT < 33) {
+                            dialog.dismiss()
+                            show("D4는 Android 13 이상에서 지원합니다.")
+                            return@setSingleChoiceItems
+                        }
+                        if (getSharedPreferences("polaris_vpn_630", 0).edit().putString("mode", chosen).commit()) {
+                            core.preference.splitTunnelToggle = chosen == "C" || chosen.startsWith("D")
                             core.preference.globalUserConnectionPreference = false
                             modeButton.text = "현재 모드: " + chosen
                             trace("Comparison mode=" + chosen)
@@ -150,7 +149,26 @@ class PolarisVpnActivity : AppCompatActivity() {
                     }.setNegativeButton("취소", null).show()
             }
         }
-        label("A/B: VPN 연결 금지. B: 음악 설정의 프록시 사용. C: 선택 앱 VPN. D: 라디오 직접 통신 실험.")
+        label("A/B: VPN 연결 금지. C: VPN. D1–D4: 라디오 우회 비교. D4는 지정 목적지만 제외합니다.")
+        button("D4 제외할 라디오 호스트 설정") {
+            val field = EditText(this).apply {
+                hint = "radio.example.com, stream.example.com"
+                setText(routePrefs.getString("d4_hosts", ""))
+            }
+            android.app.AlertDialog.Builder(this)
+                .setTitle("D4 목적지 제외 · 실험용")
+                .setMessage("지정된 호스트의 IPv4 전체가 VPN 밖으로 나갈 수 있습니다. 공유 CDN은 피하세요. IP 확인용 checkip.amazonaws.com은 자동 포함됩니다. 연결 해제 상태에서 설정하세요.")
+                .setView(field).setNegativeButton("취소", null)
+                .setPositiveButton("저장") { _, _ ->
+                    if (core.vpnConnectionStateManager.state.value.status != com.windscribe.vpn.backend.VPNState.Status.Disconnected) {
+                        show("VPN 연결을 먼저 끊으세요.")
+                    } else {
+                        val hosts = field.text.toString().split(Regex("[,\\s]+")).filter { it.matches(Regex("[A-Za-z0-9.-]{1,253}")) }.distinct().take(24)
+                        routePrefs.edit().putString("d4_hosts", hosts.joinToString(",")).commit()
+                        show("D4 호스트 저장: " + hosts.size)
+                    }
+                }.show()
+        }
         button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
         button("VPN 진단 복사") {
@@ -209,7 +227,7 @@ class PolarisVpnActivity : AppCompatActivity() {
             !prefs.splitTunnelToggle || prefs.splitRoutingMode != PreferencesKeyConstants.INCLUSIVE_MODE
         prefs.installedApps = updated
         prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
-        prefs.splitTunnelToggle = comparisonMode() in listOf("C", "D")
+        prefs.splitTunnelToggle = vpnMode()
         PolarisVpnReport.note("VPN external apps selected=" + (updated.size - 1))
         val active = core.vpnConnectionStateManager.state.value.status ==
             com.windscribe.vpn.backend.VPNState.Status.Connected
@@ -389,7 +407,7 @@ class PolarisVpnActivity : AppCompatActivity() {
     }
 
     private fun requestConnection(city: Datacenter) {
-        if (comparisonMode() !in listOf("C", "D")) { show("C 또는 D 모드로 변경 후 재시작하세요."); return }
+        if (!vpnMode()) { show("C 또는 D 모드로 변경 후 재시작하세요."); return }
         if (core.vpnConnectionStateManager.state.value.status == com.windscribe.vpn.backend.VPNState.Status.Connecting) {
             show("VPN 연결 진행 중입니다.")
             return
@@ -417,14 +435,39 @@ class PolarisVpnActivity : AppCompatActivity() {
         prefs.isConnectingToStaticIp = false
         prefs.isConnectingToConfigured = false
         prefs.connectionMode = PreferencesKeyConstants.CONNECTION_MODE_MANUAL
-        val protocol = selectedProtocol()
+        val protocol = PreferencesKeyConstants.PROTO_WIRE_GUARD
         prefs.savedProtocol = protocol
         prefs.selectedProtocol = protocol
         prefs.selectedPort = "443"
         prefs.wireGuardPort = "443"
-        prefs.savedUDPPort = "443"
-        prefs.savedTCPPort = "443"
         prefs.globalUserConnectionPreference = true
+        if (comparisonMode() == "D4") {
+            busy(true)
+            lifecycleScope.launch {
+                try {
+                    val mapping = withContext(Dispatchers.IO) {
+                        val n = PolarisRadioNetwork.physical(this@PolarisVpnActivity)
+                        val hosts = (listOf("checkip.amazonaws.com") + routePrefs.getString("d4_hosts", "").orEmpty().split(",").filter { it.isNotBlank() }).distinct()
+                        hosts.associateWith { host ->
+                            n.getAllByName(host).filterIsInstance<java.net.Inet4Address>().map { it.hostAddress.orEmpty() }.distinct().also {
+                                if (it.isEmpty()) throw java.io.IOException("No IPv4 for " + host)
+                            }
+                        }
+                    }
+                    val json = org.json.JSONObject()
+                    mapping.forEach { (host, ips) -> json.put(host.lowercase(), org.json.JSONArray(ips)) }
+                    routePrefs.edit().putString("d4_map", json.toString()).commit()
+                    trace("D4 excluded hosts=" + mapping.size + " IPv4=" + mapping.values.flatten().distinct().size)
+                    connectCity(city, protocol)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    show("D4 목적지 조회 실패: " + e.javaClass.simpleName)
+                } finally { busy(false) }
+            }
+        } else connectCity(city, protocol)
+    }
+
+    private fun connectCity(city: Datacenter, protocol: String) {
         core.locationRepository.get().setSelectedCity(city.id)
         core.autoConnectionManager.reset()
         trace("VPN request; protocol=" + protocol + "/443; mode=" + comparisonMode() + "; city=" + city.id)
