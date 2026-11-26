@@ -48,9 +48,13 @@ class PolarisVpnActivity : AppCompatActivity() {
         diagnostic.addLast(line)
         PolarisVpnReport.note(line)
     }
-    private fun comparisonMode(): String = getSharedPreferences("polaris_vpn_630", 0).getString("mode", "A") ?: "A"
-    private fun vpnMode(): Boolean = comparisonMode() == "C" || comparisonMode().startsWith("D")
-    private val routePrefs get() = getSharedPreferences("polaris_vpn_630", 0)
+    private fun vpnMode(): Boolean = true
+    private val routePrefs get() = getSharedPreferences("polaris_vpn_631", 0)
+    private lateinit var account: TextView
+    private lateinit var quota: ProgressBar
+    private lateinit var accountRefresh: Button
+    private lateinit var logout: Button
+    private var loadedAccount = false
     private var pendingCity: Datacenter? = null
     private var available: List<Datacenter> = emptyList()
 
@@ -78,6 +82,9 @@ class PolarisVpnActivity : AppCompatActivity() {
         }
         label("Polaris VPN 0.03 · Windscribe / WireGuard")
         label("실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.")
+        account = label("계정 확인 중")
+        quota = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000; body.addView(this) }
+        accountRefresh = button("계정 데이터 새로고침") { refreshAccountData() }
         name = edit("Windscribe 계정")
         password = edit("비밀번호", true)
         otp = edit("2단계 인증 코드 (사용 시)", true)
@@ -106,7 +113,7 @@ class PolarisVpnActivity : AppCompatActivity() {
         button("VPN 연결 끊기") {
             lifecycleScope.launch { core.vpnController.turnOff(); show("VPN 연결 해제 요청") }
         }
-        button("계정 로그아웃") {
+        logout = button("계정 로그아웃") {
             lifecycleScope.launch {
                 core.vpnController.turnOff()
                 core.userRepository.get().logout()
@@ -115,60 +122,34 @@ class PolarisVpnActivity : AppCompatActivity() {
                 password.text.clear()
                 otp.text.clear()
                 token = null
+                name.text.clear()
+                loadedAccount = false
+                updateAccount(null)
                 show("로그아웃")
             }
         }
-        label("비교 모드 (연결 끊은 뒤 변경)")
-        val modeButton = button("현재 모드: " + comparisonMode()) {}
-        modeButton.setOnClickListener {
-            if (core.vpnConnectionStateManager.state.value.status != com.windscribe.vpn.backend.VPNState.Status.Disconnected) {
-                show("VPN 연결을 먼저 끊으세요.")
-            } else {
-                val modes = arrayOf("A", "B", "C", "D1", "D2", "D3", "D4")
-                val descriptions = arrayOf("A · 일반망 / 프록시 OFF", "B · 일반망 / InterTune 프록시", "C · 선택 앱 VPN / 라디오도 VPN", "D1 · FD 초기화 + protect(Socket)", "D2 · FD 초기화 + protect + 물리망 bind", "D3 · FD 복제 + protect(fd)", "D4 · 목적지 IPv4 제외 (Android 13+)")
-                android.app.AlertDialog.Builder(this).setTitle("VPN 비교 모드")
-                    .setSingleChoiceItems(descriptions, modes.indexOf(comparisonMode())) { dialog, index ->
-                        val chosen = modes[index]
-                        if (chosen == "D4" && android.os.Build.VERSION.SDK_INT < 33) {
-                            dialog.dismiss()
-                            show("D4는 Android 13 이상에서 지원합니다.")
-                            return@setSingleChoiceItems
-                        }
-                        if (getSharedPreferences("polaris_vpn_630", 0).edit().putString("mode", chosen).commit()) {
-                            core.preference.splitTunnelToggle = chosen == "C" || chosen.startsWith("D")
-                            core.preference.globalUserConnectionPreference = false
-                            modeButton.text = "현재 모드: " + chosen
-                            trace("Comparison mode=" + chosen)
-                            android.app.AlertDialog.Builder(this@PolarisVpnActivity)
-                                .setTitle("통신 모드 변경").setMessage("앱을 재시작하여 프록시와 통신 클라이언트를 새로 초기화합니다. B 모드는 기존 음악 설정에서 프록시 주소를 지정하세요.")
-                                .setCancelable(false).setPositiveButton("재시작") { _, _ ->
-                                    com.dd3boh.outertune.utils.ProxyAtStart.restart(this@PolarisVpnActivity)
-                                }.show()
-                        }
-                        dialog.dismiss()
-                    }.setNegativeButton("취소", null).show()
+        label("자동 실행 설정")
+        fun check(title: String, value: Boolean, change: (Boolean) -> Unit) {
+            body.addView(CheckBox(this).apply { text = title; isChecked = value
+                setOnCheckedChangeListener { _, checked -> change(checked) }
+            })
+        }
+        check("부팅 후 폴라리스 자동 실행", routePrefs.getBoolean("app_boot", false)) {
+            routePrefs.edit().putBoolean("app_boot", it).apply()
+            if (it && android.os.Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 733)
             }
         }
-        label("A/B: VPN 연결 금지. C: VPN. D1–D4: 라디오 우회 비교. D4는 지정 목적지만 제외합니다.")
-        button("D4 제외할 라디오 호스트 설정") {
-            val field = EditText(this).apply {
-                hint = "radio.example.com, stream.example.com"
-                setText(routePrefs.getString("d4_hosts", ""))
-            }
-            android.app.AlertDialog.Builder(this)
-                .setTitle("D4 목적지 제외 · 실험용")
-                .setMessage("지정된 호스트의 IPv4 전체가 VPN 밖으로 나갈 수 있습니다. 공유 CDN은 피하세요. IP 확인용 checkip.amazonaws.com은 자동 포함됩니다. 연결 해제 상태에서 설정하세요.")
-                .setView(field).setNegativeButton("취소", null)
-                .setPositiveButton("저장") { _, _ ->
-                    if (core.vpnConnectionStateManager.state.value.status != com.windscribe.vpn.backend.VPNState.Status.Disconnected) {
-                        show("VPN 연결을 먼저 끊으세요.")
-                    } else {
-                        val hosts = field.text.toString().split(Regex("[,\\s]+")).filter { it.matches(Regex("[A-Za-z0-9.-]{1,253}")) }.distinct().take(24)
-                        routePrefs.edit().putString("d4_hosts", hosts.joinToString(",")).commit()
-                        show("D4 호스트 저장: " + hosts.size)
-                    }
-                }.show()
+        check("부팅 후 VPN 자동 연결", core.preference.autoStartOnBoot) {
+            core.preference.autoStartOnBoot = it
+            if (it && VpnService.prepare(this) != null) show("먼저 VPN을 수동으로 한 번 연결해 권한을 승인하세요.")
         }
+        check("연결 끊김 시 자동 재연결", routePrefs.getBoolean("reconnect", false)) {
+            routePrefs.edit().putBoolean("reconnect", it).apply()
+            core.preference.autoConnect = it && core.preference.globalUserConnectionPreference
+        }
+        label("앱 화면 자동 실행은 Android 제한 시 알림을 표시합니다. VPN 자동 연결은 별도 작동합니다.")
         button("VPN 적용 앱 선택") { chooseVpnApps() }
         button("통신 상태 확인") { show(PolarisVpnReport.snapshot(this)) }
         button("VPN 진단 복사") {
@@ -191,33 +172,121 @@ class PolarisVpnActivity : AppCompatActivity() {
                 show("Windscribe: " + it.status + "\n" + PolarisVpnReport.snapshot(this@PolarisVpnActivity))
             }
         }
-        if (core.userRepository.get().loggedIn()) loadCities()
+        updateAccount(core.userRepository.get().user.value)
+        lifecycleScope.launch {
+            core.userRepository.get().user.collect { user ->
+                val signedIn = user != null && !core.preference.sessionHash.isNullOrBlank()
+                updateAccount(if (signedIn) user else null)
+                if (signedIn && !loadedAccount) { loadedAccount = true; loadCities(); refreshAccountData() }
+            }
+        }
+    }
+
+    private fun updateAccount(user: com.windscribe.vpn.model.User?) {
+        val signedIn = user != null && !core.preference.sessionHash.isNullOrBlank()
+        val visible = android.view.View.VISIBLE
+        val gone = android.view.View.GONE
+        listOf(name, password, otp, login).forEach { it.visibility = if (signedIn) gone else visible }
+        if (signedIn) {
+            clearChallenge()
+            password.text.clear(); otp.text.clear(); name.text.clear()
+        }
+        accountRefresh.visibility = if (signedIn) visible else gone
+        logout.visibility = if (signedIn) visible else gone
+        quota.visibility = if (signedIn && user != null && user.maxData > 0) visible else gone
+        if (signedIn && user != null) {
+            fun gb(n: Long) = String.format(java.util.Locale.US, "%.2f GB", n / 1_000_000_000.0)
+            val unlimited = user.maxData < 0
+            account.text = user.userName + " · " + (if (user.isPro) "Pro" else "무료") +
+                "\n잔여 데이터: " + (if (unlimited) "무제한" else gb(user.dataLeft) + " / " + gb(user.maxData)) +
+                "\n다음 초기화: " + (user.nextResetDate() ?: "해당 없음 / 미확인")
+            quota.progress = if (user.maxData > 0) (user.dataLeft.toDouble() / user.maxData * 1000).toInt().coerceIn(0,1000) else 0
+        } else account.text = "Windscribe 로그인 필요"
+    }
+
+    private fun refreshAccountData() {
+        if (core.preference.sessionHash.isNullOrBlank()) return
+        lifecycleScope.launch {
+            accountRefresh.isEnabled = false
+            try {
+                val res = withContext(Dispatchers.IO) {
+                    result<com.windscribe.vpn.api.response.UserSessionResponse> {
+                        api.getSessionGeneric(null, backup = core.preference.getBackupParameter())
+                    }
+                }
+                when (res) {
+                    is CallResult.Success -> {
+                        core.userRepository.get().reloadNow(res.data)
+                        updateAccount(core.userRepository.get().user.value)
+                    }
+                    is CallResult.Error -> show("계정 데이터 갱신 실패: " + res.code)
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                show("계정 데이터 갱신 실패: " + e.javaClass.simpleName)
+            } finally { accountRefresh.isEnabled = true }
+        }
     }
 
     /** Only explicitly selected launchable apps are added to the host's allow-list. */
     private fun chooseVpnApps() {
         val pm = packageManager
         val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val collator = java.text.Collator.getInstance(java.util.Locale.getDefault())
         val apps = pm.queryIntentActivities(launchIntent, 0)
             .map { it.activityInfo.applicationInfo }
             .filter { it.packageName != packageName }
             .distinctBy { it.packageName }
-            .map { it.packageName to pm.getApplicationLabel(it).toString() }
-            .sortedWith(compareBy({ it.second.lowercase() }, { it.first }))
-        val previous = core.preference.installedApps.filter { it != packageName }.toSet()
-        val selected = previous.toMutableSet()
-        val names = apps.map { it.second + "\n" + it.first }.toTypedArray()
-        val checked = BooleanArray(apps.size) { apps[it].first in selected }
-        android.app.AlertDialog.Builder(this)
-            .setTitle("VPN 사용할 앱 선택")
-            .setMultiChoiceItems(names, checked) { _, index, enabled ->
-                val id = apps[index].first
-                if (enabled) selected.add(id) else selected.remove(id)
+            .sortedWith(Comparator { a, b ->
+                val order = collator.compare(pm.getApplicationLabel(a).toString(), pm.getApplicationLabel(b).toString())
+                if (order != 0) order else a.packageName.compareTo(b.packageName)
+            })
+        val selected = core.preference.installedApps.filter { it != packageName }.toMutableSet()
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16, 0, 16, 0) }
+        val search = EditText(this).apply { hint = "앱 이름 검색"; setSingleLine(true); body.addView(this) }
+        val only = CheckBox(this).apply { text = "선택된 앱만 보기"; body.addView(this) }
+        val list = ListView(this)
+        body.addView(list, LinearLayout.LayoutParams(-1, (350 * resources.displayMetrics.density).toInt()))
+        fun render() {
+            val q = search.text.toString().trim()
+            val shown = apps.filter { (!only.isChecked || it.packageName in selected) && pm.getApplicationLabel(it).toString().contains(q, true) }
+            list.adapter = object : BaseAdapter() {
+                override fun getCount() = shown.size
+                override fun getItem(position: Int) = shown[position]
+                override fun getItemId(position: Int) = position.toLong()
+                override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup?): android.view.View {
+                    val app = getItem(position)
+                    val row = LinearLayout(this@PolarisVpnActivity).apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(8,4,8,4) }
+                    val size = (32 * resources.displayMetrics.density).toInt()
+                    row.addView(ImageView(this@PolarisVpnActivity).apply { setImageDrawable(pm.getApplicationIcon(app)) }, LinearLayout.LayoutParams(size,size))
+                    row.addView(CheckBox(this@PolarisVpnActivity).apply {
+                        text = pm.getApplicationLabel(app); isChecked = app.packageName in selected
+                        maxLines = 1
+                        setOnCheckedChangeListener { _, checked ->
+                            if (checked) selected.add(app.packageName) else selected.remove(app.packageName)
+                            if (only.isChecked) render()
+                        }
+                    }, LinearLayout.LayoutParams(0,-2,1f))
+                    return row
+                }
             }
-            .setNegativeButton("취소", null)
-            .setNeutralButton("모두 해제") { _, _ -> applyVpnApps(emptySet()) }
-            .setPositiveButton("저장 및 적용") { _, _ -> applyVpnApps(selected) }
-            .show()
+        }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { render() }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        only.setOnCheckedChangeListener { _, _ -> render() }
+        render()
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("VPN 사용할 앱 선택")
+            .setView(body).setNegativeButton("취소", null)
+            .setNeutralButton("모두 해제", null)
+            .setPositiveButton("저장 및 적용") { _, _ -> applyVpnApps(selected) }.create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { selected.clear(); render() }
+        }
+        dialog.show()
     }
 
     private fun applyVpnApps(selected: Set<String>) {
@@ -398,6 +467,8 @@ class PolarisVpnActivity : AppCompatActivity() {
                 available = data.map { it.first }
                 cities.adapter = ArrayAdapter(this@PolarisVpnActivity, android.R.layout.simple_spinner_dropdown_item,
                     data.map { it.second })
+                val last = routePrefs.getString("last_city", null)
+                available.indexOfFirst { it.id.toString() == last }.takeIf { it >= 0 }?.let { cities.setSelection(it) }
                 show("사용 가능 서버: " + available.size)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -407,7 +478,6 @@ class PolarisVpnActivity : AppCompatActivity() {
     }
 
     private fun requestConnection(city: Datacenter) {
-        if (!vpnMode()) { show("C 또는 D 모드로 변경 후 재시작하세요."); return }
         if (core.vpnConnectionStateManager.state.value.status == com.windscribe.vpn.backend.VPNState.Status.Connecting) {
             show("VPN 연결 진행 중입니다.")
             return
@@ -441,33 +511,11 @@ class PolarisVpnActivity : AppCompatActivity() {
         prefs.selectedPort = "443"
         prefs.wireGuardPort = "443"
         prefs.globalUserConnectionPreference = true
-        if (comparisonMode() == "D4") {
-            busy(true)
-            lifecycleScope.launch {
-                try {
-                    val mapping = withContext(Dispatchers.IO) {
-                        val n = PolarisRadioNetwork.physical(this@PolarisVpnActivity)
-                        val hosts = (listOf("checkip.amazonaws.com") + routePrefs.getString("d4_hosts", "").orEmpty().split(",").filter { it.isNotBlank() }).distinct()
-                        hosts.associateWith { host ->
-                            n.getAllByName(host).filterIsInstance<java.net.Inet4Address>().map { it.hostAddress.orEmpty() }.distinct().also {
-                                if (it.isEmpty()) throw java.io.IOException("No IPv4 for " + host)
-                            }
-                        }
-                    }
-                    val json = org.json.JSONObject()
-                    mapping.forEach { (host, ips) -> json.put(host.lowercase(), org.json.JSONArray(ips)) }
-                    routePrefs.edit().putString("d4_map", json.toString()).commit()
-                    trace("D4 excluded hosts=" + mapping.size + " IPv4=" + mapping.values.flatten().distinct().size)
-                    connectCity(city, protocol)
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    show("D4 목적지 조회 실패: " + e.javaClass.simpleName)
-                } finally { busy(false) }
-            }
-        } else connectCity(city, protocol)
+        connectCity(city, protocol)
     }
 
     private fun connectCity(city: Datacenter, protocol: String) {
+        routePrefs.edit().putString("last_city", city.id.toString()).apply()
         core.locationRepository.get().setSelectedCity(city.id)
         core.autoConnectionManager.reset()
         trace("VPN request; protocol=" + protocol + "/443; mode=" + comparisonMode() + "; city=" + city.id)
