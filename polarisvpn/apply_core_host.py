@@ -16,7 +16,8 @@ assert 'applicationId = "app.hush.music.polarisradio.debug"' in appgrad.read_tex
 replace(appgrad,'versionCode = 100616','versionCode = 3')
 replace(appgrad,'versionName = "6.16"','versionName = "0.03"')
 # Flip7 test: only ARM64; compress native libraries in the delivered APK.
-replace(appgrad,'    defaultConfig {','    defaultConfig {\n        ndk { abiFilters.clear(); abiFilters.add("arm64-v8a") }')
+replace(appgrad,'    defaultConfig {','    defaultConfig {\n        ndk { abiFilters.clear(); abiFilters.add("POLARIS_ABI") }')
+appgrad.write_text(appgrad.read_text().replace('POLARIS_ABI', sys.argv[3]))
 with appgrad.open("a") as f:
     f.write("\nandroid { packaging { jniLibs { useLegacyPackaging = true } } }\n")
 lib=root/"app/libs"
@@ -139,7 +140,7 @@ internal object PolarisVpnReport {
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val dns = active?.let { cm.getLinkProperties(it) }?.dnsServers?.size ?: 0
         return "Default VPN=" + (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) +
-            ", DNS servers=" + dns + ", music=default network, radio media=physical network"
+            ", DNS servers=" + dns + ", mode=" + context.getSharedPreferences("polaris_vpn_compare", 0).getString("mode", "D") + ", music=default network, radio=" + (if (PolarisRadioNetwork.directEnabled()) "physical" else "default")
     }
     fun observe(app: Windscribe) {
         Windscribe.applicationScope.launch {
@@ -183,6 +184,10 @@ import java.net.Proxy
 import java.net.URL
 
 object PolarisRadioNetwork {
+    @JvmStatic
+    fun directEnabled(): Boolean = Windscribe.appContext.getSharedPreferences("polaris_vpn_compare", 0)
+        .getString("mode", "D") == "D"
+
     private fun caps(cm: ConnectivityManager, n: Network): NetworkCapabilities? =
         cm.getNetworkCapabilities(n)?.takeIf {
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
@@ -209,6 +214,7 @@ object PolarisRadioNetwork {
     @JvmStatic
     @Throws(IOException::class)
     fun openConnection(url: URL): HttpURLConnection {
+        if (!directEnabled()) return url.openConnection(Proxy.NO_PROXY) as HttpURLConnection
         val context=Windscribe.appContext
         val n=physical(context)
         val cm=context.getSystemService(ConnectivityManager::class.java)
@@ -226,6 +232,23 @@ s=re.sub(r'    private fun physical\(n: Network\).*?(?=    override fun newCall)
 ''',s,flags=re.S)
 assert "PolarisRadioNetwork.physical" in s
 s=s.replace("import okhttp3.Call","import com.windscribe.vpn.Windscribe\nimport okhttp3.Call")
+s=s.replace('    override fun newCall(request: Request): Call = synchronized(lock) {',
+    '''    private val normalClient = OkHttpClient.Builder()
+        .proxy(Proxy.NO_PROXY)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+
+    override fun newCall(request: Request): Call = synchronized(lock) {
+        if (!PolarisRadioNetwork.directEnabled()) {
+            client?.connectionPool?.evictAll()
+            client = null
+            selected = null
+            return@synchronized normalClient.newCall(request)
+        }
+        normalClient.connectionPool.evictAll()''')
 radio.write_text(s)
 # Also feed the original Polaris TXT diagnostics, not just InterTune's trail.
 s=report.read_text()
