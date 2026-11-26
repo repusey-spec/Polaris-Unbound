@@ -71,8 +71,12 @@ replace(app,'        super.onCreate()','''        com.windscribe.vpn.Windscribe.
         applicationInterface = this
         super.onCreate()
         com.dd3boh.outertune.polaris.PolarisVpnReport.observe(this)''')
-# Disable the legacy global proxy when the experimental VPN is in use.
-replace(app,'if (dataStore[ProxyEnabledKey] == true) {','if (false && dataStore[ProxyEnabledKey] == true) {')
+# Preserve the original proxy initializer in Proxy mode only; record effective settings.
+replace(app,'ProxyAtStart.setting = ProxyAtStart.of(dataStore[ProxyEnabledKey], dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])','''val polarisProxyMode = getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") == "B"
+        ProxyAtStart.setting = ProxyAtStart.of(polarisProxyMode && dataStore[ProxyEnabledKey] == true, dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])
+        android.util.Log.i("PolarisVpnRoute", "Proxy configured=" + (dataStore[ProxyEnabledKey] == true) + " modeAllows=" + polarisProxyMode)''')
+replace(app,'if (dataStore[ProxyEnabledKey] == true) {','if (polarisProxyMode && dataStore[ProxyEnabledKey] == true) {')
+replace(app,'ProxySelector.setDefault(AppProxySelector(proxy))','ProxySelector.setDefault(AppProxySelector(proxy))\n                android.util.Log.i("PolarisVpnRoute", "InterTune proxy applied=true")')
 manifest=root/"app/src/main/AndroidManifest.xml"
 s=manifest.read_text()
 # The test profile contains VPN login secrets; do not allow Android backup.
@@ -83,7 +87,7 @@ s=s.replace('android:supportsRtl="true"','android:supportsRtl="true" tools:repla
 assert '        <activity\n' in s
 s=s.replace('        <activity\n','''        <activity android:name=".polaris.PolarisVpnActivity"
             android:exported="false" android:label="Polaris VPN"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
         <provider android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false" tools:node="merge">
@@ -140,7 +144,7 @@ internal object PolarisVpnReport {
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val dns = active?.let { cm.getLinkProperties(it) }?.dnsServers?.size ?: 0
         return "Default VPN=" + (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) +
-            ", DNS servers=" + dns + ", mode=" + context.getSharedPreferences("polaris_vpn_compare", 0).getString("mode", "D") + ", music=default network, radio=" + (if (PolarisRadioNetwork.directEnabled()) "physical" else "default")
+            ", DNS servers=" + dns + ", mode=" + context.getSharedPreferences("polaris_vpn_629", 0).getString("mode", "A") + ", music=default network, radio=" + (if (PolarisRadioNetwork.directEnabled()) "physical" else "default")
     }
     fun observe(app: Windscribe) {
         Windscribe.applicationScope.launch {
@@ -185,8 +189,8 @@ import java.net.URL
 
 object PolarisRadioNetwork {
     @JvmStatic
-    fun directEnabled(): Boolean = Windscribe.appContext.getSharedPreferences("polaris_vpn_compare", 0)
-        .getString("mode", "D") == "D"
+    fun directEnabled(): Boolean = Windscribe.appContext.getSharedPreferences("polaris_vpn_629", 0)
+        .getString("mode", "A") == "D"
 
     private fun caps(cm: ConnectivityManager, n: Network): NetworkCapabilities? =
         cm.getNetworkCapabilities(n)?.takeIf {
@@ -269,8 +273,11 @@ internal class PolarisProtectedSocketFactory(private val network: Network): Sock
         try {
             val cm = Windscribe.appContext.getSystemService(ConnectivityManager::class.java)
             val vpn = cm.activeNetwork?.let { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true
-            if (vpn && !WindscribeVpnService.protectRadio(s)) throw IOException("Radio socket protection failed")
-            network.bindSocket(s)
+            if (vpn) {
+                if (!WindscribeVpnService.protectRadio(s)) throw IOException("Radio socket protection failed")
+                // protect the socket before connect, without a second explicit bind in a secure VPN.
+                android.util.Log.i("PolarisVpnRoute", "Radio media protected socket")
+            } else network.bindSocket(s)
             return s
         } catch (e: Exception) { s.close(); throw e }
     }
