@@ -122,7 +122,7 @@ class PolarisVpnActivity : ComponentActivity() {
             val coreLog = withContext(Dispatchers.IO) {
                     runCatching { java.lang.Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "1000", "-s", "PolarisVpnCore:I")).inputStream.bufferedReader().use { it.readText() } }.getOrDefault("Core log unavailable")
                 }
-                val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this) + "\n" + coreLog
+                val report = diagnostic.joinToString("\n") + "\n" + PolarisVpnReport.snapshot(this@PolarisVpnActivity) + "\n" + coreLog
             getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("VPN diagnostic", report))
             show("VPN 진단 복사 완료")
             }
