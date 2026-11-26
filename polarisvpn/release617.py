@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""6.23 production candidate. Preserve original Polaris production application ID and its existing local data."""
+"""6.24 production candidate. Preserve original Polaris production application ID and its existing local data."""
 from pathlib import Path
 import sys, zipfile, tempfile, subprocess, re, shutil
 mode= sys.argv[1]
@@ -12,7 +12,7 @@ if mode=="core":
     base=root/"base/src/main/java/com/windscribe/vpn"
     p=base/"Windscribe.kt"
     edit(p,"        reloadAfterMigration()","""        reloadAfterMigration()
-        // 6.23: only Polaris plus explicitly chosen external apps use this VPN.
+        // 6.24: only Polaris plus explicitly chosen external apps use this VPN.
         if (!preference.splitTunnelToggle ||
             preference.splitRoutingMode != com.windscribe.vpn.apppreference.PreferencesKeyConstants.INCLUSIVE_MODE) {
             preference.installedApps = listOf(packageName)
@@ -21,11 +21,8 @@ if mode=="core":
         }
         preference.splitRoutingMode = com.windscribe.vpn.apppreference.PreferencesKeyConstants.INCLUSIVE_MODE
         preference.splitTunnelToggle = true
-        // Migrate the tested installation's last explicit connection choice.
-        if (preference.sessionHash != null && preference.globalUserConnectionPreference) {
-            preference.autoConnect = true
-            preference.autoStartOnBoot = true
-        }""")
+        preference.autoConnect = false
+        preference.autoStartOnBoot = false""")
     # Do not silently fall back to all-app routing if a selected package was removed.
     p=base/"backend/tunnel/WindscribeVpnService.kt"
     edit(p,'''            builder.addAllowedApplication(packageName)
@@ -49,17 +46,7 @@ if mode=="core":
         android.util.Log.i("PolarisVpnCore", "engine stopped: " + reason)''')
     edit(p, 'liveTun = established', '''liveTun = established
             android.util.Log.i("PolarisVpnCore", "TUN established")''')
-    p=base/"state/ConnectionPolicy.kt"
-    s=p.read_text()
-    start=s.index("    fun blockingApplies(input: PolicyInput): Boolean =")
-    end=s.index("    /**",start)
-    s=s[:start]+"""    // Polaris radio must remain on the physical network even during recovery.
-    // Android system lockdown remains a separate user setting and must be off.
-    fun blockingApplies(input: PolicyInput): Boolean = false
-
-"""+s[end:]
-    s=s.replace("input.isAutoSecureOn ?: !input.canReadNetworkName","input.isAutoSecureOn ?: true")
-    p.write_text(s)
+    # Keep upstream ConnectionPolicy unchanged.
 elif mode=="prune":
     aar=root/"windscribe-core/build/outputs/aar/windscribe-core.aar"
     # Only known non-WireGuard protocol native binaries; preserve shared WSNet.
@@ -92,16 +79,16 @@ elif mode=="prune":
 elif mode=="host":
     pkg=root/"app/src/main/java/com/dd3boh/outertune"
     g=root/"app/build.gradle.kts"
-    edit(g,"versionCode = 3","versionCode = 100623")
-    edit(g,'versionName = "0.03"','versionName = "6.23"')
+    edit(g,"versionCode = 3","versionCode = 100624")
+    edit(g,'versionName = "0.03"','versionName = "6.24"')
     for p in [root/"app/src/main/AndroidManifest.xml",*list((root/"app/src").glob("*/res/values*/*.xml"))]:
         s=p.read_text()
-        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.23"))
+        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.24"))
     a=pkg/"polaris/PolarisVpnActivity.kt"
-    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.23 · Windscribe / WireGuard")
-    edit(a,"실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.","최초 연결 후 자동 재연결 · 라디오는 직접 통신")
-    edit(a,"        prefs.globalUserConnectionPreference = true","""        prefs.autoConnect = true
-        prefs.autoStartOnBoot = true
+    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.24 · Windscribe / WireGuard")
+    edit(a,"실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.","수동 연결 검증 · 라디오는 직접 통신")
+    edit(a,"        prefs.globalUserConnectionPreference = true","""        prefs.autoConnect = false
+        prefs.autoStartOnBoot = false
         prefs.globalUserConnectionPreference = true""")
     edit(a,'lifecycleScope.launch { core.vpnController.turnOff(); show("VPN 연결 해제 요청") }','''lifecycleScope.launch {
                 core.preference.autoConnect = false
@@ -127,7 +114,7 @@ elif mode=="host":
     edit(a,'        prefs.splitTunnelToggle = false','''        prefs.installedApps = (listOf(packageName) + prefs.installedApps).distinct()
         prefs.splitRoutingMode = PreferencesKeyConstants.INCLUSIVE_MODE
         prefs.splitTunnelToggle = true''')
-    # 6.23: keep original 0.03 phone IP text from apply_route_ip.py.
+    # 6.24: keep original 0.03 phone IP text from apply_route_ip.py.
     # Do not change AA icons, VPN policy, or media transport.
     p=pkg/"polaris/PolarisRouteIpProbe.kt"
     s=p.read_text()
@@ -209,6 +196,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
         android:strokeLineJoin="round" android:pathData="M2,9 L7,14 M7,9 L2,14 M15,4 L15,18 M15,18 C13,16 9,17 9,20 C9,22 15,22 15,19 M15,4 L22,8"/>
 </vector>
 ''')
-    print("6.23: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
+    print("6.24: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
 else:
     raise ValueError(mode)
