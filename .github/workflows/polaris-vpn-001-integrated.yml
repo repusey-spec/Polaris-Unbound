@@ -1,14 +1,14 @@
-name: Polaris 6.30 - Universal WireGuard bypass comparison
+name: Polaris 6.31 - Universal production D1
 on:
   push:
-    branches: [release/polaris-6.30]
+    branches: [release/polaris-6.31]
     paths: [".github/workflows/polaris-vpn-001-integrated.yml", "polarisvpn/**"]
   workflow_dispatch:
 permissions:
   contents: read
   statuses: write
 concurrency:
-  group: polaris-630-integrated
+  group: polaris-631-integrated
   cancel-in-progress: true
 jobs:
   integrated-apk:
@@ -27,7 +27,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.30 building" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.31 building" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
@@ -134,12 +134,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p delivery
-          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.30_${{ matrix.arch }}.apk
-          APK=delivery/Polaris_6.30_${{ matrix.arch }}.apk
+          cp "$RUNNER_TEMP/intertune/app/build/outputs/apk/core/release/"*.apk delivery/Polaris_6.31_${{ matrix.arch }}.apk
+          APK=delivery/Polaris_6.31_${{ matrix.arch }}.apk
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee delivery/badging.txt
-          grep -F "package: name='app.hush.music.polarisradio.debug' versionCode='100630' versionName='6.30'" delivery/badging.txt
-          grep -Fx "application-label:'Polaris 6.30'" delivery/badging.txt
+          grep -F "package: name='app.hush.music.polarisradio.debug' versionCode='100631' versionName='6.31'" delivery/badging.txt
+          grep -Fx "application-label:'Polaris 6.31'" delivery/badging.txt
           grep -E "^native-code: .*arm64-v8a.*armeabi-v7a|^native-code: .*armeabi-v7a.*arm64-v8a" delivery/badging.txt
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml > delivery/manifest.txt
           grep -F 'com.dd3boh.outertune.playback.MusicService' delivery/manifest.txt
@@ -150,7 +150,7 @@ jobs:
           python3 - <<'PY'
           import zipfile
           from pathlib import Path
-          with zipfile.ZipFile('delivery/Polaris_6.30_${{ matrix.arch }}.apk') as z:
+          with zipfile.ZipFile('delivery/Polaris_6.31_${{ matrix.arch }}.apk') as z:
               libs=[n for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')]
               assert {n.split('/')[1] for n in libs} == {'arm64-v8a','armeabi-v7a'}
               from collections import defaultdict
@@ -163,7 +163,7 @@ jobs:
                       f.write(f'{value/1000000:.3f} MB {key}\n')
               print(Path('delivery/size-breakdown.txt').read_text())
               print(libs)
-              print("APK size MB:", Path('delivery/Polaris_6.30_${{ matrix.arch }}.apk').stat().st_size / 1000000)
+              print("APK size MB:", Path('delivery/Polaris_6.31_${{ matrix.arch }}.apk').stat().st_size / 1000000)
               for entry in z.infolist():
                   if entry.filename.startswith('lib/') and entry.filename.endswith('.so'):
                       assert entry.compress_type != zipfile.ZIP_STORED, 'Uncompressed native library: '+entry.filename
@@ -174,7 +174,7 @@ jobs:
           sha256sum "$APK" > delivery/SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Polaris-6.30-${{ matrix.arch }}-APK
+          name: Polaris-6.31-${{ matrix.arch }}-APK
           path: delivery/
           if-no-files-found: error
           retention-days: 14
@@ -188,4 +188,4 @@ jobs:
         run: |
           state=failure
           if [ "$BUILD_RESULT" = success ]; then state=success; fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.30 $BUILD_RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context=polaris/build-${{ matrix.arch }} -f description="Polaris 6.31 $BUILD_RESULT" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
