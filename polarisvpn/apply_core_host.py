@@ -279,9 +279,9 @@ s=re.sub(r'    private fun physical\(n: Network\).*?(?=    override fun newCall)
 ''',s,flags=re.S)
 assert "PolarisRadioNetwork.physical" in s
 s=s.replace("import okhttp3.Call","import com.windscribe.vpn.Windscribe\nimport okhttp3.Call")
-s=s.replace("    private var selected: Network? = null", "    private var selected: Network? = null\\n    private var selectedVpn: Boolean? = null")
+s=s.replace("    private var selected: Network? = null", "    private var selected: Network? = null\n    private var selectedVpn: Boolean? = null")
 s=s.replace("if (selected != n || client == null)", "if (selected != n || client == null || selectedVpn != PolarisRadioNetwork.vpnActive())")
-s=s.replace("            selected = n", "            selected = n\\n            selectedVpn = PolarisRadioNetwork.vpnActive()")
+s=s.replace("            selected = n", "            selected = n\n            selectedVpn = PolarisRadioNetwork.vpnActive()")
 s=s.replace(".socketFactory(n.socketFactory)", ".socketFactory(PolarisProtectedSocketFactory(n))")
 radio.write_text(s)
 (pkg/"polaris/PolarisProtectedSocketFactory.kt").write_text(r'''package com.dd3boh.outertune.polaris
