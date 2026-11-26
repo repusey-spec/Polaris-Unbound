@@ -16,9 +16,10 @@ if mode=="core":
         preference.installedApps = (listOf(packageName) + preference.installedApps).distinct()
         preference.splitRoutingMode = com.windscribe.vpn.apppreference.PreferencesKeyConstants.INCLUSIVE_MODE
         preference.splitTunnelToggle = true
-        preference.autoConnect = getSharedPreferences("polaris_vpn_631", 0).getBoolean("reconnect", false) && preference.globalUserConnectionPreference
+        preference.autoConnect = getSharedPreferences("polaris_vpn_631", 0).getBoolean("reconnect", false) && preference.globalUserConnectionPreference && !getSharedPreferences("polaris_vpn_631", 0).getBoolean("proxy_only", false)
         preference.savedProtocol = com.windscribe.vpn.apppreference.PreferencesKeyConstants.PROTO_WIRE_GUARD
         preference.wireGuardPort = "443"
+        if (getSharedPreferences("polaris_vpn_631", 0).getBoolean("proxy_only", false)) { preference.autoStartOnBoot = false; preference.globalUserConnectionPreference = false }
 """)
     # Keep upstream selected-app lists and hold/replacement policies. No allowBypass.
     p=base/"backend/tunnel/WindscribeVpnService.kt"
@@ -209,13 +210,14 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
                     while (true) { delay(30_000); ticks.value += 1 }
                 }
                 while (true) {
+                    val started = android.os.SystemClock.elapsedRealtime()
                     val before = activeVpn(app)
                     val (r,m) = measure(f ?: return@collectLatest)
                     verified.value = before && activeVpn(app) && r.ip != null && m.ip != null && r.ip != m.ip
                     PolarisVpnReport.note("Streaming route check: " + verified.value +
                         "; radio=" + (r.ip ?: r.failure) + "; music=" + (m.ip ?: m.failure))
                     ticks.value += 1
-                    delay(30_000)
+                    delay((30_000L - (android.os.SystemClock.elapsedRealtime() - started)).coerceAtLeast(0L))
                 }
             }
         }
@@ -254,7 +256,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
     <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
         android:strokeWidth="1.8" android:strokeLineCap="round"
         android:strokeLineJoin="round" android:pathData="M8,17 L8,5 L19,2 L19,14 M8,17 C6,15 2,16 2,19 C2,22 8,21 8,18 M19,14 C17,12 13,13 13,16 C13,19 19,18 19,15"/>
-    <path android:fillColor="#00000000" android:strokeColor="#00000000" android:strokeWidth="3.8" android:pathData="M3,3 L21,21 M21,3 L3,21"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FF17191E" android:strokeWidth="3.8" android:pathData="M3,3 L21,21 M21,3 L3,21"/>
     <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.8" android:strokeLineCap="round" android:pathData="M3,3 L21,21 M21,3 L3,21"/>
 </vector>
 ''')
