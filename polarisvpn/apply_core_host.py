@@ -72,7 +72,7 @@ replace(app,'        super.onCreate()','''        com.windscribe.vpn.Windscribe.
         super.onCreate()
         com.dd3boh.outertune.polaris.PolarisVpnReport.observe(this)''')
 # Preserve the original proxy initializer in Proxy mode only; record effective settings.
-replace(app,'ProxyAtStart.setting = ProxyAtStart.of(dataStore[ProxyEnabledKey], dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])','''val polarisProxyMode = getSharedPreferences("polaris_vpn_630", 0).getString("mode", "A") == "B"
+replace(app,'ProxyAtStart.setting = ProxyAtStart.of(dataStore[ProxyEnabledKey], dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])','''val polarisProxyMode = getSharedPreferences("polaris_vpn_631", 0).getBoolean("proxy_only", false)
         ProxyAtStart.setting = ProxyAtStart.of(polarisProxyMode && dataStore[ProxyEnabledKey] == true, dataStore[ProxyTypeKey], dataStore[ProxyUrlKey])
         android.util.Log.i("PolarisVpnRoute", "Proxy configured=" + (dataStore[ProxyEnabledKey] == true) + " modeAllows=" + polarisProxyMode)''')
 replace(app,'if (dataStore[ProxyEnabledKey] == true) {','if (polarisProxyMode && dataStore[ProxyEnabledKey] == true) {')
@@ -100,7 +100,48 @@ s=s.replace('android:label="@string/app_name"','android:label="Polaris VPN 0.03"
 # Force the launcher activity label too, independently of resource overrides.
 s,n=re.subn(r'(<activity\b[^>]*android:name="\.MainActivity")',r'\1 android:label="Polaris VPN 0.03"',s,count=1)
 assert n==1, "Launcher activity missing"
+# App-screen boot is separate from the upstream VPN BootWorker.
+s=s.replace('<application','<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application',1) if 'android.permission.RECEIVE_BOOT_COMPLETED' not in s else s
+s=s.replace('<application','<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application',1) if 'android.permission.POST_NOTIFICATIONS' not in s else s
+s=s.replace('        <activity android:name=".polaris.PolarisVpnActivity"', '''        <receiver android:name=".polaris.PolarisBootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+        <activity android:name=".polaris.PolarisVpnActivity"''',1)
 manifest.write_text(s)
+(pkg/"polaris/PolarisBootReceiver.kt").write_text(r'''package com.dd3boh.outertune.polaris
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import com.windscribe.vpn.Windscribe
+
+class PolarisBootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (!context.getSharedPreferences("polaris_vpn_631", 0).getBoolean("app_boot", false)) return
+        val launch = (context.applicationContext as Windscribe).applicationInterface.homeIntent
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // Android 10+ may silently reject background activity launches; use a regular
+        // notification as fallback rather than a full-screen or overlay workaround.
+        runCatching { context.startActivity(launch) }
+        if (Build.VERSION.SDK_INT >= 29) runCatching {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel("polaris_boot", "Polaris 자동 실행", NotificationManager.IMPORTANCE_LOW))
+            val pending = PendingIntent.getActivity(context, 631, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            manager.notify(631, Notification.Builder(context, "polaris_boot")
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentTitle("Polaris")
+                .setContentText("탭하여 폴라리스 실행")
+                .setContentIntent(pending).setAutoCancel(true).build())
+        }
+    }
+}
+''')
 # Preserve the existing UI, add one settings entry.
 settings=pkg/"ui/screens/settings/SettingsScreen.kt"
 s=settings.read_text()
@@ -144,7 +185,7 @@ internal object PolarisVpnReport {
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val dns = active?.let { cm.getLinkProperties(it) }?.dnsServers?.size ?: 0
         return "Default VPN=" + (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) +
-            ", DNS servers=" + dns + ", mode=" + context.getSharedPreferences("polaris_vpn_630", 0).getString("mode", "A") + ", music=default network, radio=" + (if (PolarisRadioNetwork.directEnabled()) "physical" else "default")
+            ", DNS servers=" + dns + ", music=default network, radio=protected physical"
     }
     fun observe(app: Windscribe) {
         Windscribe.applicationScope.launch {
@@ -188,24 +229,9 @@ import java.net.Proxy
 import java.net.URL
 
 object PolarisRadioNetwork {
-    @JvmStatic
-    fun mode(): String = Windscribe.appContext.getSharedPreferences("polaris_vpn_630", 0)
-        .getString("mode", "A") ?: "A"
-
-    @JvmStatic
-    fun directEnabled(): Boolean = mode().startsWith("D")
-
     fun vpnActive(): Boolean {
         val cm = Windscribe.appContext.getSystemService(ConnectivityManager::class.java)
         return cm.activeNetwork?.let { cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } == true
-    }
-
-    fun radioDns(n: Network, host: String): List<java.net.InetAddress> {
-        if (mode() != "D4" || !vpnActive()) return n.getAllByName(host).toList()
-        val prefs = Windscribe.appContext.getSharedPreferences("polaris_vpn_630", 0)
-        val map = org.json.JSONObject(prefs.getString("d4_map", "{}") ?: "{}")
-        val ips = map.optJSONArray(host.lowercase()) ?: throw java.net.UnknownHostException("D4 host not excluded: " + host)
-        return (0 until ips.length()).map { android.net.InetAddresses.parseNumericAddress(ips.getString(it)) }
     }
 
     private val radioCalls by lazy { PolarisDirectRadioCalls(Windscribe.appContext) }
@@ -236,7 +262,6 @@ object PolarisRadioNetwork {
     @JvmStatic
     @Throws(IOException::class)
     fun openConnection(url: URL): HttpURLConnection {
-        if (!directEnabled()) return url.openConnection(Proxy.NO_PROXY) as HttpURLConnection
         val context=Windscribe.appContext
         val n=physical(context)
         val cm=context.getSystemService(ConnectivityManager::class.java)
@@ -254,25 +279,10 @@ s=re.sub(r'    private fun physical\(n: Network\).*?(?=    override fun newCall)
 ''',s,flags=re.S)
 assert "PolarisRadioNetwork.physical" in s
 s=s.replace("import okhttp3.Call","import com.windscribe.vpn.Windscribe\nimport okhttp3.Call")
-s=s.replace('    override fun newCall(request: Request): Call = synchronized(lock) {',
-    '''    private val normalClient = OkHttpClient.Builder()
-        .proxy(Proxy.NO_PROXY)
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .followSslRedirects(true)
-        .build()
-
-    override fun newCall(request: Request): Call = synchronized(lock) {
-        if (!PolarisRadioNetwork.directEnabled()) {
-            client?.connectionPool?.evictAll()
-            client = null
-            selected = null
-            return@synchronized normalClient.newCall(request)
-        }
-        normalClient.connectionPool.evictAll()''')
+s=s.replace("    private var selected: Network? = null", "    private var selected: Network? = null\\n    private var selectedVpn: Boolean? = null")
+s=s.replace("if (selected != n || client == null)", "if (selected != n || client == null || selectedVpn != PolarisRadioNetwork.vpnActive())")
+s=s.replace("            selected = n", "            selected = n\\n            selectedVpn = PolarisRadioNetwork.vpnActive()")
 s=s.replace(".socketFactory(n.socketFactory)", ".socketFactory(PolarisProtectedSocketFactory(n))")
-s=s.replace("n.getAllByName(host).toList()", "PolarisRadioNetwork.radioDns(n, host)")
 radio.write_text(s)
 (pkg/"polaris/PolarisProtectedSocketFactory.kt").write_text(r'''package com.dd3boh.outertune.polaris
 import android.net.Network
@@ -289,40 +299,23 @@ import javax.net.SocketFactory
 internal class PolarisProtectedSocketFactory(private val network: Network): SocketFactory() {
     override fun createSocket(): Socket {
         val s = Socket()
-        val mode = PolarisRadioNetwork.mode()
         try {
             // setTcpNoDelay forces the underlying socket to be created before protect.
             s.tcpNoDelay = true
             val vpn = PolarisRadioNetwork.vpnActive()
             if (!vpn) {
                 network.bindSocket(s)
-            } else if (mode == "D4") {
-                // Destination exclusions are installed by the VPN builder. DNS is pinned to
-                // those explicit addresses; no per-socket protection or network binding.
-                PolarisVpnReport.note("D4 default socket / excluded destination")
             } else {
-                val protected = if (mode == "D3") {
-                    android.os.ParcelFileDescriptor.fromSocket(s).use { pfd ->
-                        val valid = pfd.fileDescriptor.valid()
-                        val ok = valid && WindscribeVpnService.protectRadioFd(pfd.fd)
-                        PolarisVpnReport.note("D3 FD valid=" + valid + " protect=" + ok)
-                        ok
-                    }
-                } else {
-                    val valid = android.os.ParcelFileDescriptor.fromSocket(s).use { it.fileDescriptor.valid() }
-                    val ok = valid && WindscribeVpnService.protectRadio(s)
-                    PolarisVpnReport.note(mode + " FD valid=" + valid + " protect(Socket)=" + ok)
-                    ok
-                }
-                if (!protected) throw IOException("Radio socket protection failed: " + mode)
-                if (mode == "D2") {
-                    network.bindSocket(s)
-                    PolarisVpnReport.note("D2 physical bind OK network=" + network)
+                val valid = android.os.ParcelFileDescriptor.fromSocket(s).use { it.fileDescriptor.valid() }
+                val ok = valid && WindscribeVpnService.protectRadio(s)
+                if (!ok) {
+                    PolarisVpnReport.note("Radio socket FD valid=" + valid + " protect=false")
+                    throw IOException("Radio socket protection failed")
                 }
             }
             return s
         } catch (e: Exception) {
-            PolarisVpnReport.note(mode + " radio socket FAIL " + e.javaClass.simpleName)
+            PolarisVpnReport.note("Radio socket FAIL " + e.javaClass.simpleName)
             s.close()
             throw e
         }
