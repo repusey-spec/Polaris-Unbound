@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""6.31 production candidate. Preserve original Polaris production application ID and its existing local data."""
+"""6.32 production candidate. Preserve original Polaris production application ID and its existing local data."""
 from pathlib import Path
 import sys, zipfile, tempfile, subprocess, re, shutil
 mode= sys.argv[1]
@@ -12,7 +12,7 @@ if mode=="core":
     base=root/"base/src/main/java/com/windscribe/vpn"
     p=base/"Windscribe.kt"
     edit(p,"        reloadAfterMigration()","""        reloadAfterMigration()
-        // 6.31: only Polaris plus explicitly chosen external apps use this VPN.
+        // 6.32: only Polaris plus explicitly chosen external apps use this VPN.
         preference.installedApps = (listOf(packageName) + preference.installedApps).distinct()
         preference.splitRoutingMode = com.windscribe.vpn.apppreference.PreferencesKeyConstants.INCLUSIVE_MODE
         preference.splitTunnelToggle = true
@@ -24,7 +24,7 @@ if mode=="core":
     # Keep upstream selected-app lists and hold/replacement policies. No allowBypass.
     p=base/"backend/tunnel/WindscribeVpnService.kt"
     edit(p, '    override fun requestTun(config: TunConfig): ParcelFileDescriptor {', '''    override fun requestTun(config: TunConfig): ParcelFileDescriptor {
-        logger.info("Polaris 6.31 D1 sdk=" + android.os.Build.VERSION.SDK_INT)''')
+        logger.info("Polaris 6.32 D1 sdk=" + android.os.Build.VERSION.SDK_INT)''')
     edit(p, '    companion object {', '''    companion object {
         @Volatile private var polarisService: WindscribeVpnService? = null
         @JvmStatic fun protectRadio(socket: java.net.Socket): Boolean =
@@ -66,7 +66,7 @@ if mode=="core":
     protected open suspend fun polarisAwaitHandshake(): Boolean = true
 
     private fun polarisDiagnosticLog(id: Long, msg: String) {
-        val line = "6.31 probe=$id $msg"
+        val line = "6.32 probe=$id $msg"
         android.util.Log.i("PolarisVpnDiag", line)
         vpnLogger.info(line)
     }
@@ -129,13 +129,13 @@ elif mode=="prune":
 elif mode=="host":
     pkg=root/"app/src/main/java/com/dd3boh/outertune"
     g=root/"app/build.gradle.kts"
-    edit(g,"versionCode = 3","versionCode = 100631")
-    edit(g,'versionName = "0.03"','versionName = "6.31"')
+    edit(g,"versionCode = 3","versionCode = 100632")
+    edit(g,'versionName = "0.03"','versionName = "6.32"')
     for p in [root/"app/src/main/AndroidManifest.xml",*list((root/"app/src").glob("*/res/values*/*.xml"))]:
         s=p.read_text()
-        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.31"))
+        if "Polaris VPN 0.03" in s: p.write_text(s.replace("Polaris VPN 0.03","Polaris 6.32"))
     a=pkg/"polaris/PolarisVpnActivity.kt"
-    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.31 · WireGuard 443")
+    edit(a,"Polaris VPN 0.03 · Windscribe / WireGuard","Polaris 6.32 · WireGuard 443")
     edit(a,"실험용 통합 설정. 음악 재생 전에 VPN 연결 상태를 확인하세요.","라디오 일반망 · 스트리밍 VPN")
     edit(a,"        prefs.globalUserConnectionPreference = true","""        prefs.autoConnect = routePrefs.getBoolean("reconnect", false)
         prefs.globalUserConnectionPreference = true""")
@@ -200,15 +200,21 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
             override fun onAvailable(network: android.net.Network) { networkChanges.value += 1 }
             override fun onLost(network: android.net.Network) { networkChanges.value += 1 }
         }) }
+        // Refresh AA only when the verified icon changes. One delayed retry covers a host
+        // that coalesces or caches the first invalidate; never refresh continuously at steady state.
+        Windscribe.applicationScope.launch {
+            healthy.collectLatest {
+                ticks.value += 1
+                delay(30_000)
+                ticks.value += 1
+            }
+        }
         Windscribe.applicationScope.launch {
             combine(factories, app.vpnConnectionStateManager.state.map { it.status to it.connectionId }.distinctUntilChanged(), networkChanges) { f, state, _ ->
                 f to state
             }.collectLatest { (f, state) ->
                 verified.value = false
-                ticks.value += 1
-                if (f == null || state.first != VPNState.Status.Connected) {
-                    while (true) { delay(30_000); ticks.value += 1 }
-                }
+                if (f == null || state.first != VPNState.Status.Connected) return@collectLatest
                 while (true) {
                     val started = android.os.SystemClock.elapsedRealtime()
                     val before = activeVpn(app)
@@ -216,7 +222,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
                     verified.value = before && activeVpn(app) && r.ip != null && m.ip != null && r.ip != m.ip
                     PolarisVpnReport.note("Streaming route check: " + verified.value +
                         "; radio=" + (r.ip ?: r.failure) + "; music=" + (m.ip ?: m.failure))
-                    ticks.value += 1
                     delay((30_000L - (android.os.SystemClock.elapsedRealtime() - started)).coerceAtLeast(0L))
                 }
             }
@@ -230,7 +235,86 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
     p.write_text(s)
     p=pkg/"App.kt"
     edit(p,"        com.dd3boh.outertune.polaris.PolarisVpnReport.observe(this)","""        com.dd3boh.outertune.polaris.PolarisVpnReport.observe(this)
-        com.dd3boh.outertune.polaris.PolarisRouteIpProbe.observe(this)""")
+        com.dd3boh.outertune.polaris.PolarisRouteIpProbe.observe(this)
+        com.dd3boh.outertune.polaris.PolarisResourceDiagnostics.install()""")
+    (pkg/"polaris/PolarisResourceDiagnostics.kt").write_text(r'''package com.dd3boh.outertune.polaris
+
+import android.os.Build
+import android.os.StrictMode
+import android.util.Log
+import java.util.concurrent.Executors
+
+/** Report leaked closeable/SQLite allocations, never terminate the process. */
+internal object PolarisResourceDiagnostics {
+    fun install() {
+        if (Build.VERSION.SDK_INT < 28) return
+        runCatching {
+            val executor = Executors.newSingleThreadExecutor { task ->
+                Thread(task, "PolarisResourceDiag").apply { isDaemon = true }
+            }
+            StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder(StrictMode.getVmPolicy())
+                .detectLeakedClosableObjects()
+                .detectLeakedSqlLiteObjects()
+                .penaltyListener(executor) { violation ->
+                    // Keep only class/method/line information, not provider data or secrets.
+                    val where = generateSequence<Throwable>(violation) { it.cause }
+                        .take(3).joinToString(" | ") { error ->
+                            error.javaClass.simpleName + ": " +
+                                error.stackTrace.take(18).joinToString(" <- ") { frame ->
+                                    frame.className + "." + frame.methodName + ":" + frame.lineNumber
+                                }
+                        }
+                    Log.w("PolarisResource", where)
+                    PolarisErrorReport.record("RESOURCE LEAK " + where)
+                }.build())
+        }.onFailure { Log.w("PolarisResource", "Resource diagnostics unavailable: " + it.javaClass.simpleName) }
+    }
+}
+''')
+    # Only CBS Music FM gets a new HTTPS endpoint. Preserve D1 DNS and socket factory.
+    radio=pkg/"polaris/PolarisDirectRadioCalls.kt"
+    edit(radio,"            client = OkHttpClient.Builder()",'''            client = OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    val request = chain.request()
+                    val url = request.url
+                    val cbs939 = url.host in setOf("m-aac.cbs.co.kr", "aac.cbs.co.kr") &&
+                        url.encodedPath.contains("cbs939.stream/playlist.m3u8") &&
+                        request.method == "GET"
+                    if (!cbs939) {
+                        chain.proceed(request)
+                    } else {
+                        val primary = request.newBuilder()
+                            .url("https://m-aac.cbs.co.kr/mweb_cbs939/_definst_/cbs939.stream/playlist.m3u8").build()
+                        val backup = request.newBuilder()
+                            .url("https://aac.cbs.co.kr/cbs939/_definst_/cbs939.stream/playlist.m3u8").build()
+                        val first = try {
+                            chain.proceed(primary)
+                        } catch (e: IOException) {
+                            if (chain.call().isCanceled()) throw e
+                            PolarisVpnReport.note("CBS 939 HTTPS primary failed: " + e.javaClass.simpleName)
+                            null
+                        }
+                        if (first != null && first.isSuccessful) {
+                            first
+                        } else {
+                            if (first != null) {
+                                PolarisVpnReport.note("CBS 939 HTTPS primary HTTP " + first.code)
+                                first.close()
+                            }
+                            PolarisVpnReport.note("CBS 939 HTTPS backup requested")
+                            chain.proceed(backup)
+                        }
+                    }
+                }''')
+    # Update literal legacy endpoints too so the media item/resolver uses HTTPS from the start.
+    cbs_re = re.compile(r'https?://(?:m-aac|aac)\\.cbs\\.co\\.kr/[^"\\s<>]*cbs939\\.stream/playlist\\.m3u8')
+    for source in (pkg/"polaris").rglob("*"):
+        if source == radio or source.suffix not in (".kt", ".java"): continue
+        old=source.read_text()
+        new=cbs_re.sub("https://m-aac.cbs.co.kr/mweb_cbs939/_definst_/cbs939.stream/playlist.m3u8",old)
+        if old!=new:
+            source.write_text(new)
+            print("CBS HTTPS source:",source.name)
     p=pkg/"playback/AutoCar.kt"
     edit(p,"Polaris613Nav.STREAM -> carContext.icon(R.drawable.polaris614_nav_streaming)","Polaris613Nav.STREAM -> carContext.icon(com.dd3boh.outertune.polaris.PolarisRouteIpProbe.icon())")
     edit(p,"""    private var tabs: List<MediaItem>? = null""","""    private var tabs: List<MediaItem>? = null
@@ -260,6 +344,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged''',1)
     <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.8" android:strokeLineCap="round" android:pathData="M3,3 L21,21 M21,3 L3,21"/>
 </vector>
 ''')
-    print("6.31: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
+    print("6.32: original production package, local data retained, auto-connect/boot, route indicator and phone UI restored")
 else:
     raise ValueError(mode)
