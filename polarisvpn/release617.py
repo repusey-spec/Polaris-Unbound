@@ -307,7 +307,7 @@ internal object PolarisResourceDiagnostics {
                     }
                 }''')
     # Update literal legacy endpoints too so the media item/resolver uses HTTPS from the start.
-    cbs_re = re.compile(r'https?://(?:m-aac|aac)\\.cbs\\.co\\.kr/[^"\\s<>]*cbs939\\.stream/playlist\\.m3u8')
+    cbs_re = re.compile(r'https?://(?:m-aac|aac)\.cbs\.co\.kr/[^"\s<>]*cbs939\.stream/playlist\.m3u8')
     for source in (pkg/"polaris").rglob("*"):
         if source == radio or source.suffix not in (".kt", ".java"): continue
         old=source.read_text()
